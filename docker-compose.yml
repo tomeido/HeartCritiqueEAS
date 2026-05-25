@@ -6,6 +6,8 @@ services:
     env_file: .env
     environment:
       - UPLOADER_URL=http://uploader:3000
+    volumes:
+      - ./static:/app/static:ro
     depends_on:
       uploader:
         condition: service_healthy

@@ -1,0 +1,26 @@
+# 환경변수 (API 키, 개인키 포함 - 절대 커밋 금지)
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+
+# Node
+node_modules/
+npm-debug.log*
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# 로컬 빌드/캐시
+*.log
+.cache/

@@ -236,10 +236,6 @@ button:disabled { background: #bbb; color: #fff; cursor: not-allowed; }
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.6 0 6.6 5.5 2.7 13.6l7.8 6c1.9-5.7 7.1-10.1 13.5-10.1z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3.1-2.3 5.7-4.8 7.5l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.3z"/><path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.8-6A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.7 2.2-7.7 2.2-6.3 0-11.7-4.3-13.6-10l-7.8 6c4 8 11.9 13.1 21.4 13.1z"/></svg>
       Google로 계속하기
     </button>
-    <button class="provider-btn" id="btn-discord">
-      <svg width="18" height="18" viewBox="0 0 127.14 96.36" fill="#5865F2"><path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15zM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69z"/></svg>
-      Discord로 계속하기
-    </button>
   </div>
 
   <!-- 최근 스토리 목록 -->
@@ -252,30 +248,40 @@ button:disabled { background: #bbb; color: #fff; cursor: not-allowed; }
 
 <script>
 // ── 전역 상태 ──────────────────────────────────────────────────────────────
-let supabase, cfg, session;
+let sb, cfg, session;
 let currentStoryId = null;
 
 async function init() {
-  cfg = await fetch('/api/config').then(r => r.json());
-  if (cfg.supabase_url && cfg.supabase_anon_key) {
-    supabase = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
-    supabase.auth.onAuthStateChange((_event, s) => {
-      session = s;
-      renderAuth();
-      if (currentStoryId) refreshVoteStatus(currentStoryId);
-    });
-    const { data: { session: s } } = await supabase.auth.getSession();
-    session = s;
+  try {
+    cfg = await fetch('/api/config').then(r => r.json());
+
+    if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
+
+    if (cfg.supabase_url && cfg.supabase_anon_key) {
+      sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
+        auth: { detectSessionInUrl: true, persistSession: true },
+      });
+      sb.auth.onAuthStateChange((_event, s) => {
+        session = s;
+        renderAuth();
+        if (currentStoryId) refreshVoteStatus(currentStoryId);
+      });
+      const { data } = await sb.auth.getSession();
+      session = data.session;
+    }
+  } catch (e) {
+    console.error('[init 오류]', e);
+  } finally {
+    renderAuth();
+    loadStoryList();
   }
-  renderAuth();
-  loadStoryList();
 }
 
 // ── 인증 UI ────────────────────────────────────────────────────────────────
 function renderAuth() {
   const area = document.getElementById('auth-area');
   const loginCard = document.getElementById('login-card');
-  if (!supabase) {
+  if (!sb) {
     area.innerHTML = '<span class="muted" style="font-size:13px">Supabase 미설정</span>';
     loginCard.style.display = 'none';
     return;
@@ -285,7 +291,7 @@ function renderAuth() {
     area.innerHTML = `
       <span style="font-size:13px;opacity:.7">${email}</span>
       <button class="btn-sm btn-outline" id="btn-logout">로그아웃</button>`;
-    document.getElementById('btn-logout').onclick = () => supabase.auth.signOut();
+    document.getElementById('btn-logout').onclick = () => sb.auth.signOut();
     loginCard.style.display = 'none';
   } else {
     area.innerHTML = '<button class="btn-sm" id="btn-login-header">로그인</button>';
@@ -296,15 +302,14 @@ function renderAuth() {
 }
 
 async function oauthLogin(provider) {
-  if (!supabase) return;
-  await supabase.auth.signInWithOAuth({
+  if (!sb) return;
+  await sb.auth.signInWithOAuth({
     provider,
     options: { redirectTo: window.location.origin },
   });
 }
 
-document.getElementById('btn-google').onclick  = () => oauthLogin('google');
-document.getElementById('btn-discord').onclick = () => oauthLogin('discord');
+document.getElementById('btn-google').onclick = () => oauthLogin('google');
 
 // ── 스토리 생성 ────────────────────────────────────────────────────────────
 document.getElementById('btn-generate').onclick = async () => {

@@ -72,10 +72,10 @@ async def vote_status(
                 .select("id")
                 .eq("story_id", story_id)
                 .eq("user_id", user_id)
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
-            already_voted = v.data is not None
+            already_voted = bool(v.data)
         except HTTPException:
             pass
 

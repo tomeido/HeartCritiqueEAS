@@ -23,10 +23,10 @@ async def archive_story(story_id: str) -> str | None:
     """박제 실행. 성공 시 Arweave Tx ID 반환, 실패 시 None."""
     db = get_db()
 
-    story_resp = db.table("stories").select("*").eq("id", story_id).maybe_single().execute()
+    story_resp = db.table("stories").select("*").eq("id", story_id).limit(1).execute()
     if not story_resp.data:
         return None
-    story = story_resp.data
+    story = story_resp.data[0]
 
     if story.get("arweave_tx_id"):
         return story["arweave_tx_id"]

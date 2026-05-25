@@ -55,7 +55,7 @@ async def list_stories(limit: int = 20):
 @router.get("/stories/{story_id}")
 async def get_story(story_id: str):
     db = get_db()
-    resp = db.table("stories").select("*").eq("id", story_id).maybe_single().execute()
+    resp = db.table("stories").select("*").eq("id", story_id).limit(1).execute()
     if not resp.data:
         raise HTTPException(404, "스토리를 찾을 수 없습니다")
-    return resp.data
+    return resp.data[0]
