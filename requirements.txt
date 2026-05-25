@@ -1,0 +1,2 @@
+# No third-party deps. This agent uses only the Python standard library.
+# File kept to signal a Python project to Vercel's build detector.
