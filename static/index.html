@@ -3,260 +3,506 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Heart &amp; Critique</title>
+<title>Heart &amp; Critique — 시간의 문지기</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
-:root { color-scheme: light dark; }
+/* ── 변수 ─────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa;
+  --bg-card: rgba(255,255,255,.72);
+  --bg-card-2: rgba(255,255,255,.95);
+  --border: rgba(0,0,0,.08);
+  --border-strong: rgba(0,0,0,.14);
+  --text: #1a1a1a;
+  --muted: rgba(0,0,0,.55);
+  --accent-1: #6366f1;
+  --accent-2: #8b5cf6;
+  --kindness-bg: #fef9c3; --kindness-fg: #854d0e;
+  --critique-bg: #fee2e2; --critique-fg: #991b1b;
+  --archive-bg: #dcfce7; --archive-fg: #166534; --archive-border: #86efac;
+  --err: #dc2626;
+  --ok: #16a34a;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.08);
+  --shadow-lg: 0 12px 40px rgba(0,0,0,.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b0b0e;
+    --bg-card: rgba(28,28,32,.7);
+    --bg-card-2: rgba(36,36,42,.95);
+    --border: rgba(255,255,255,.08);
+    --border-strong: rgba(255,255,255,.14);
+    --text: #f0f0f0;
+    --muted: rgba(255,255,255,.55);
+    --kindness-bg: #422006; --kindness-fg: #fde68a;
+    --critique-bg: #450a0a; --critique-fg: #fca5a5;
+    --archive-bg: #052e16; --archive-fg: #86efac; --archive-border: #14532d;
+    --shadow-md: 0 4px 16px rgba(0,0,0,.4);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,.5);
+  }
+}
+
 * { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 body {
   margin: 0; min-height: 100vh;
   font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
         "Segoe UI", "Noto Sans KR", sans-serif;
+  color: var(--text);
   background:
-    radial-gradient(1200px 600px at 50% -10%, #fde2e4 0%, transparent 60%),
-    radial-gradient(1000px 500px at 80% 80%, #cfe1ff 0%, transparent 60%),
-    #fafafa;
-  color: #1a1a1a;
+    radial-gradient(1200px 600px at 50% -10%, rgba(253,226,228,.6) 0%, transparent 60%),
+    radial-gradient(1000px 500px at 80% 80%, rgba(207,225,255,.6) 0%, transparent 60%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
 }
 @media (prefers-color-scheme: dark) {
   body {
     background:
-      radial-gradient(1200px 600px at 50% -10%, #2a1820 0%, transparent 60%),
-      radial-gradient(1000px 500px at 80% 80%, #16263f 0%, transparent 60%),
-      #0c0c0e;
-    color: #f0f0f0;
+      radial-gradient(1200px 600px at 50% -10%, rgba(42,24,32,.7) 0%, transparent 60%),
+      radial-gradient(1000px 500px at 80% 80%, rgba(22,38,63,.6) 0%, transparent 60%),
+      var(--bg);
   }
 }
-.wrap { max-width: 740px; margin: 0 auto; padding: 40px 20px 100px; }
-/* Header */
+
+.wrap { max-width: 760px; margin: 0 auto; padding: 36px 20px 100px; }
+
+/* ── Header ───────────────────────────────────────────────────────────────── */
 .header {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 32px; flex-wrap: wrap; gap: 12px;
+  gap: 14px; flex-wrap: wrap; margin-bottom: 28px;
 }
-h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
-.tagline { font-size: 13px; opacity: .6; margin: 2px 0 0; }
-/* Auth */
+.brand h1 {
+  font-size: 28px; margin: 0; letter-spacing: -.025em; font-weight: 800;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand .tagline { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
 .auth-area { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-.avatar {
-  width: 32px; height: 32px; border-radius: 50%;
-  background: #ddd; display: flex; align-items: center; justify-content: center;
-  font-size: 14px; font-weight: 600; overflow: hidden;
+.user-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  background: var(--bg-card-2); border: 1px solid var(--border);
+  font-size: 13px; box-shadow: var(--shadow-sm);
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-/* Card */
+.user-chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
 .card {
-  background: rgba(255,255,255,.7);
+  background: var(--bg-card);
   backdrop-filter: blur(14px);
-  border: 1px solid rgba(0,0,0,.06);
-  border-radius: 18px;
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
   padding: 22px 24px;
   margin-bottom: 14px;
+  box-shadow: var(--shadow-sm);
+  animation: fadeInUp .35s cubic-bezier(.4,0,.2,1) both;
 }
-@media (prefers-color-scheme: dark) {
-  .card { background: rgba(28,28,32,.7); border-color: rgba(255,255,255,.08); }
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-/* Buttons */
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
 button {
   appearance: none; border: 0; cursor: pointer;
   padding: 10px 18px; border-radius: 10px;
   font: 600 14px/1 inherit;
-  background: #111; color: #fff;
-  transition: opacity .1s, transform .05s;
+  background: var(--text); color: var(--bg);
+  transition: transform .12s ease, box-shadow .12s ease, opacity .12s ease;
 }
-button:hover { opacity: .85; }
-button:active { transform: translateY(1px); }
-button:disabled { background: #bbb; color: #fff; cursor: not-allowed; }
-@media (prefers-color-scheme: dark) {
-  button { background: #e8e8e8; color: #111; }
-  button:disabled { background: #444; color: #888; }
-}
-.btn-sm { padding: 7px 13px; font-size: 13px; border-radius: 8px; }
+button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+button:active:not(:disabled) { transform: translateY(0); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.btn-sm { padding: 8px 14px; font-size: 13px; border-radius: 9px; }
+.btn-lg { padding: 14px 28px; font-size: 15px; border-radius: 12px; font-weight: 700; }
 .btn-outline {
   background: transparent;
-  border: 1.5px solid currentColor;
-  color: inherit;
-  opacity: .7;
+  color: var(--text);
+  border: 1.5px solid var(--border-strong);
 }
-.btn-vote {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+.btn-outline:hover:not(:disabled) { background: var(--bg-card-2); }
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
   color: #fff;
 }
-.btn-vote:disabled { background: #bbb; }
+.btn-vote {
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  color: #fff; width: 100%;
+}
 .btn-voted {
-  background: #dcfce7; color: #166534;
-  border: 1.5px solid #bbf7d0;
-  cursor: default;
+  background: var(--archive-bg);
+  color: var(--archive-fg);
+  border: 1.5px solid var(--archive-border);
+  cursor: default; width: 100%;
 }
-@media (prefers-color-scheme: dark) {
-  .btn-voted { background: #14532d; color: #86efac; border-color: #166534; }
+.btn-voted:hover { transform: none; box-shadow: none; }
+
+/* ── Generator ────────────────────────────────────────────────────────────── */
+.gen-card {
+  text-align: center;
+  padding: 28px 24px;
 }
-/* Story */
-.story-body { white-space: pre-wrap; line-height: 1.75; }
-.story-header {
-  display: flex; align-items: center; gap: 10px;
-  margin-bottom: 14px; flex-wrap: wrap;
+.gen-card .copy { font-size: 14px; color: var(--muted); margin: 0 0 16px; }
+
+/* ── Story card ───────────────────────────────────────────────────────────── */
+.story-meta {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 18px;
 }
 .badge {
-  display: inline-block; padding: 3px 10px; border-radius: 999px;
-  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+  display: inline-block; padding: 4px 10px; border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em;
 }
-.badge-kindness { background: #fef9c3; color: #854d0e; }
-.badge-critique  { background: #fee2e2; color: #991b1b; }
-@media (prefers-color-scheme: dark) {
-  .badge-kindness { background: #422006; color: #fde68a; }
-  .badge-critique  { background: #450a0a; color: #fca5a5; }
+.badge-kindness { background: var(--kindness-bg); color: var(--kindness-fg); }
+.badge-critique { background: var(--critique-bg); color: var(--critique-fg); }
+.story-body {
+  white-space: pre-wrap; line-height: 1.85; font-size: 15.5px;
 }
-/* Citations */
-.citations { margin-top: 16px; }
-.citations-title { font-size: 12px; opacity: .55; margin-bottom: 6px; }
-.citation-link {
-  display: block; font-size: 13px; padding: 5px 0;
-  border-bottom: 1px solid rgba(0,0,0,.06); text-decoration: none; color: inherit;
-  opacity: .8;
+
+/* ── Citations ────────────────────────────────────────────────────────────── */
+.citations { margin-top: 22px; padding-top: 18px; border-top: 1px dashed var(--border-strong); }
+.cit-list { display: flex; flex-direction: column; gap: 2px; }
+.cit-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 0;
+  text-decoration: none; color: inherit;
+  border-bottom: 1px solid var(--border);
+  transition: padding .15s, color .15s;
 }
-.citation-link:hover { opacity: 1; }
-@media (prefers-color-scheme: dark) {
-  .citation-link { border-color: rgba(255,255,255,.06); }
+.cit-item:last-child { border-bottom: 0; }
+.cit-item:hover { padding-left: 4px; }
+.cit-item:hover .cit-title { color: var(--accent-1); }
+.cit-favicon {
+  width: 20px; height: 20px; border-radius: 5px;
+  background: var(--bg-card-2); flex-shrink: 0;
+  border: 1px solid var(--border);
 }
-/* Vote section */
+.cit-content { flex: 1; min-width: 0; }
+.cit-title {
+  font-size: 14px; font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  transition: color .15s;
+}
+.cit-domain { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cit-arrow { color: var(--muted); flex-shrink: 0; font-size: 14px; }
+
+/* ── Vote section ─────────────────────────────────────────────────────────── */
 .vote-section {
-  margin-top: 18px; padding-top: 16px;
-  border-top: 1px solid rgba(0,0,0,.08);
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 22px;
+  padding: 16px 18px;
+  background: var(--bg-card-2);
+  border-radius: 12px;
+  border: 1px solid var(--border);
 }
-@media (prefers-color-scheme: dark) {
-  .vote-section { border-color: rgba(255,255,255,.08); }
+.vote-row {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 12px; flex-wrap: wrap; gap: 8px;
 }
-.vote-count { font-size: 14px; opacity: .7; }
-/* Archive badge */
-.archive-badge {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: #f0fdf4; border: 1px solid #bbf7d0;
-  color: #166534; padding: 6px 12px; border-radius: 8px;
-  font-size: 13px; font-weight: 500; text-decoration: none;
+.vote-label { font-size: 12px; font-weight: 700; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+.vote-num { font-size: 13px; color: var(--muted); }
+.vote-num strong { color: var(--text); font-size: 15px; font-weight: 700; }
+.vote-bar {
+  position: relative; height: 8px;
+  background: var(--border); border-radius: 999px; overflow: hidden;
+  margin-bottom: 14px;
 }
-@media (prefers-color-scheme: dark) {
-  .archive-badge {
-    background: #052e16; border-color: #14532d; color: #86efac;
-  }
+.vote-bar-fill {
+  position: absolute; top: 0; left: 0; height: 100%;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  border-radius: 999px;
+  transition: width .8s cubic-bezier(.4,0,.2,1);
 }
-/* Status */
-.status { font-size: 13px; min-height: 1.3em; opacity: .75; }
-.err { color: #dc2626; }
-.ok  { color: #16a34a; }
-/* Stories list */
-.story-list-item {
+.vote-bar.complete .vote-bar-fill {
+  background: linear-gradient(90deg, var(--ok), #22c55e);
+  animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .7; }
+}
+
+/* ── Archive hero ─────────────────────────────────────────────────────────── */
+.archive-hero {
+  margin-top: 22px;
+  background: linear-gradient(135deg, var(--archive-bg), var(--bg-card-2));
+  border: 1.5px solid var(--archive-border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex; align-items: center; gap: 16px;
+  text-decoration: none; color: inherit;
+  box-shadow: var(--shadow-md);
+  transition: transform .15s ease;
+}
+.archive-hero:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.archive-icon { font-size: 30px; flex-shrink: 0; }
+.archive-text { flex: 1; min-width: 0; }
+.archive-text .lbl {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em;
+  color: var(--archive-fg); text-transform: uppercase;
+}
+.archive-text .tx {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px; opacity: .75; margin-top: 4px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.archive-text .ts { font-size: 11px; opacity: .55; margin-top: 4px; }
+
+/* ── Stories list ─────────────────────────────────────────────────────────── */
+.list-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; flex-wrap: wrap; gap: 10px;
+}
+.section-title {
+  font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); margin: 0;
+}
+.filters { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  padding: 5px 12px; border-radius: 999px;
+  font-size: 12px; font-weight: 500;
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  transition: all .15s;
+}
+.chip:hover { color: var(--text); }
+.chip.active {
+  background: var(--text); color: var(--bg);
+  border-color: var(--text);
+}
+
+.list-item {
   display: flex; align-items: flex-start; gap: 12px;
-  padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,.06);
-  cursor: pointer; transition: opacity .1s;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: padding .15s;
 }
-.story-list-item:hover { opacity: .8; }
-@media (prefers-color-scheme: dark) {
-  .story-list-item { border-color: rgba(255,255,255,.06); }
-}
-.story-list-body {
+.list-item:last-child { border-bottom: 0; }
+.list-item:hover { padding-left: 4px; }
+.list-body {
   flex: 1; min-width: 0;
   font-size: 14px; line-height: 1.55;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.story-list-meta { font-size: 12px; opacity: .5; white-space: nowrap; }
-/* Spinner */
+.list-meta {
+  font-size: 11px; color: var(--muted);
+  text-align: right; flex-shrink: 0;
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-end;
+}
+.mini-bar {
+  display: inline-block; width: 50px; height: 4px;
+  background: var(--border); border-radius: 999px; overflow: hidden;
+  vertical-align: middle;
+}
+.mini-bar-fill {
+  height: 100%; border-radius: 999px;
+  background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
+  transition: width .4s;
+}
+.mini-bar.archived .mini-bar-fill {
+  background: var(--ok); width: 100% !important;
+}
+
+/* ── Status / Spinner ─────────────────────────────────────────────────────── */
+.status { font-size: 13px; opacity: .8; }
+.status:empty { display: none; }
+.status.err { color: var(--err); }
+.status.ok  { color: var(--ok); }
 .spin {
   display: inline-block; width: 14px; height: 14px;
-  border: 2px solid rgba(0,0,0,.15); border-top-color: #555;
-  border-radius: 50%; animation: spin .6s linear infinite;
+  border: 2px solid rgba(127,127,127,.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+  vertical-align: -2px;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-.muted { opacity: .5; }
-/* Login provider buttons */
+
+/* ── Toasts ───────────────────────────────────────────────────────────────── */
+#toasts {
+  position: fixed; bottom: 20px; right: 20px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 1000; max-width: 360px;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  background: var(--bg-card-2);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: var(--shadow-lg);
+  animation: slideInRight .3s cubic-bezier(.4,0,.2,1) both;
+  font-size: 14px;
+}
+@keyframes slideInRight {
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+.toast.fadeOut { animation: fadeOutRight .25s ease both; }
+@keyframes fadeOutRight {
+  to { transform: translateX(120%); opacity: 0; }
+}
+.toast.success { border-left: 3px solid var(--ok); }
+.toast.error   { border-left: 3px solid var(--err); }
+.toast.info    { border-left: 3px solid var(--accent-1); }
+.toast.archive {
+  border-left: 3px solid var(--archive-fg);
+  background: linear-gradient(135deg, var(--archive-bg), var(--bg-card-2));
+}
+
+/* ── Login ────────────────────────────────────────────────────────────────── */
 .provider-btn {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; margin-bottom: 8px;
-  background: rgba(0,0,0,.04); color: inherit;
-  border: 1.5px solid rgba(0,0,0,.1); border-radius: 10px;
-  padding: 11px 16px; font-size: 14px;
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  background: transparent; color: var(--text);
+  border: 1.5px solid var(--border-strong);
+  border-radius: 11px;
+  padding: 12px 16px; font-size: 14px; font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
 }
-@media (prefers-color-scheme: dark) {
-  .provider-btn { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.1); }
+.provider-btn:hover {
+  background: var(--text); color: var(--bg);
+  border-color: var(--text);
 }
-.provider-btn:hover { opacity: .8; }
-.section-title { font-size: 13px; font-weight: 600; opacity: .5; margin: 0 0 10px; letter-spacing: .04em; }
+
+/* ── Empty / Util ─────────────────────────────────────────────────────────── */
+.empty { padding: 36px 20px; text-align: center; color: var(--muted); }
+.empty-icon { font-size: 36px; opacity: .35; margin-bottom: 10px; }
+.empty-text { font-size: 14px; }
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+a { color: inherit; }
+
+/* ── Mobile ───────────────────────────────────────────────────────────────── */
+@media (max-width: 540px) {
+  .wrap { padding: 24px 16px 80px; }
+  .brand h1 { font-size: 24px; }
+  .card { padding: 18px 18px; }
+  .gen-card { padding: 22px 16px; }
+  .btn-lg { padding: 12px 22px; font-size: 14px; }
+}
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <!-- 헤더 -->
-  <div class="header">
-    <div>
+  <header class="header">
+    <div class="brand">
       <h1>Heart &amp; Critique</h1>
-      <p class="tagline">AI 사냥개가 건진 날것의 사실 · 인간 투표로 Arweave에 영구 박제</p>
+      <p class="tagline">AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제</p>
     </div>
     <div class="auth-area" id="auth-area">
-      <span class="muted" style="font-size:13px" id="auth-status">로딩 중…</span>
+      <span class="muted" style="font-size:13px">로딩 중…</span>
     </div>
-  </div>
+  </header>
 
-  <!-- 스토리 생성 -->
-  <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
-      <b>새 이야기 받기</b>
-      <button id="btn-generate">동전 던지기</button>
-    </div>
-    <div class="status" id="gen-status"></div>
+  <!-- 생성기 -->
+  <div class="card gen-card">
+    <p class="copy" id="gen-copy">동전을 던져 무작위로 한 이야기를 받아보세요</p>
+    <button class="btn-primary btn-lg" id="btn-generate">🎲 동전 던지기</button>
+    <div class="status" id="gen-status" style="margin-top:12px"></div>
   </div>
 
   <!-- 현재 스토리 -->
-  <div class="card" id="story-card" style="display:none">
-    <div class="story-header">
-      <span class="badge" id="story-badge"></span>
-      <span class="muted" style="font-size:12px" id="story-meta"></span>
-    </div>
-    <div class="story-body" id="story-body"></div>
+  <div id="story-card" class="hidden">
+    <div class="card">
+      <div class="story-meta">
+        <span class="badge" id="story-badge"></span>
+        <span class="muted" style="font-size:12px" id="story-time"></span>
+        <span class="muted" style="font-size:12px" id="story-model"></span>
+      </div>
+      <div class="story-body" id="story-body"></div>
 
-    <!-- 출처 -->
-    <div class="citations" id="citations-section" style="display:none">
-      <div class="citations-title">참고 출처</div>
-      <div id="citations-list"></div>
-    </div>
+      <!-- 출처 -->
+      <div class="citations hidden" id="citations-section">
+        <p class="section-title" style="margin-bottom:10px">참고 출처</p>
+        <div class="cit-list" id="citations-list"></div>
+      </div>
 
-    <!-- 투표 -->
-    <div class="vote-section">
-      <button class="btn-vote btn-sm" id="btn-vote" disabled>공론화 찬성</button>
-      <span class="vote-count" id="vote-count"></span>
-      <span id="archive-link"></span>
+      <!-- 박제 hero -->
+      <a class="archive-hero hidden" id="archive-hero" target="_blank" rel="noopener">
+        <div class="archive-icon">🗄</div>
+        <div class="archive-text">
+          <div class="lbl">Arweave 영구 박제됨</div>
+          <div class="tx" id="archive-tx"></div>
+          <div class="ts" id="archive-ts"></div>
+        </div>
+      </a>
+
+      <!-- 투표 -->
+      <div class="vote-section" id="vote-section">
+        <div class="vote-row">
+          <span class="vote-label">공론화 투표</span>
+          <span class="vote-num"><strong id="vote-num">0</strong> / <span id="vote-threshold">3</span> 표</span>
+        </div>
+        <div class="vote-bar" id="vote-bar">
+          <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
+        </div>
+        <button class="btn-vote btn-sm" id="btn-vote" disabled>로그인 후 투표</button>
+        <div class="status" id="vote-status" style="margin-top:10px"></div>
+      </div>
     </div>
-    <div class="status" id="vote-status" style="margin-top:8px"></div>
   </div>
 
-  <!-- 소셜 로그인 카드 (비로그인 상태에서만 표시) -->
-  <div class="card" id="login-card" style="display:none">
-    <p class="section-title">공론화 투표에 참여하려면 소셜 로그인이 필요합니다</p>
+  <!-- 로그인 -->
+  <div class="card hidden" id="login-card">
+    <p class="section-title" style="margin-bottom:10px">로그인</p>
+    <p class="muted" style="font-size:13px; margin: 0 0 14px">투표에 참여하려면 소셜 로그인이 필요합니다</p>
     <button class="provider-btn" id="btn-google">
       <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.6 0 6.6 5.5 2.7 13.6l7.8 6c1.9-5.7 7.1-10.1 13.5-10.1z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3.1-2.3 5.7-4.8 7.5l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.3z"/><path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.8-6A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.7 2.2-7.7 2.2-6.3 0-11.7-4.3-13.6-10l-7.8 6c4 8 11.9 13.1 21.4 13.1z"/></svg>
       Google로 계속하기
     </button>
   </div>
 
-  <!-- 최근 스토리 목록 -->
-  <div class="card" id="list-card">
-    <p class="section-title">최근 이야기</p>
-    <div id="story-list"><span class="muted" style="font-size:13px">로딩 중…</span></div>
+  <!-- 최근 이야기 -->
+  <div class="card">
+    <div class="list-header">
+      <p class="section-title">최근 이야기</p>
+      <div class="filters">
+        <button class="chip active" data-filter="all">전체</button>
+        <button class="chip" data-filter="kindness">선행</button>
+        <button class="chip" data-filter="critique">비판</button>
+        <button class="chip" data-filter="archived">🗄 박제됨</button>
+      </div>
+    </div>
+    <div id="story-list">
+      <div class="empty">
+        <div class="empty-icon">📜</div>
+        <div class="empty-text">아직 이야기가 없습니다.</div>
+      </div>
+    </div>
   </div>
 
 </div>
 
+<div id="toasts"></div>
+
 <script>
 // ── 전역 상태 ──────────────────────────────────────────────────────────────
 let sb, cfg, session;
-let currentStoryId = null;
+let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드 포함 가능)
+let allStories = [];
+let currentFilter = 'all';
+let archivePollTimer = null;
 
+// ── 초기화 ─────────────────────────────────────────────────────────────────
 async function init() {
   try {
     cfg = await fetch('/api/config').then(r => r.json());
-
     if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
-
     if (cfg.supabase_url && cfg.supabase_anon_key) {
       sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
         auth: { detectSessionInUrl: true, persistSession: true },
@@ -264,109 +510,163 @@ async function init() {
       sb.auth.onAuthStateChange((_event, s) => {
         session = s;
         renderAuth();
-        if (currentStoryId) refreshVoteStatus(currentStoryId);
+        if (currentStory?.story_id) refreshVoteStatus(currentStory.story_id);
       });
       const { data } = await sb.auth.getSession();
       session = data.session;
     }
+    document.getElementById('vote-threshold').textContent = cfg?.vote_threshold || 3;
   } catch (e) {
     console.error('[init 오류]', e);
+    toast('초기화 실패: ' + e.message, 'error');
   } finally {
     renderAuth();
     loadStoryList();
   }
 }
 
-// ── 인증 UI ────────────────────────────────────────────────────────────────
+// ── 인증 ───────────────────────────────────────────────────────────────────
 function renderAuth() {
   const area = document.getElementById('auth-area');
   const loginCard = document.getElementById('login-card');
   if (!sb) {
     area.innerHTML = '<span class="muted" style="font-size:13px">Supabase 미설정</span>';
-    loginCard.style.display = 'none';
+    loginCard.classList.add('hidden');
     return;
   }
   if (session?.user) {
-    const email = session.user.email || session.user.user_metadata?.name || '사용자';
+    const name = session.user.user_metadata?.full_name
+              || session.user.user_metadata?.name
+              || session.user.email?.split('@')[0]
+              || '사용자';
     area.innerHTML = `
-      <span style="font-size:13px;opacity:.7">${email}</span>
+      <span class="user-chip" title="${escHtml(session.user.email || '')}">
+        <span class="dot"></span>${escHtml(name)}
+      </span>
       <button class="btn-sm btn-outline" id="btn-logout">로그아웃</button>`;
     document.getElementById('btn-logout').onclick = () => sb.auth.signOut();
-    loginCard.style.display = 'none';
+    loginCard.classList.add('hidden');
   } else {
-    area.innerHTML = '<button class="btn-sm" id="btn-login-header">로그인</button>';
-    document.getElementById('btn-login-header').onclick = () => { loginCard.style.display = ''; loginCard.scrollIntoView({behavior:'smooth'}); };
-    loginCard.style.display = '';
+    area.innerHTML = '<button class="btn-sm btn-primary" id="btn-login-header">로그인</button>';
+    document.getElementById('btn-login-header').onclick = () => {
+      loginCard.classList.remove('hidden');
+      loginCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
   }
-  updateVoteButton();
 }
 
-async function oauthLogin(provider) {
+document.getElementById('btn-google').onclick = async () => {
   if (!sb) return;
   await sb.auth.signInWithOAuth({
-    provider,
+    provider: 'google',
     options: { redirectTo: window.location.origin },
   });
-}
-
-document.getElementById('btn-google').onclick = () => oauthLogin('google');
+};
 
 // ── 스토리 생성 ────────────────────────────────────────────────────────────
 document.getElementById('btn-generate').onclick = async () => {
   const btn = document.getElementById('btn-generate');
+  const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 조사 중…';
   setStatus('gen-status', '');
-  document.getElementById('story-card').style.display = 'none';
-  currentStoryId = null;
 
   try {
     const resp = await fetch('/api/story', { method: 'POST' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    currentStoryId = data.story_id;
-    renderStory(data);
-    setStatus('gen-status', '');
+    showStory({
+      id: data.story_id,
+      category: data.category,
+      body: data.body,
+      citations: data.citations,
+      created_at: new Date().toISOString(),
+      vote_count: 0,
+      arweave_url: null,
+      arweave_tx_id: null,
+      archived_at: null,
+      provider: data.provider,
+      model: data.model,
+    });
+    document.getElementById('gen-copy').textContent = '다른 이야기를 받아보고 싶다면';
+    btn.innerHTML = '🎲 동전 다시 던지기';
     loadStoryList();
   } catch (e) {
-    setStatus('gen-status', '이야기 생성 실패: ' + e.message, 'err');
+    setStatus('gen-status', '실패: ' + e.message, 'err');
+    toast('이야기 생성 실패', 'error');
+    btn.innerHTML = orig;
   } finally {
     btn.disabled = false;
-    btn.textContent = '동전 던지기';
   }
 };
 
-function renderStory(data) {
+function showStory(s) {
+  currentStory = s;
+  if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
+
   const card = document.getElementById('story-card');
-  card.style.display = '';
+  card.classList.remove('hidden');
+  // 카드 재생성 애니메이션을 위해 잠시 재마운트
+  const inner = card.querySelector('.card');
+  inner.style.animation = 'none';
+  void inner.offsetWidth;
+  inner.style.animation = '';
 
   const badge = document.getElementById('story-badge');
-  badge.textContent = data.category === 'kindness' ? '따뜻한 선행' : '인류애가 흔들리는 사건';
-  badge.className = 'badge ' + (data.category === 'kindness' ? 'badge-kindness' : 'badge-critique');
+  badge.textContent = s.category === 'kindness' ? '따뜻한 선행' : '인류애가 흔들리는 사건';
+  badge.className = 'badge ' + (s.category === 'kindness' ? 'badge-kindness' : 'badge-critique');
 
-  document.getElementById('story-meta').textContent = `${data.provider} · ${data.model}`;
-  document.getElementById('story-body').textContent = data.body;
+  document.getElementById('story-time').textContent = s.created_at ? formatRelative(s.created_at) : '';
+  document.getElementById('story-model').textContent =
+    (s.provider && s.model) ? ` · ${s.provider} ${s.model}` : '';
+  document.getElementById('story-body').textContent = s.body;
 
+  // 출처
   const citSection = document.getElementById('citations-section');
   const citList = document.getElementById('citations-list');
   citList.innerHTML = '';
-  if (data.citations?.length) {
-    citSection.style.display = '';
-    data.citations.forEach(c => {
-      const a = document.createElement('a');
-      a.href = c.uri; a.target = '_blank'; a.rel = 'noopener noreferrer';
-      a.className = 'citation-link';
-      a.textContent = c.title || c.uri;
-      citList.appendChild(a);
-    });
+  if (s.citations?.length) {
+    citSection.classList.remove('hidden');
+    s.citations.forEach(c => citList.appendChild(makeCitation(c)));
   } else {
-    citSection.style.display = 'none';
+    citSection.classList.add('hidden');
   }
 
-  document.getElementById('archive-link').innerHTML = '';
+  // 박제 상태 분기
+  if (s.arweave_tx_id) {
+    showArchiveHero(s.arweave_url, s.arweave_tx_id, s.archived_at);
+    document.getElementById('vote-section').classList.add('hidden');
+  } else {
+    document.getElementById('archive-hero').classList.add('hidden');
+    document.getElementById('vote-section').classList.remove('hidden');
+  }
+
   setStatus('vote-status', '');
-  refreshVoteStatus(data.story_id);
-  card.scrollIntoView({ behavior: 'smooth' });
+  refreshVoteStatus(s.id);
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function makeCitation(c) {
+  const a = document.createElement('a');
+  a.href = c.uri;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  a.className = 'cit-item';
+  const domain = extractDomain(c.uri);
+  a.innerHTML = `
+    <img class="cit-favicon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32"
+         alt="" loading="lazy" onerror="this.style.visibility='hidden'">
+    <div class="cit-content">
+      <div class="cit-title">${escHtml(c.title || c.uri)}</div>
+      <div class="cit-domain">${escHtml(domain)}</div>
+    </div>
+    <span class="cit-arrow">↗</span>`;
+  return a;
+}
+
+function extractDomain(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch { return ''; }
 }
 
 // ── 투표 ───────────────────────────────────────────────────────────────────
@@ -376,19 +676,35 @@ async function refreshVoteStatus(storyId) {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   try {
     const resp = await fetch(`/api/vote/${storyId}/status`, { headers });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     renderVoteArea(storyId, data);
-  } catch (_) {}
+    if (data.vote_count >= data.threshold && !currentStory?.arweave_tx_id) {
+      pollForArchive(storyId);
+    }
+  } catch (e) {
+    console.error('[vote status]', e);
+  }
 }
 
 function renderVoteArea(storyId, data) {
   const btn = document.getElementById('btn-vote');
-  const countEl = document.getElementById('vote-count');
-  const archiveEl = document.getElementById('archive-link');
+  document.getElementById('vote-num').textContent = data.vote_count;
+  document.getElementById('vote-threshold').textContent = data.threshold;
+  const pct = Math.min(100, (data.vote_count / data.threshold) * 100);
+  document.getElementById('vote-bar-fill').style.width = pct + '%';
+  document.getElementById('vote-bar').classList.toggle('complete', data.vote_count >= data.threshold);
 
-  countEl.textContent = `${data.vote_count} / ${data.threshold} 표`;
+  if (currentStory?.arweave_tx_id) {
+    document.getElementById('vote-section').classList.add('hidden');
+    return;
+  }
 
-  if (data.already_voted) {
+  if (data.vote_count >= data.threshold) {
+    btn.innerHTML = '<span class="spin"></span> Arweave 박제 진행 중…';
+    btn.className = 'btn-vote btn-sm';
+    btn.disabled = true;
+  } else if (data.already_voted) {
     btn.textContent = '✓ 투표 완료';
     btn.className = 'btn-voted btn-sm';
     btn.disabled = true;
@@ -397,30 +713,17 @@ function renderVoteArea(storyId, data) {
     btn.className = 'btn-vote btn-sm';
     btn.disabled = true;
   } else {
-    btn.textContent = '공론화 찬성 투표';
+    btn.textContent = '👍 공론화 찬성 투표';
     btn.className = 'btn-vote btn-sm';
     btn.disabled = false;
     btn.onclick = () => castVote(storyId);
   }
-  updateVoteButton();
-
-  // Arweave 박제 링크
-  if (data.arweave_url) {
-    archiveEl.innerHTML = `<a class="archive-badge" href="${data.arweave_url}" target="_blank" rel="noopener">
-      🗄 Arweave 영구 보관됨</a>`;
-  }
-}
-
-function updateVoteButton() {
-  const btn = document.getElementById('btn-vote');
-  if (!btn || btn.classList.contains('btn-voted')) return;
-  if (!currentStoryId) { btn.disabled = true; return; }
-  if (!session) { btn.textContent = '로그인 후 투표'; btn.disabled = true; }
 }
 
 async function castVote(storyId) {
   if (!session?.access_token) return;
   const btn = document.getElementById('btn-vote');
+  const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span>';
   setStatus('vote-status', '');
@@ -432,40 +735,105 @@ async function castVote(storyId) {
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
-    setStatus('vote-status', `투표 완료. ${data.vote_count}/${data.threshold}표`, 'ok');
+
+    toast(`👍 투표 완료 · ${data.vote_count}/${data.threshold}`, 'success');
+
+    if (data.vote_count >= data.threshold) {
+      toast('🗄 임계값 도달! Arweave 박제 진행 중...', 'archive');
+      pollForArchive(storyId);
+    }
+
     await refreshVoteStatus(storyId);
     loadStoryList();
   } catch (e) {
-    setStatus('vote-status', '투표 실패: ' + e.message, 'err');
+    setStatus('vote-status', '실패: ' + e.message, 'err');
+    toast('투표 실패: ' + e.message, 'error');
     btn.disabled = false;
-    btn.textContent = '공론화 찬성 투표';
+    btn.innerHTML = orig;
   }
 }
 
-// ── 스토리 목록 ────────────────────────────────────────────────────────────
+// ── 박제 폴링 ──────────────────────────────────────────────────────────────
+function pollForArchive(storyId, attempt = 0) {
+  if (archivePollTimer) clearTimeout(archivePollTimer);
+  if (attempt > 30) return;  // 최대 5분
+
+  archivePollTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/stories/${storyId}`);
+      if (!r.ok) throw new Error();
+      const s = await r.json();
+      if (s.arweave_tx_id) {
+        currentStory = { ...currentStory, ...s };
+        showArchiveHero(s.arweave_url, s.arweave_tx_id, s.archived_at);
+        document.getElementById('vote-section').classList.add('hidden');
+        toast('🎉 Arweave 영구 박제 완료!', 'archive');
+        loadStoryList();
+      } else {
+        pollForArchive(storyId, attempt + 1);
+      }
+    } catch {
+      pollForArchive(storyId, attempt + 1);
+    }
+  }, 8000);
+}
+
+function showArchiveHero(url, txId, archivedAt) {
+  const hero = document.getElementById('archive-hero');
+  hero.href = url;
+  document.getElementById('archive-tx').textContent = txId;
+  document.getElementById('archive-ts').textContent =
+    archivedAt ? formatRelative(archivedAt) + ' 박제' : '영구 보관';
+  hero.classList.remove('hidden');
+}
+
+// ── 목록 ───────────────────────────────────────────────────────────────────
 async function loadStoryList() {
   try {
-    const resp = await fetch('/api/stories?limit=10');
-    const stories = await resp.json();
-    renderStoryList(stories);
+    const resp = await fetch('/api/stories?limit=20');
+    allStories = await resp.json();
+    renderStoryList();
   } catch (_) {}
 }
 
-function renderStoryList(stories) {
+function renderStoryList() {
   const el = document.getElementById('story-list');
-  if (!stories.length) { el.innerHTML = '<span class="muted" style="font-size:13px">아직 스토리가 없습니다.</span>'; return; }
+  let stories = allStories;
+  if (currentFilter === 'kindness')      stories = stories.filter(s => s.category === 'kindness');
+  else if (currentFilter === 'critique') stories = stories.filter(s => s.category === 'critique');
+  else if (currentFilter === 'archived') stories = stories.filter(s => s.arweave_tx_id);
+
+  if (!stories.length) {
+    el.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
+        <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
+      </div>`;
+    return;
+  }
+
+  const threshold = cfg?.vote_threshold || 3;
   el.innerHTML = '';
   stories.forEach(s => {
     const div = document.createElement('div');
-    div.className = 'story-list-item';
+    div.className = 'list-item';
     const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
     const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
-    const archived = s.arweave_tx_id
-      ? `<span style="color:#16a34a;font-size:11px">🗄 AR</span>` : '';
+    const isArchived = !!s.arweave_tx_id;
+    const pct = Math.min(100, (s.vote_count / threshold) * 100);
+
     div.innerHTML = `
       <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
-      <span class="story-list-body">${escHtml(s.body?.slice(0, 120) || '')}</span>
-      <span class="story-list-meta">${s.vote_count}표 ${archived}</span>`;
+      <div class="list-body">${escHtml((s.body || '').slice(0, 140))}</div>
+      <div class="list-meta">
+        <div>${formatRelative(s.created_at)}</div>
+        <div>
+          ${isArchived
+            ? `<span style="color:var(--ok);font-weight:600">🗄 박제됨</span>`
+            : `${s.vote_count}/${threshold}표
+               <span class="mini-bar"><span class="mini-bar-fill" style="width:${pct}%"></span></span>`}
+        </div>
+      </div>`;
     div.onclick = () => loadAndShowStory(s.id);
     el.appendChild(div);
   });
@@ -475,19 +843,42 @@ async function loadAndShowStory(storyId) {
   try {
     const resp = await fetch(`/api/stories/${storyId}`);
     const s = await resp.json();
-    currentStoryId = s.id;
-    renderStory({
-      story_id: s.id,
-      category: s.category,
-      body: s.body,
-      citations: s.citations || [],
-      provider: '—', model: '—',
-    });
-    if (s.arweave_url) {
-      document.getElementById('archive-link').innerHTML =
-        `<a class="archive-badge" href="${s.arweave_url}" target="_blank" rel="noopener">🗄 Arweave 영구 보관됨</a>`;
-    }
+    showStory(s);
   } catch (_) {}
+}
+
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.onclick = () => {
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    currentFilter = chip.dataset.filter;
+    renderStoryList();
+  };
+});
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, kind = 'info') {
+  const div = document.createElement('div');
+  div.className = `toast ${kind}`;
+  div.textContent = msg;
+  document.getElementById('toasts').appendChild(div);
+  setTimeout(() => {
+    div.classList.add('fadeOut');
+    setTimeout(() => div.remove(), 300);
+  }, 4500);
+}
+
+// ── 상대 시간 ──────────────────────────────────────────────────────────────
+function formatRelative(iso) {
+  if (!iso) return '';
+  const then = new Date(iso).getTime();
+  const diff = Math.floor((Date.now() - then) / 1000);
+  if (diff < 30)      return '방금';
+  if (diff < 60)      return `${diff}초 전`;
+  if (diff < 3600)    return `${Math.floor(diff/60)}분 전`;
+  if (diff < 86400)   return `${Math.floor(diff/3600)}시간 전`;
+  if (diff < 604800)  return `${Math.floor(diff/86400)}일 전`;
+  return new Date(iso).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
 }
 
 // ── 유틸 ───────────────────────────────────────────────────────────────────
@@ -497,9 +888,8 @@ function setStatus(id, msg, cls) {
   el.textContent = msg;
   el.className = 'status' + (cls ? ' ' + cls : '');
 }
-
 function escHtml(s) {
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 init();

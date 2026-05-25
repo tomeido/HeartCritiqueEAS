@@ -21,7 +21,7 @@ GEMINI_ENDPOINT = (
 GEMINI_TIMEOUT = 50
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant").strip()
+GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
 GROQ_ENDPOINT = os.environ.get(
     "GROQ_ENDPOINT", "https://api.groq.com/openai/v1/chat/completions"
 ).strip()
@@ -59,29 +59,56 @@ DOMAINS_CRITIQUE = [
 ]
 
 PROMPT_KINDNESS = """\
-한국어로 쓰는 따뜻한 큐레이터. 아래 검색 결과 중 '평범한 사람의 따뜻한 선행' 한 가지를 골라
-5~8문장으로 들려줘. 규칙: 검색 결과 사실 기반(창작·과장 금지), 인물·지역·시점은 결과에
-나오는 만큼만 구체적으로, 톤은 담담하고 따뜻하게. 본문 마지막 줄에 "오늘의 한 줄: ..." 형식
-한 줄 메시지. URL·출처 표기는 본문에 넣지 마(시스템이 별도로 붙여줌).
-응답 맨 끝(오늘의 한 줄 다음)에 별도 한 줄로 정확히 다음 형식의 메타 라인을 적어:
-USED_SOURCES: [번호, 번호] — 실제로 본문 근거로 사용한 검색 결과 번호만 (1개여도 대괄호 안에).
-이 메타 라인은 시스템이 제거하니 자유롭게 적어. 출력은 본문 + 메타 라인만.
+한국어로 쓰는 따뜻한 큐레이터.
+
+[엄격 규칙]
+1. 아래 검색 결과에 명시된 사실만 써. 결과에 없는 인물명·지명·날짜·숫자·인용문은 절대 만들지 마.
+2. 결과에 디테일이 모호하면 모호하게: "한 시민이", "최근", "한 지역에서" 등 일반화된 표현을 써.
+3. 순수 한국어로만 작성. 중국 한자(简体/繁體), 영어 단어, 일본어, 다른 외국어 일절 섞지 말 것.
+   외래어는 한글 표기 ("회사" O, "公司" X / "운영" O, "operate" X / "음악" O, "音乐" X).
+4. 마크다운 기호 금지: **굵게**, ##헤더, *목록*, --- 일절 사용 금지. 순수 평서문만.
+5. 메타 발화 금지: "검색 결과에 따르면", "X번을 선택했습니다", "다음과 같이" 등 시스템 발화 금지.
+6. 본문은 곧바로 이야기로 시작. 인사말·서론·결론 안내 금지.
+7. 분량은 5~8문장. 단락 나누지 마.
+8. 톤은 담담하고 따뜻하게. 형용사 절제.
+9. URL·언론사명은 본문에 넣지 마 (시스템이 별도로 출처를 붙임).
+
+[출력 형식]
+<본문 5~8문장>
+오늘의 한 줄: <짧은 감상 한 줄>
+USED_SOURCES: [번호, 번호]
+
+USED_SOURCES 는 실제로 본문 근거가 된 검색 결과 번호 (1개여도 대괄호 안에). 시스템이 제거함.
 """
 
 PROMPT_CRITIQUE = """\
-한국어로 쓰는 냉정한 탐사 기자. 아래 검색 결과 중 잘 알려진 대기업(국내 재벌·플랫폼·글로벌
-메가코퍼) 한 곳의 '인류애가 흔들릴 만한' 무거운 사건 한 가지를 6~9문장으로 사실대로 정리.
+한국어로 쓰는 냉정한 탐사 기자.
+
+[엄격 규칙]
+1. 아래 검색 결과에 명시된 사실만 써. 결과에 없는 인물명·직책·날짜·금액·인용문은 절대 만들지 마.
+2. 결과에 회사명이 분명하지 않으면 "한 대기업"·"해당 기업" 등 일반 표현 사용.
+3. 인용부호("…") 안에는 검색 결과에 그대로 등장하는 발언만. 추측·재구성 인용 금지.
+4. 순수 한국어로만 작성. 중국 한자(简体/繁體), 영어 단어, 일본어, 다른 외국어 일절 섞지 말 것.
+   외래어는 한글 표기 ("회사" O, "公司" X / "운영" O, "operate" X / "교묘하게" O, "巧妙" X).
+5. 마크다운 기호 금지: **굵게**, ##헤더, *목록*, --- 일절 사용 금지. 순수 평서문만.
+6. 메타 발화 금지: "검색 결과에 따르면", "X번을 선택", "다음과 같이" 등 시스템 발화 금지.
+7. 본문은 곧바로 사건으로 시작. 인사말·서론·결론 안내 금지.
+8. 분량은 6~9문장. 단락 나누지 마.
+9. 톤은 차가운 사실 나열. 분노 형용사("끔찍한", "용서할 수 없는", "충격적인") 사용 금지.
+10. 회사명·시점·장소·피해 규모·비판 주체(언론·법원·정부·노조 등)는 결과에 있을 때만 명시.
+11. URL·언론사명은 본문에 넣지 마.
+
+[출력 형식]
+<본문 6~9문장>
+※ 비판 관점 요약이며, 해당 기업의 공식 입장과 다를 수 있습니다.
+USED_SOURCES: [번호, 번호]
+
 선호 사건: 노동자 사망·중대재해 은폐, 결함·유해 제품, 하청·갑질·임금 착취, 내부고발자 보복,
-회계·뇌물·담합, 약탈적 마케팅, 정보 유출·기만, 그리고 대표·총수·오너 일가의 도덕적 타락
-(갑질·폭언·마약·음주운전·성범죄·횡령·탈세·세습 비리 등) 도 포함. 규칙: 검색 결과 근거, 창작·미확인 의혹 금지.
-회사명·시점·장소·피해 규모, 비판 주체(언론·법원·정부·노조 등) 명시. 톤은 차가운 사실 나열,
-분노 형용사 금지. 중소·신생기업·단순 광고 논란은 피하고 생명·존엄·생계 영향 사건 우선.
-본문 마지막 줄에 정확히:
-"※ 비판 관점 요약이며, 해당 기업의 공식 입장과 다를 수 있습니다."
-URL·출처 표기는 본문에 넣지 마.
-응답 맨 끝(disclaimer 다음)에 별도 한 줄로 정확히 다음 형식의 메타 라인을 적어:
-USED_SOURCES: [번호, 번호] — 실제로 본문 근거로 사용한 검색 결과 번호만 (1개여도 대괄호 안에).
-이 메타 라인은 시스템이 제거하니 자유롭게 적어. 출력은 본문 + 메타 라인만.
+회계·뇌물·담합, 약탈적 마케팅, 정보 유출·기만, 오너 일가의 도덕적 타락(갑질·폭언·마약·
+음주운전·성범죄·횡령·탈세·세습 비리). 중소·신생기업·단순 광고 논란은 피하고 생명·존엄·생계
+영향 사건 우선.
+
+USED_SOURCES 는 실제 본문 근거가 된 검색 결과 번호 (1개여도 대괄호 안에). 시스템이 제거함.
 """
 
 SEARCH_QUERIES_KINDNESS = [
@@ -106,9 +133,67 @@ SEARCH_QUERIES_CRITIQUE = [
     "재벌 오너 일가 성범죄 사건 보도",
 ]
 
+# 줄 끝/문장 끝/단독 줄 어디든 잡도록 앵커 완화
 USED_SOURCES_RE = re.compile(
-    r'(?im)^[ \t]*USED_SOURCES[ \t]*[:=][ \t]*\[?([0-9,\s]*)\]?[ \t]*$'
+    r'(?i)\s*USED_SOURCES[ \t]*[:=][ \t]*\[?([0-9,\s]*)\]?\s*$',
+    re.MULTILINE,
 )
+
+# 본문 시작에 종종 나오는 LLM 메타 발화 패턴
+META_PREFIX_RE = re.compile(
+    r'(?im)^\s*(?:검색\s*결과(?:에\s*따르면|의?\s*\d+\s*번을?\s*(?:선택|골라)\S*)?'
+    r'|다음(?:은|과)\s+같이'
+    r'|아래(?:는|와)\s+같이'
+    r'|아래\s+검색\s*결과'
+    r'|네[,.]?\s*'
+    r'|네\s*알겠습니다'
+    r')[^\n]*\n+'
+)
+
+# 마크다운 잔재
+MD_BOLD_RE   = re.compile(r'\*\*([^*\n]+?)\*\*')
+MD_ITALIC_RE = re.compile(r'(?<![*\w])\*([^*\n]+?)\*(?![*\w])')
+MD_UNDER_RE  = re.compile(r'__([^_\n]+?)__')
+MD_HEADER_RE = re.compile(r'(?m)^#{1,6}[ \t]+')
+MD_HR_RE     = re.compile(r'(?m)^[ \t]*(?:-{3,}|={3,}|\*{3,})[ \t]*$')
+
+
+CJK_CHINESE_RE = re.compile(r'[一-鿿]+')  # 한자 (Chinese ideographs)
+HIRAGANA_KATAKANA_RE = re.compile(r'[぀-ゟ゠-ヿ]+')  # 일본 가나
+# 'SOUTH Korea' 'CEO' 같이 한글 사이에 갑자기 튀어나오는 ALL-CAPS 영단어 잔재
+CAPS_NOISE_RE = re.compile(r'\b[A-Z]{3,}(?:\s+[A-Za-z]+)?\b')
+
+
+def sanitize_text(text: str) -> str:
+    """LLM 출력에서 마크다운 기호·메타 발화·외국어 잔재 제거."""
+    # 시작 부분 메타 발화 한 번 제거
+    text = META_PREFIX_RE.sub('', text, count=1)
+
+    # 마크다운 강조 기호 제거 (텍스트는 보존)
+    text = MD_BOLD_RE.sub(r'\1', text)
+    text = MD_UNDER_RE.sub(r'\1', text)
+    text = MD_ITALIC_RE.sub(r'\1', text)
+
+    # 헤더/구분선 제거
+    text = MD_HEADER_RE.sub('', text)
+    text = MD_HR_RE.sub('', text)
+
+    # 한자/일본 가나 잔재 제거 (모델이 가끔 섞음)
+    text = CJK_CHINESE_RE.sub('', text)
+    text = HIRAGANA_KATAKANA_RE.sub('', text)
+
+    # SOUTH KOREA, CEO 같은 ALL-CAPS 영어 잡음 제거
+    text = CAPS_NOISE_RE.sub('', text)
+
+    # 외국어 제거로 생긴 연속 공백/이상한 구두점 정리
+    text = re.sub(r' {2,}', ' ', text)
+    text = re.sub(r'\s+([.,!?。、])', r'\1', text)
+    text = re.sub(r'([가-힣])\s+([가-힣])', r'\1 \2', text)  # 한글 사이 다중 공백 단일화
+
+    # 빈 줄 정리 (3개 이상의 개행 → 2개)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    return text.strip()
 
 
 def _http_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
@@ -295,6 +380,7 @@ def generate_via_groq(category: str) -> tuple:
     raw_text = parse_groq_chat_text(chat)
 
     text, used_indices = extract_used_indices(raw_text, len(results))
+    text = sanitize_text(text)
     chosen = [results[i - 1] for i in used_indices] if used_indices else results
     citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
     return text, citations, [query], GROQ_MODEL
@@ -309,6 +395,7 @@ def generate() -> dict:
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
+        text = sanitize_text(text)
         model_name = GEMINI_MODEL
     else:
         raise RuntimeError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")
