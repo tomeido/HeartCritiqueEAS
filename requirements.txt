@@ -1,2 +1,6 @@
-# No third-party deps. This agent uses only the Python standard library.
-# File kept to signal a Python project to Vercel's build detector.
+fastapi>=0.115
+uvicorn[standard]>=0.32
+supabase>=2.10
+httpx>=0.28
+cryptography>=44.0
+python-dotenv>=1.0

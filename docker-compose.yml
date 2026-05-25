@@ -1,7 +1,23 @@
 services:
-  heartcritique:
+  app:
     build: .
     ports:
-      - "9999:9999"
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - UPLOADER_URL=http://uploader:3000
+    depends_on:
+      uploader:
+        condition: service_healthy
+    restart: unless-stopped
+
+  uploader:
+    build: ./uploader
     env_file: .env
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

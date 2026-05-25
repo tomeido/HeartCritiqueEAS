@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Heart &amp; Critique</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh;
+  font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+        "Segoe UI", "Noto Sans KR", sans-serif;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #fde2e4 0%, transparent 60%),
+    radial-gradient(1000px 500px at 80% 80%, #cfe1ff 0%, transparent 60%),
+    #fafafa;
+  color: #1a1a1a;
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #2a1820 0%, transparent 60%),
+      radial-gradient(1000px 500px at 80% 80%, #16263f 0%, transparent 60%),
+      #0c0c0e;
+    color: #f0f0f0;
+  }
+}
+.wrap { max-width: 740px; margin: 0 auto; padding: 40px 20px 100px; }
+/* Header */
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 32px; flex-wrap: wrap; gap: 12px;
+}
+h1 { font-size: 26px; margin: 0; letter-spacing: -.02em; }
+.tagline { font-size: 13px; opacity: .6; margin: 2px 0 0; }
+/* Auth */
+.auth-area { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #ddd; display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 600; overflow: hidden;
+}
+/* Card */
+.card {
+  background: rgba(255,255,255,.7);
+  backdrop-filter: blur(14px);
+  border: 1px solid rgba(0,0,0,.06);
+  border-radius: 18px;
+  padding: 22px 24px;
+  margin-bottom: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  .card { background: rgba(28,28,32,.7); border-color: rgba(255,255,255,.08); }
+}
+/* Buttons */
+button {
+  appearance: none; border: 0; cursor: pointer;
+  padding: 10px 18px; border-radius: 10px;
+  font: 600 14px/1 inherit;
+  background: #111; color: #fff;
+  transition: opacity .1s, transform .05s;
+}
+button:hover { opacity: .85; }
+button:active { transform: translateY(1px); }
+button:disabled { background: #bbb; color: #fff; cursor: not-allowed; }
+@media (prefers-color-scheme: dark) {
+  button { background: #e8e8e8; color: #111; }
+  button:disabled { background: #444; color: #888; }
+}
+.btn-sm { padding: 7px 13px; font-size: 13px; border-radius: 8px; }
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid currentColor;
+  color: inherit;
+  opacity: .7;
+}
+.btn-vote {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+}
+.btn-vote:disabled { background: #bbb; }
+.btn-voted {
+  background: #dcfce7; color: #166534;
+  border: 1.5px solid #bbf7d0;
+  cursor: default;
+}
+@media (prefers-color-scheme: dark) {
+  .btn-voted { background: #14532d; color: #86efac; border-color: #166534; }
+}
+/* Story */
+.story-body { white-space: pre-wrap; line-height: 1.75; }
+.story-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 14px; flex-wrap: wrap;
+}
+.badge {
+  display: inline-block; padding: 3px 10px; border-radius: 999px;
+  font-size: 12px; font-weight: 600; letter-spacing: .02em;
+}
+.badge-kindness { background: #fef9c3; color: #854d0e; }
+.badge-critique  { background: #fee2e2; color: #991b1b; }
+@media (prefers-color-scheme: dark) {
+  .badge-kindness { background: #422006; color: #fde68a; }
+  .badge-critique  { background: #450a0a; color: #fca5a5; }
+}
+/* Citations */
+.citations { margin-top: 16px; }
+.citations-title { font-size: 12px; opacity: .55; margin-bottom: 6px; }
+.citation-link {
+  display: block; font-size: 13px; padding: 5px 0;
+  border-bottom: 1px solid rgba(0,0,0,.06); text-decoration: none; color: inherit;
+  opacity: .8;
+}
+.citation-link:hover { opacity: 1; }
+@media (prefers-color-scheme: dark) {
+  .citation-link { border-color: rgba(255,255,255,.06); }
+}
+/* Vote section */
+.vote-section {
+  margin-top: 18px; padding-top: 16px;
+  border-top: 1px solid rgba(0,0,0,.08);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+@media (prefers-color-scheme: dark) {
+  .vote-section { border-color: rgba(255,255,255,.08); }
+}
+.vote-count { font-size: 14px; opacity: .7; }
+/* Archive badge */
+.archive-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #f0fdf4; border: 1px solid #bbf7d0;
+  color: #166534; padding: 6px 12px; border-radius: 8px;
+  font-size: 13px; font-weight: 500; text-decoration: none;
+}
+@media (prefers-color-scheme: dark) {
+  .archive-badge {
+    background: #052e16; border-color: #14532d; color: #86efac;
+  }
+}
+/* Status */
+.status { font-size: 13px; min-height: 1.3em; opacity: .75; }
+.err { color: #dc2626; }
+.ok  { color: #16a34a; }
+/* Stories list */
+.story-list-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,.06);
+  cursor: pointer; transition: opacity .1s;
+}
+.story-list-item:hover { opacity: .8; }
+@media (prefers-color-scheme: dark) {
+  .story-list-item { border-color: rgba(255,255,255,.06); }
+}
+.story-list-body {
+  flex: 1; min-width: 0;
+  font-size: 14px; line-height: 1.55;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.story-list-meta { font-size: 12px; opacity: .5; white-space: nowrap; }
+/* Spinner */
+.spin {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(0,0,0,.15); border-top-color: #555;
+  border-radius: 50%; animation: spin .6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.muted { opacity: .5; }
+/* Login provider buttons */
+.provider-btn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin-bottom: 8px;
+  background: rgba(0,0,0,.04); color: inherit;
+  border: 1.5px solid rgba(0,0,0,.1); border-radius: 10px;
+  padding: 11px 16px; font-size: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  .provider-btn { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.1); }
+}
+.provider-btn:hover { opacity: .8; }
+.section-title { font-size: 13px; font-weight: 600; opacity: .5; margin: 0 0 10px; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- 헤더 -->
+  <div class="header">
+    <div>
+      <h1>Heart &amp; Critique</h1>
+      <p class="tagline">AI 사냥개가 건진 날것의 사실 · 인간 투표로 Arweave에 영구 박제</p>
+    </div>
+    <div class="auth-area" id="auth-area">
+      <span class="muted" style="font-size:13px" id="auth-status">로딩 중…</span>
+    </div>
+  </div>
+
+  <!-- 스토리 생성 -->
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <b>새 이야기 받기</b>
+      <button id="btn-generate">동전 던지기</button>
+    </div>
+    <div class="status" id="gen-status"></div>
+  </div>
+
+  <!-- 현재 스토리 -->
+  <div class="card" id="story-card" style="display:none">
+    <div class="story-header">
+      <span class="badge" id="story-badge"></span>
+      <span class="muted" style="font-size:12px" id="story-meta"></span>
+    </div>
+    <div class="story-body" id="story-body"></div>
+
+    <!-- 출처 -->
+    <div class="citations" id="citations-section" style="display:none">
+      <div class="citations-title">참고 출처</div>
+      <div id="citations-list"></div>
+    </div>
+
+    <!-- 투표 -->
+    <div class="vote-section">
+      <button class="btn-vote btn-sm" id="btn-vote" disabled>공론화 찬성</button>
+      <span class="vote-count" id="vote-count"></span>
+      <span id="archive-link"></span>
+    </div>
+    <div class="status" id="vote-status" style="margin-top:8px"></div>
+  </div>
+
+  <!-- 소셜 로그인 카드 (비로그인 상태에서만 표시) -->
+  <div class="card" id="login-card" style="display:none">
+    <p class="section-title">공론화 투표에 참여하려면 소셜 로그인이 필요합니다</p>
+    <button class="provider-btn" id="btn-google">
+      <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.6 0 6.6 5.5 2.7 13.6l7.8 6c1.9-5.7 7.1-10.1 13.5-10.1z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3.1-2.3 5.7-4.8 7.5l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.3z"/><path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.8-6A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.7 2.2-7.7 2.2-6.3 0-11.7-4.3-13.6-10l-7.8 6c4 8 11.9 13.1 21.4 13.1z"/></svg>
+      Google로 계속하기
+    </button>
+    <button class="provider-btn" id="btn-discord">
+      <svg width="18" height="18" viewBox="0 0 127.14 96.36" fill="#5865F2"><path d="M107.7 8.07A105.15 105.15 0 0 0 81.47 0a72.06 72.06 0 0 0-3.36 6.83 97.68 97.68 0 0 0-29.11 0A72.37 72.37 0 0 0 45.64 0a105.89 105.89 0 0 0-26.25 8.09C2.79 32.65-1.71 56.6.54 80.21a105.73 105.73 0 0 0 32.17 16.15 77.7 77.7 0 0 0 6.89-11.11 68.42 68.42 0 0 1-10.85-5.18c.91-.66 1.8-1.34 2.66-2a75.57 75.57 0 0 0 64.32 0c.87.71 1.76 1.39 2.66 2a68.68 68.68 0 0 1-10.87 5.19 77 77 0 0 0 6.89 11.1 105.25 105.25 0 0 0 32.19-16.14c2.64-27.38-4.51-51.11-18.9-72.15zM42.45 65.69C36.18 65.69 31 60 31 53s5-12.74 11.43-12.74S54 46 53.89 53s-5.05 12.69-11.44 12.69zm42.24 0C78.41 65.69 73.25 60 73.25 53s5-12.74 11.44-12.74S96.23 46 96.12 53s-5.04 12.69-11.43 12.69z"/></svg>
+      Discord로 계속하기
+    </button>
+  </div>
+
+  <!-- 최근 스토리 목록 -->
+  <div class="card" id="list-card">
+    <p class="section-title">최근 이야기</p>
+    <div id="story-list"><span class="muted" style="font-size:13px">로딩 중…</span></div>
+  </div>
+
+</div>
+
+<script>
+// ── 전역 상태 ──────────────────────────────────────────────────────────────
+let supabase, cfg, session;
+let currentStoryId = null;
+
+async function init() {
+  cfg = await fetch('/api/config').then(r => r.json());
+  if (cfg.supabase_url && cfg.supabase_anon_key) {
+    supabase = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+    supabase.auth.onAuthStateChange((_event, s) => {
+      session = s;
+      renderAuth();
+      if (currentStoryId) refreshVoteStatus(currentStoryId);
+    });
+    const { data: { session: s } } = await supabase.auth.getSession();
+    session = s;
+  }
+  renderAuth();
+  loadStoryList();
+}
+
+// ── 인증 UI ────────────────────────────────────────────────────────────────
+function renderAuth() {
+  const area = document.getElementById('auth-area');
+  const loginCard = document.getElementById('login-card');
+  if (!supabase) {
+    area.innerHTML = '<span class="muted" style="font-size:13px">Supabase 미설정</span>';
+    loginCard.style.display = 'none';
+    return;
+  }
+  if (session?.user) {
+    const email = session.user.email || session.user.user_metadata?.name || '사용자';
+    area.innerHTML = `
+      <span style="font-size:13px;opacity:.7">${email}</span>
+      <button class="btn-sm btn-outline" id="btn-logout">로그아웃</button>`;
+    document.getElementById('btn-logout').onclick = () => supabase.auth.signOut();
+    loginCard.style.display = 'none';
+  } else {
+    area.innerHTML = '<button class="btn-sm" id="btn-login-header">로그인</button>';
+    document.getElementById('btn-login-header').onclick = () => { loginCard.style.display = ''; loginCard.scrollIntoView({behavior:'smooth'}); };
+    loginCard.style.display = '';
+  }
+  updateVoteButton();
+}
+
+async function oauthLogin(provider) {
+  if (!supabase) return;
+  await supabase.auth.signInWithOAuth({
+    provider,
+    options: { redirectTo: window.location.origin },
+  });
+}
+
+document.getElementById('btn-google').onclick  = () => oauthLogin('google');
+document.getElementById('btn-discord').onclick = () => oauthLogin('discord');
+
+// ── 스토리 생성 ────────────────────────────────────────────────────────────
+document.getElementById('btn-generate').onclick = async () => {
+  const btn = document.getElementById('btn-generate');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>';
+  setStatus('gen-status', '');
+  document.getElementById('story-card').style.display = 'none';
+  currentStoryId = null;
+
+  try {
+    const resp = await fetch('/api/story', { method: 'POST' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    currentStoryId = data.story_id;
+    renderStory(data);
+    setStatus('gen-status', '');
+    loadStoryList();
+  } catch (e) {
+    setStatus('gen-status', '이야기 생성 실패: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '동전 던지기';
+  }
+};
+
+function renderStory(data) {
+  const card = document.getElementById('story-card');
+  card.style.display = '';
+
+  const badge = document.getElementById('story-badge');
+  badge.textContent = data.category === 'kindness' ? '따뜻한 선행' : '인류애가 흔들리는 사건';
+  badge.className = 'badge ' + (data.category === 'kindness' ? 'badge-kindness' : 'badge-critique');
+
+  document.getElementById('story-meta').textContent = `${data.provider} · ${data.model}`;
+  document.getElementById('story-body').textContent = data.body;
+
+  const citSection = document.getElementById('citations-section');
+  const citList = document.getElementById('citations-list');
+  citList.innerHTML = '';
+  if (data.citations?.length) {
+    citSection.style.display = '';
+    data.citations.forEach(c => {
+      const a = document.createElement('a');
+      a.href = c.uri; a.target = '_blank'; a.rel = 'noopener noreferrer';
+      a.className = 'citation-link';
+      a.textContent = c.title || c.uri;
+      citList.appendChild(a);
+    });
+  } else {
+    citSection.style.display = 'none';
+  }
+
+  document.getElementById('archive-link').innerHTML = '';
+  setStatus('vote-status', '');
+  refreshVoteStatus(data.story_id);
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ── 투표 ───────────────────────────────────────────────────────────────────
+async function refreshVoteStatus(storyId) {
+  if (!storyId) return;
+  const token = session?.access_token || '';
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  try {
+    const resp = await fetch(`/api/vote/${storyId}/status`, { headers });
+    const data = await resp.json();
+    renderVoteArea(storyId, data);
+  } catch (_) {}
+}
+
+function renderVoteArea(storyId, data) {
+  const btn = document.getElementById('btn-vote');
+  const countEl = document.getElementById('vote-count');
+  const archiveEl = document.getElementById('archive-link');
+
+  countEl.textContent = `${data.vote_count} / ${data.threshold} 표`;
+
+  if (data.already_voted) {
+    btn.textContent = '✓ 투표 완료';
+    btn.className = 'btn-voted btn-sm';
+    btn.disabled = true;
+  } else if (!session) {
+    btn.textContent = '로그인 후 투표';
+    btn.className = 'btn-vote btn-sm';
+    btn.disabled = true;
+  } else {
+    btn.textContent = '공론화 찬성 투표';
+    btn.className = 'btn-vote btn-sm';
+    btn.disabled = false;
+    btn.onclick = () => castVote(storyId);
+  }
+  updateVoteButton();
+
+  // Arweave 박제 링크
+  if (data.arweave_url) {
+    archiveEl.innerHTML = `<a class="archive-badge" href="${data.arweave_url}" target="_blank" rel="noopener">
+      🗄 Arweave 영구 보관됨</a>`;
+  }
+}
+
+function updateVoteButton() {
+  const btn = document.getElementById('btn-vote');
+  if (!btn || btn.classList.contains('btn-voted')) return;
+  if (!currentStoryId) { btn.disabled = true; return; }
+  if (!session) { btn.textContent = '로그인 후 투표'; btn.disabled = true; }
+}
+
+async function castVote(storyId) {
+  if (!session?.access_token) return;
+  const btn = document.getElementById('btn-vote');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>';
+  setStatus('vote-status', '');
+
+  try {
+    const resp = await fetch(`/api/vote/${storyId}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
+    setStatus('vote-status', `투표 완료. ${data.vote_count}/${data.threshold}표`, 'ok');
+    await refreshVoteStatus(storyId);
+    loadStoryList();
+  } catch (e) {
+    setStatus('vote-status', '투표 실패: ' + e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = '공론화 찬성 투표';
+  }
+}
+
+// ── 스토리 목록 ────────────────────────────────────────────────────────────
+async function loadStoryList() {
+  try {
+    const resp = await fetch('/api/stories?limit=10');
+    const stories = await resp.json();
+    renderStoryList(stories);
+  } catch (_) {}
+}
+
+function renderStoryList(stories) {
+  const el = document.getElementById('story-list');
+  if (!stories.length) { el.innerHTML = '<span class="muted" style="font-size:13px">아직 스토리가 없습니다.</span>'; return; }
+  el.innerHTML = '';
+  stories.forEach(s => {
+    const div = document.createElement('div');
+    div.className = 'story-list-item';
+    const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
+    const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
+    const archived = s.arweave_tx_id
+      ? `<span style="color:#16a34a;font-size:11px">🗄 AR</span>` : '';
+    div.innerHTML = `
+      <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
+      <span class="story-list-body">${escHtml(s.body?.slice(0, 120) || '')}</span>
+      <span class="story-list-meta">${s.vote_count}표 ${archived}</span>`;
+    div.onclick = () => loadAndShowStory(s.id);
+    el.appendChild(div);
+  });
+}
+
+async function loadAndShowStory(storyId) {
+  try {
+    const resp = await fetch(`/api/stories/${storyId}`);
+    const s = await resp.json();
+    currentStoryId = s.id;
+    renderStory({
+      story_id: s.id,
+      category: s.category,
+      body: s.body,
+      citations: s.citations || [],
+      provider: '—', model: '—',
+    });
+    if (s.arweave_url) {
+      document.getElementById('archive-link').innerHTML =
+        `<a class="archive-badge" href="${s.arweave_url}" target="_blank" rel="noopener">🗄 Arweave 영구 보관됨</a>`;
+    }
+  } catch (_) {}
+}
+
+// ── 유틸 ───────────────────────────────────────────────────────────────────
+function setStatus(id, msg, cls) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = 'status' + (cls ? ' ' + cls : '');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+init();
+</script>
+</body>
+</html>

@@ -4,84 +4,94 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Heart & Critique (EAS-free Web2.5 Edition)** — a Python serverless AI agent combining LLM-driven story generation, real-time news search, and x402 Web3 payment gating. Deployed on Vercel; all logic lives in a single handler file.
+**Heart & Critique (EAS-free Web2.5 Edition)** — AI 사냥개가 실시간 뉴스를 검색해 따뜻한 선행 또는 대기업 비위 사건을 전달하고, 소셜 로그인한 인간의 투표로 Arweave에 영구 박제하는 Web2.5 타임캡슐 아카이브.
+
+- **LLM**: Groq(Llama+Tavily) 또는 Gemini(Google Search grounding)
+- **DB/Auth**: Supabase (OAuth: Google/Discord)
+- **박제**: Irys(Node.js) → Arweave
+- **배포**: Docker 홈서버 (FastAPI + uvicorn)
 
 ## Development Commands
 
 ```bash
-# Run locally (defaults to port 9999)
-python agent.py
-python agent.py 8080
+# 환경변수 설정
+cp .env.example .env
+# .env 에서 API 키 입력
 
-# Test the agent endpoint
-curl -X POST http://localhost:9999 \
+# Docker로 실행
+docker compose up -d
+docker compose logs -f app
+
+# 로컬 개발 (Docker 없이)
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+
+# Irys 업로더만 로컬 실행
+cd uploader && npm install && node index.js
+
+# API 테스트
+curl -X POST http://localhost:8000/api/story
+curl http://localhost:8000/api/stories
+# A2A JSON-RPC (하위 호환)
+curl -X POST http://localhost:8000 \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","method":"message/send","params":{"message":{"parts":[{"text":"이야기 해줘"}]}},"id":1}'
-
-# Check agent card
-curl http://localhost:9999/.well-known/agent-card.json
+  -d '{"jsonrpc":"2.0","method":"message/send","id":1,"params":{"message":{"parts":[{"text":"하나 들려줘"}]}}}'
 ```
-
-No build step, no linter, no test suite. All dependencies are Python stdlib only — `requirements.txt` is intentionally empty.
 
 ## Architecture
 
-The entire agent is implemented in **`api/index.py`** (single-file serverless handler). `agent.py` wraps it in a local HTTP server for development.
+```
+Docker
+├── app (Python/FastAPI :8000)
+│   ├── main.py               FastAPI 진입점 + JSON-RPC A2A 엔드포인트
+│   ├── routers/
+│   │   ├── stories.py        POST /api/story, GET /api/stories[/{id}]
+│   │   └── votes.py          POST /api/vote/{id}, GET /api/vote/{id}/status
+│   └── services/
+│       ├── llm.py            Groq/Gemini 스토리 생성 파이프라인
+│       ├── db.py             Supabase 클라이언트 싱글톤
+│       ├── crypto.py         EC 키 서명 (secp256k1 ECDSA-SHA256)
+│       └── archive.py        스토리+투표 번들 → uploader 서비스 호출
+├── uploader (Node.js/Irys :3000)
+│   └── index.js              POST /upload → Irys → Arweave Tx ID 반환
+└── static/index.html         프론트엔드 (Supabase JS + 바닐라 JS)
+```
 
-### Request Routing
+### 주요 흐름
 
-All HTTP requests are rewritten to `api/index.py` via `vercel.json`. The handler dispatches by path:
-- `GET /` → serves the embedded HTML frontend (818+ lines of HTML/JS/CSS inlined in `get_html()`)
-- `GET /.well-known/agent-card.json` → A2A agent metadata
-- `POST /` → JSON-RPC 2.0 dispatch
+1. **스토리 생성**: `POST /api/story` → `services/llm.generate()` → Supabase `stories` 테이블 저장 → story_id + citations 반환
+2. **투표**: `POST /api/vote/{id}` (Bearer JWT 필요) → Supabase `votes` 테이블 insert → vote_count 갱신 → 임계값 도달 시 `services/archive.archive_story()` 백그라운드 실행
+3. **박제**: `archive_story()` → EC 서명 → `http://uploader:3000/upload` → Irys → Arweave Tx ID → Supabase 저장
 
-### JSON-RPC Methods
+### A2A JSON-RPC 하위 호환
 
-| Method | Cost | Description |
+`POST /` 에서 `message/send` 메서드를 JSON-RPC 2.0으로 처리. 기존 A2A 에이전트와 호환.
+
+## Supabase 설정
+
+1. `supabase_schema.sql` 을 Supabase SQL Editor에서 실행
+2. Authentication > Providers 에서 Google, Discord OAuth 활성화
+3. Authentication > URL Configuration 에서 `http://your-server:8000` 추가
+
+## Environment Variables
+
+| 변수 | 필수 | 설명 |
 |---|---|---|
-| `message/send` | Free | Generates kindness or critique story (50/50 random) |
-| `sources/reveal` | x402 USDC | Decrypts and returns source citations |
+| `SUPABASE_URL` | ✓ | Supabase 프로젝트 URL |
+| `SUPABASE_ANON_KEY` | ✓ | 프론트엔드용 anon 키 |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✓ | 서버용 서비스 롤 키 |
+| `AGENT_PRIVATE_KEY` | ✓ | 에이전트 ETH 개인키 (서명 + Irys 수수료) |
+| `GROQ_API_KEY` | Groq 모드 | |
+| `TAVILY_API_KEY` | Groq 모드 | |
+| `GEMINI_API_KEY` | Gemini 모드 | |
+| `IRYS_NETWORK` | | `devnet`(기본/테스트) 또는 `mainnet` |
+| `VOTE_THRESHOLD` | | 박제 트리거 투표수 (기본: 10) |
+| `LLM_PROVIDER` | | `groq`(기본) 또는 `gemini` |
 
-### LLM Pipelines
+## Key Design Decisions
 
-Two mutually exclusive pipelines selected by which API key is set:
-
-**Groq mode** (default, requires `GROQ_API_KEY` + `TAVILY_API_KEY`):
-1. Tavily search with curated domain allow-list
-2. Llama model generates story from search results
-3. `USED_SOURCES: url1,url2` meta-line extracted from LLM output via regex
-
-**Gemini mode** (requires `GEMINI_API_KEY`):
-1. Gemini with Google Search grounding (built-in)
-2. Grounding metadata provides citations directly
-
-### Payment Flow (x402)
-
-1. `message/send` returns story + encrypted source token (SHAKE-256 + HMAC-SHA256)
-2. Client pays via EIP-3009 USDC authorization signature on Base/Base Sepolia
-3. `sources/reveal` verifies payment through facilitator, decrypts token, returns sources
-4. Optional auto-settlement configured via `X402_FACILITATOR`
-
-### Frontend
-
-Vanilla JS + HTML inlined in `get_html()`. Uses the `viem` library (loaded from CDN) for wallet integration. Two-phase UX: free story generation → paid source reveal.
-
-## Required Environment Variables
-
-| Variable | Required For | Notes |
-|---|---|---|
-| `GROQ_API_KEY` | Groq pipeline | Default pipeline |
-| `TAVILY_API_KEY` | Groq pipeline | News search |
-| `GEMINI_API_KEY` | Gemini pipeline | Alternative to Groq |
-| `X402_PAY_TO` | Payment gating | Wallet address to receive payment |
-| `X402_NETWORK` | Payment gating | `base` or `base-sepolia` |
-| `X402_AMOUNT` | Optional | Defaults to minimum |
-| `X402_FACILITATOR` | Optional | Payment settlement endpoint |
-| `TAVILY_INCLUDE_DOMAINS` | Optional | Override domain allow-list |
-
-## Key Design Constraints
-
-- **No external dependencies**: Must stay pure Python stdlib. Any new functionality must avoid adding packages to `requirements.txt`.
-- **Single-file handler**: All server logic stays in `api/index.py`. Do not split into modules — Vercel's Python runtime expects this layout.
-- **Korean content**: Story prompts, UI copy, and comments are in Korean. The agent targets Korean-language content.
-- **60-second max duration**: Vercel enforces this. LLM + search calls must complete within budget.
+- **한국어 콘텐츠**: LLM 프롬프트, UI, 주석 모두 한국어. 한국 언론 도메인 큐레이션 목록 유지(`services/llm.py`의 `DOMAINS_KINDNESS`, `DOMAINS_CRITIQUE`).
+- **소셜 로그인만**: 지갑 연결 불필요. Supabase Auth가 OAuth 처리.
+- **sources 무료 공개**: x402 결제 제거. 출처는 생성 즉시 공개. 투표는 "Arweave 영구 박제"를 위한 인간 결단.
+- **업로더 분리**: Irys는 공식 Node.js SDK만 지원하므로 별도 컨테이너로 분리.
+- `api/index.py`: 기존 Vercel 핸들러 (레거시 보존). 새 기능은 `services/`, `routers/` 에 추가.
