@@ -11,9 +11,11 @@ router = APIRouter(prefix="/api")
 
 
 @router.post("/story")
-async def create_story():
+async def create_story(category: str | None = None):
+    if category and category not in ("kindness", "critique"):
+        raise HTTPException(400, "category는 kindness 또는 critique만 허용")
     try:
-        result = await asyncio.to_thread(generate)
+        result = await asyncio.to_thread(generate, category)
     except Exception as e:
         raise HTTPException(500, f"LLM 생성 실패: {e}")
 

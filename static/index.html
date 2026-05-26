@@ -147,7 +147,31 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   text-align: center;
   padding: 28px 24px;
 }
-.gen-card .copy { font-size: 14px; color: var(--muted); margin: 0 0 16px; }
+.gen-card .copy { font-size: 14px; color: var(--muted); margin: 0 0 18px; line-height: 1.6; }
+.gen-buttons {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+}
+.btn-gen {
+  padding: 14px 22px; font-size: 14px; font-weight: 700;
+  border-radius: 12px; cursor: pointer; border: 0;
+  color: #fff;
+  transition: transform .12s, box-shadow .12s, opacity .12s;
+}
+.btn-gen:hover:not(:disabled) { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+.btn-gen:active:not(:disabled) { transform: translateY(0); }
+.btn-gen:disabled { opacity: .5; cursor: not-allowed; }
+.btn-gen-kindness {
+  background: linear-gradient(135deg, #fb923c, #f59e0b);
+}
+.btn-gen-critique {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+}
+.btn-gen-random {
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+}
+@media (max-width: 540px) {
+  .btn-gen { padding: 12px 18px; font-size: 13px; flex: 1 1 auto; min-width: 120px; }
+}
 
 /* ── Story card ───────────────────────────────────────────────────────────── */
 .story-meta {
@@ -411,8 +435,14 @@ a { color: inherit; }
 
   <!-- 생성기 -->
   <div class="card gen-card">
-    <p class="copy" id="gen-copy">동전을 던져 무작위로 한 이야기를 받아보세요</p>
-    <button class="btn-primary btn-lg" id="btn-generate">🎲 동전 던지기</button>
+    <p class="copy" id="gen-copy">AI 사냥개에게 무엇을 시킬까요?<br>
+      <span style="font-size:12px;opacity:.65">커뮤니티 게시판(더쿠·블라인드·FM코리아·디시 등)에서 익명 사연·폭로를 길어 올립니다</span>
+    </p>
+    <div class="gen-buttons">
+      <button class="btn-gen btn-gen-kindness" data-category="kindness">🌸 따뜻한 미담</button>
+      <button class="btn-gen btn-gen-critique" data-category="critique">🔥 대기업 비위</button>
+      <button class="btn-gen btn-gen-random" data-category="">🎲 무작위</button>
+    </div>
     <div class="status" id="gen-status" style="margin-top:12px"></div>
   </div>
 
@@ -564,15 +594,16 @@ document.getElementById('btn-google').onclick = async () => {
 };
 
 // ── 스토리 생성 ────────────────────────────────────────────────────────────
-document.getElementById('btn-generate').onclick = async () => {
-  const btn = document.getElementById('btn-generate');
+async function generateStory(btn, category) {
+  const allBtns = document.querySelectorAll('.btn-gen');
   const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span> 조사 중…';
+  allBtns.forEach(b => b.disabled = true);
+  btn.innerHTML = '<span class="spin"></span> 사냥 중…';
   setStatus('gen-status', '');
 
   try {
-    const resp = await fetch('/api/story', { method: 'POST' });
+    const url = category ? `/api/story?category=${category}` : '/api/story';
+    const resp = await fetch(url, { method: 'POST' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     showStory({
@@ -588,17 +619,19 @@ document.getElementById('btn-generate').onclick = async () => {
       provider: data.provider,
       model: data.model,
     });
-    document.getElementById('gen-copy').textContent = '다른 이야기를 받아보고 싶다면';
-    btn.innerHTML = '🎲 동전 다시 던지기';
     loadStoryList();
   } catch (e) {
     setStatus('gen-status', '실패: ' + e.message, 'err');
     toast('이야기 생성 실패', 'error');
-    btn.innerHTML = orig;
   } finally {
-    btn.disabled = false;
+    btn.innerHTML = orig;
+    allBtns.forEach(b => b.disabled = false);
   }
-};
+}
+
+document.querySelectorAll('.btn-gen').forEach(btn => {
+  btn.onclick = () => generateStory(btn, btn.dataset.category);
+});
 
 function showStory(s) {
   currentStory = s;
