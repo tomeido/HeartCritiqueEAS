@@ -214,6 +214,39 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .cit-domain { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .cit-arrow { color: var(--muted); flex-shrink: 0; font-size: 14px; }
+.cit-status {
+  display: inline-block; font-size: 11px; font-weight: 700;
+  padding: 1px 6px; border-radius: 4px; margin-left: 4px;
+  letter-spacing: .02em;
+}
+.cit-status-deleted { background: var(--critique-bg); color: var(--critique-fg); }
+.cit-status-blocked { background: #fef3c7; color: #92400e; }
+.cit-status-error { background: var(--border); color: var(--muted); }
+.cit-status-unchecked { background: var(--border); color: var(--muted); }
+@media (prefers-color-scheme: dark) {
+  .cit-status-blocked { background: #451a03; color: #fcd34d; }
+}
+.cit-item.is-deleted .cit-title { text-decoration: line-through; opacity: .55; }
+
+/* 삭제된 출처 알림 (story card 상단) */
+.deletion-alert {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #fee2e2, var(--bg-card-2));
+  border: 1.5px solid var(--critique-border, #fecaca);
+  border-left: 4px solid var(--err);
+  border-radius: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  .deletion-alert {
+    background: linear-gradient(135deg, #450a0a, var(--bg-card-2));
+    border-color: #7f1d1d;
+  }
+}
+.deletion-alert-icon { font-size: 20px; flex-shrink: 0; line-height: 1.2; }
+.deletion-alert-body { flex: 1; font-size: 13px; line-height: 1.55; }
+.deletion-alert-body strong { display: block; font-size: 14px; margin-bottom: 2px; }
 
 /* ── Vote section ─────────────────────────────────────────────────────────── */
 .vote-section {
@@ -458,7 +491,18 @@ a { color: inherit; }
 
       <!-- 출처 -->
       <div class="citations hidden" id="citations-section">
-        <p class="section-title" style="margin-bottom:10px">참고 출처</p>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+          <p class="section-title" style="margin:0">참고 출처</p>
+          <button class="btn-sm btn-outline" id="btn-recheck" style="padding:4px 10px;font-size:11px">🔄 재검사</button>
+        </div>
+        <!-- 삭제된 출처 알림 (deleted_count > 0일 때만 표시) -->
+        <div class="deletion-alert hidden" id="deletion-alert">
+          <span class="deletion-alert-icon">🚨</span>
+          <div class="deletion-alert-body">
+            <strong id="deletion-alert-title">출처가 삭제되었습니다</strong>
+            <span id="deletion-alert-detail">이 사연의 흔적이 지워지고 있습니다. 박제 가치가 큽니다.</span>
+          </div>
+        </div>
         <div class="cit-list" id="citations-list"></div>
       </div>
 
@@ -505,6 +549,7 @@ a { color: inherit; }
         <button class="chip active" data-filter="all">전체</button>
         <button class="chip" data-filter="kindness">선행</button>
         <button class="chip" data-filter="critique">비판</button>
+        <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
         <button class="chip" data-filter="archived">🗄 박제됨</button>
       </div>
     </div>
@@ -632,6 +677,7 @@ async function generateStory(btn, category) {
 document.querySelectorAll('.btn-gen').forEach(btn => {
   btn.onclick = () => generateStory(btn, btn.dataset.category);
 });
+document.getElementById('btn-recheck').onclick = recheckCurrent;
 
 function showStory(s) {
   currentStory = s;
@@ -656,11 +702,9 @@ function showStory(s) {
 
   // 출처
   const citSection = document.getElementById('citations-section');
-  const citList = document.getElementById('citations-list');
-  citList.innerHTML = '';
   if (s.citations?.length) {
     citSection.classList.remove('hidden');
-    s.citations.forEach(c => citList.appendChild(makeCitation(c)));
+    redrawCitations(s.citations, s.deleted_count || 0, s.blocked_count || 0);
   } else {
     citSection.classList.add('hidden');
   }
@@ -686,15 +730,80 @@ function makeCitation(c) {
   a.rel = 'noopener noreferrer';
   a.className = 'cit-item';
   const domain = extractDomain(c.uri);
+  const status = c.track_status || 'unchecked';
+  const statusBadge = renderStatusBadge(status);
+  if (status === 'deleted') a.classList.add('is-deleted');
   a.innerHTML = `
     <img class="cit-favicon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32"
          alt="" loading="lazy" onerror="this.style.visibility='hidden'">
     <div class="cit-content">
       <div class="cit-title">${escHtml(c.title || c.uri)}</div>
-      <div class="cit-domain">${escHtml(domain)}</div>
+      <div class="cit-domain">${escHtml(domain)}${statusBadge}</div>
     </div>
     <span class="cit-arrow">↗</span>`;
   return a;
+}
+
+function renderStatusBadge(status) {
+  switch (status) {
+    case 'deleted':   return ' <span class="cit-status cit-status-deleted">❌ 삭제됨</span>';
+    case 'blocked':   return ' <span class="cit-status cit-status-blocked">⛔ 차단됨</span>';
+    case 'error':     return ' <span class="cit-status cit-status-error">⚠ 오류</span>';
+    case 'unchecked': return ' <span class="cit-status cit-status-unchecked">⏳ 확인 중</span>';
+    case 'live':
+    default:          return '';
+  }
+}
+
+function renderDeletionAlert(deletedCount, blockedCount) {
+  const el = document.getElementById('deletion-alert');
+  if (deletedCount > 0) {
+    el.classList.remove('hidden');
+    document.getElementById('deletion-alert-title').textContent =
+      `${deletedCount}개 출처가 삭제되었습니다`;
+    document.getElementById('deletion-alert-detail').textContent =
+      '이 사연의 흔적이 지워지고 있습니다. 사라지기 전에 박제할 가치가 큽니다.';
+  } else if (blockedCount > 0) {
+    el.classList.remove('hidden');
+    document.getElementById('deletion-alert-title').textContent =
+      `${blockedCount}개 출처가 차단되었습니다`;
+    document.getElementById('deletion-alert-detail').textContent =
+      '로그인·차단 등으로 접근할 수 없습니다.';
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+async function recheckCurrent() {
+  if (!currentStory?.id) return;
+  const btn = document.getElementById('btn-recheck');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span>';
+  try {
+    const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const data = await r.json();
+    toast(`출처 ${data.checked}개 재검사 완료`, 'success');
+    // 다시 로드
+    const sr = await fetch(`/api/stories/${currentStory.id}`);
+    const s = await sr.json();
+    currentStory = s;
+    redrawCitations(s.citations || [], s.deleted_count || 0, s.blocked_count || 0);
+    loadStoryList();
+  } catch (e) {
+    toast('재검사 실패: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+function redrawCitations(citations, deletedCount, blockedCount) {
+  const citList = document.getElementById('citations-list');
+  citList.innerHTML = '';
+  citations.forEach(c => citList.appendChild(makeCitation(c)));
+  renderDeletionAlert(deletedCount || 0, blockedCount || 0);
 }
 
 function extractDomain(url) {
@@ -835,6 +944,7 @@ function renderStoryList() {
   if (currentFilter === 'kindness')      stories = stories.filter(s => s.category === 'kindness');
   else if (currentFilter === 'critique') stories = stories.filter(s => s.category === 'critique');
   else if (currentFilter === 'archived') stories = stories.filter(s => s.arweave_tx_id);
+  else if (currentFilter === 'deleted')  stories = stories.filter(s => (s.deleted_count || 0) > 0);
 
   if (!stories.length) {
     el.innerHTML = `
@@ -855,6 +965,9 @@ function renderStoryList() {
     const isArchived = !!s.arweave_tx_id;
     const pct = Math.min(100, (s.vote_count / threshold) * 100);
 
+    const deletedLine = (s.deleted_count || 0) > 0
+      ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${s.deleted_count}개 삭제됨</div>`
+      : '';
     div.innerHTML = `
       <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
       <div class="list-body">${escHtml((s.body || '').slice(0, 140))}</div>
@@ -866,6 +979,7 @@ function renderStoryList() {
             : `${s.vote_count}/${threshold}표
                <span class="mini-bar"><span class="mini-bar-fill" style="width:${pct}%"></span></span>`}
         </div>
+        ${deletedLine}
       </div>`;
     div.onclick = () => loadAndShowStory(s.id);
     el.appendChild(div);

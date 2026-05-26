@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,8 +31,26 @@ load_dotenv()
 
 from routers import stories, votes  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
+from services.tracker import TRACKER_ENABLED, background_loop  # noqa: E402
 
-app = FastAPI(title="Heart & Critique", version="6.0.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = None
+    if TRACKER_ENABLED and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
+        task = asyncio.create_task(background_loop())
+    try:
+        yield
+    finally:
+        if task:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title="Heart & Critique", version="6.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

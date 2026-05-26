@@ -46,3 +46,33 @@ create policy "stories_write_svc" on public.stories for all
 create policy "votes_read_all"  on public.votes for select using (true);
 create policy "votes_write_svc" on public.votes for all
   using (auth.role() = 'service_role');
+
+-- ── 출처 삭제 추적 ─────────────────────────────────────────────────────────
+-- CONTEXT.md 정신: 대기업 자본력에 삭제되는 글을 박제. URL 별 생존 여부 추적.
+
+create table if not exists public.citation_checks (
+  id            uuid        primary key default gen_random_uuid(),
+  story_id      uuid        not null references public.stories(id) on delete cascade,
+  url           text        not null,
+  status        text        not null default 'unchecked'
+                check (status in ('unchecked', 'live', 'deleted', 'blocked', 'error')),
+  http_code     int,
+  reason        text,
+  first_seen    timestamptz not null default now(),
+  last_checked  timestamptz,
+  check_count   int         not null default 0,
+  unique (story_id, url)
+);
+
+create index if not exists idx_citation_checks_status
+  on public.citation_checks (status);
+create index if not exists idx_citation_checks_last_checked
+  on public.citation_checks (last_checked nulls first);
+create index if not exists idx_citation_checks_story_id
+  on public.citation_checks (story_id);
+
+alter table public.citation_checks enable row level security;
+create policy "citation_checks_read"  on public.citation_checks
+  for select using (true);
+create policy "citation_checks_write" on public.citation_checks
+  for all using (auth.role() = 'service_role');
