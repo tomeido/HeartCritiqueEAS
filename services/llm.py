@@ -121,14 +121,20 @@ USED_SOURCES: [번호, 번호]
 """
 
 SEARCH_QUERIES_KINDNESS = [
-    "감동 사연 미담 베스트",
-    "익명 도움 받은 이야기",
-    "이웃 선행 후기 게시판",
-    "구조 도와준 사람 사연",
-    "오늘 본 따뜻한 글",
-    "선행 베스트 게시판",
-    "감동 실화 커뮤니티",
-    "도움 받은 후기 글",
+    "지하철에서 도와준 사람 사연",
+    "길에서 쓰러진 사람 도와준 후기",
+    "병원에서 도와준 사람 이야기",
+    "어르신 도와준 사연 글",
+    "아이 도와준 사람 후기",
+    "익명 기부 받은 사연",
+    "모르는 사람이 도와준 후기",
+    "버스에서 자리 양보 사연",
+    "위기 상황 도와준 사람 글",
+    "잃어버린 물건 찾아준 사람",
+    "마음 따뜻해진 사연 후기",
+    "이런 사람도 있구나 사연 글",
+    "감사한 사람 후기 게시글",
+    "오늘 받은 친절 사연",
 ]
 
 SEARCH_QUERIES_CRITIQUE = [
@@ -329,7 +335,48 @@ def tavily_search(query: str, include_domains=None) -> dict:
     )
 
 
-def normalize_search_results(data: dict) -> list:
+# 커뮤니티 게시판에 자주 복붙되는 뉴스 기사 식별 패턴.
+# 우리는 "검열 전 날것의 익명 글"을 원하지, 정제된 언론 보도를 원하지 않음.
+NEWS_INDICATORS_RE = re.compile(
+    # 뉴스 헤드라인 머리표
+    r'\[(?:속보|단독|종합|특보|특집|기획|르포|분석|사설|칼럼|인터뷰|이슈|화제|영상|사진|뉴스|기자수첩)\]'
+    # "○○○ 기자 = " 형식
+    r'|기자\s*[\]=]'
+    # 언론사명 직접 노출
+    r'|(?:뉴스1|연합뉴스|뉴시스|YTN|SBS\s?뉴스|KBS\s?뉴스|MBC\s?뉴스|JTBC|TV조선|MBN|채널A'
+    r'|조선일보|중앙일보|동아일보|한겨레|경향신문|국민일보|문화일보|세계일보|서울신문'
+    r'|매일경제|한국경제|머니투데이|이데일리|아시아경제|파이낸셜뉴스|디지털타임스'
+    r'|오마이뉴스|프레시안|미디어오늘|디스패치|일요신문|스포츠조선|스포츠동아)',
+    re.IGNORECASE,
+)
+
+# URL 경로에 뉴스 게시판 표식이 있으면 거의 100% 기사 복붙
+NEWS_URL_PATTERNS = (
+    'mid=news', 'mid=hotnews', 'mid=politics_news',
+    '/news/', '/article/news', '/article_view',
+    'category=news', 'cate=news',
+)
+
+
+def looks_like_news(item: dict) -> bool:
+    """뉴스 기사 복붙으로 보이는 결과면 True."""
+    url = (item.get("url") or "").lower()
+    if any(p in url for p in NEWS_URL_PATTERNS):
+        return True
+
+    title = item.get("title") or ""
+    if NEWS_INDICATORS_RE.search(title):
+        return True
+
+    # 본문 첫 200자만 보고 판단 (전체 검사는 false positive 위험)
+    first = (item.get("content") or "")[:200]
+    if NEWS_INDICATORS_RE.search(first):
+        return True
+
+    return False
+
+
+def normalize_search_results(data: dict, drop_news: bool = True) -> list:
     out = []
     for r in data.get("results") or []:
         if not isinstance(r, dict):
@@ -337,11 +384,14 @@ def normalize_search_results(data: dict) -> list:
         url = r.get("url")
         if not isinstance(url, str) or not url.startswith("http"):
             continue
-        out.append({
+        item = {
             "title": r.get("title") or url,
             "url": url,
             "content": (r.get("content") or "")[:600],
-        })
+        }
+        if drop_news and looks_like_news(item):
+            continue
+        out.append(item)
     return out
 
 
@@ -380,11 +430,16 @@ def generate_via_groq(category: str) -> tuple:
     domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
         DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
     )
+    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터
     search_data = tavily_search(query, include_domains=domains)
-    results = normalize_search_results(search_data)
+    results = normalize_search_results(search_data, drop_news=True)
+    # 2차: 같은 도메인이지만 뉴스 필터 해제 (전부 뉴스 복붙이었을 때)
+    if not results:
+        results = normalize_search_results(search_data, drop_news=False)
+    # 3차: 도메인 제한도 풀고 검색 다시
     if not results:
         search_data = tavily_search(query)
-        results = normalize_search_results(search_data)
+        results = normalize_search_results(search_data, drop_news=False)
 
     system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
     user_prompt = f"아래 검색 결과 중 하나를 골라 위 규칙대로 들려줘.\n\n검색 결과:\n{build_search_context(results)}"
