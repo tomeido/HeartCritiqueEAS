@@ -45,6 +45,7 @@ async def create_story(category: str | None = None):
     except Exception as e:
         raise HTTPException(500, f"LLM 생성 실패: {e}")
 
+    gap = result.get("gap_data") or {}
     db = get_db()
     resp = db.table("stories").insert({
         "category": result["category"],
@@ -52,6 +53,9 @@ async def create_story(category: str | None = None):
         "citations": result["citations"],
         "search_queries": result["search_queries"],
         "vote_count": 0,
+        "gap_score": gap.get("gap_score"),
+        "community_count": gap.get("community_count"),
+        "news_count": gap.get("news_count"),
     }).execute()
     story_id = resp.data[0]["id"]
 
@@ -66,6 +70,9 @@ async def create_story(category: str | None = None):
         "citations": result["citations"],
         "provider": result["provider"],
         "model": result["model"],
+        "gap_score": gap.get("gap_score"),
+        "community_count": gap.get("community_count"),
+        "news_count": gap.get("news_count"),
     }
 
 
@@ -74,7 +81,8 @@ async def list_stories(limit: int = 20):
     db = get_db()
     resp = (
         db.table("stories")
-        .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,created_at,citations")
+        .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
+                "created_at,citations,gap_score,community_count,news_count")
         .order("created_at", desc=True)
         .limit(min(limit, 50))
         .execute()

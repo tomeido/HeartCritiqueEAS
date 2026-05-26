@@ -66,6 +66,38 @@ DOMAINS_CRITIQUE = [
     "instiz.net",          # 여초의 사회 이슈
 ]
 
+# 격차 탐지용 - 메이저 언론 도메인. 커뮤니티에 도는 이슈가 여기 안 잡히면
+# 검열·압박 신호로 간주.
+NEWS_DOMAINS = [
+    "chosun.com", "joongang.co.kr", "donga.com",
+    "hani.co.kr", "khan.co.kr", "kmib.co.kr",
+    "sbs.co.kr", "kbs.co.kr", "imbc.com", "ytn.co.kr",
+    "jtbc.co.kr", "tvchosun.com", "mbn.co.kr", "channela.com",
+    "yonhapnews.co.kr", "news1.kr", "newsis.com",
+    "news.naver.com", "news.daum.net",
+    "mk.co.kr", "hankyung.com", "edaily.co.kr",
+    "ohmynews.com", "pressian.com", "mediatoday.co.kr",
+    "newstapa.org", "sisain.co.kr",
+    "dispatch.co.kr", "ilyo.co.kr",
+]
+
+GAP_DETECTION_ENABLED = os.environ.get("GAP_DETECTION_ENABLED", "true").lower() != "false"
+
+
+def calculate_gap_score(community: int, news: int) -> str:
+    """선정된 커뮤니티 글 제목을 언론에서 검색한 결과로 격차 산출.
+    community 는 첫 검색 결과 수(맥락 정보), news 는 같은 사건의 언론 보도 수.
+    news == 0 이면 이 구체적 사건이 메이저 언론에 없음 = 강한 검열 신호."""
+    if community == 0:
+        return "none"
+    if news == 0:
+        return "extreme"   # 이 구체적 사건이 언론에 0건
+    if news == 1:
+        return "high"      # 거의 보도 안 됨
+    if news == 2:
+        return "medium"
+    return "none"          # 3건 이상이면 언론도 충분히 다룸
+
 PROMPT_KINDNESS = """\
 한국어로 쓰는 큐레이터. 아래는 한국 커뮤니티 게시판(더쿠·클리앙·인스티즈·네이트판·FM코리아·
 보배드림 등)에서 모은 익명 미담 글들. 정제된 언론 보도가 아닌 일반인의 날것 사연.
@@ -424,6 +456,58 @@ def build_search_context(results: list) -> str:
     return "\n".join(lines) if lines else "(검색 결과 없음)"
 
 
+# 커뮤니티 게시판 제목에 자주 붙는 prefix/suffix 정리
+TITLE_PREFIX_RE = re.compile(r'^\s*\[[^\]\n]{1,15}\]\s*')
+TITLE_SUFFIX_RE = re.compile(
+    r'\s*[-–|]\s*(에펨코리아|더쿠|클리앙|블라인드|블라인드라이트|디시인사이드|네이트\s*판|'
+    r'보배드림|인스티즈|루리웹|뽐뿌|pann|FM코리아|theqoo|teamblind|보배|디시)[^\n]*$',
+    re.IGNORECASE,
+)
+
+
+def clean_title_for_news_search(title: str) -> str:
+    """커뮤니티 글 제목에서 사이트 prefix/suffix 제거하고 검색 쿼리로 사용."""
+    if not title:
+        return ""
+    title = TITLE_PREFIX_RE.sub('', title)
+    title = TITLE_SUFFIX_RE.sub('', title)
+    # 매우 짧은 제목은 무의미 (격차 측정 불가)
+    return title.strip()[:150]
+
+
+def measure_news_coverage(chosen_items: list) -> dict | None:
+    """선정된 커뮤니티 글의 title + content 스니펫으로 언론 보도 확인.
+    content 가 더 specific 한 정보(회사명·인명·금액 등) 포함하므로 우선 사용.
+    None 반환 시 측정 불가."""
+    if not GAP_DETECTION_ENABLED or not chosen_items:
+        return None
+
+    item = chosen_items[0]
+    title_clean = clean_title_for_news_search(item.get("title") or "")
+    content = (item.get("content") or "")[:200].replace("\n", " ").strip()
+
+    # 가장 specific 한 정보를 쿼리로
+    if content and len(content) >= 20:
+        query = content
+    elif len(title_clean) >= 8:
+        query = title_clean
+    else:
+        return None  # 측정할 정보 부족
+
+    try:
+        news_data = tavily_search(query[:300], include_domains=NEWS_DOMAINS)
+        news_results = news_data.get("results") or []
+        news_count = sum(
+            1 for r in news_results
+            if isinstance(r, dict) and isinstance(r.get("url"), str)
+        )
+    except Exception as e:
+        print(f"[gap] news search failed: {e}")
+        return None
+
+    return {"news_count": news_count, "query_used": query[:100]}
+
+
 def generate_via_groq(category: str) -> tuple:
     seeds = SEARCH_QUERIES_KINDNESS if category == "kindness" else SEARCH_QUERIES_CRITIQUE
     query = random.choice(seeds)
@@ -441,6 +525,9 @@ def generate_via_groq(category: str) -> tuple:
         search_data = tavily_search(query)
         results = normalize_search_results(search_data, drop_news=False)
 
+    # 격차 탐지는 LLM 선정 후 measure_news_coverage()에서 진행. 일단 community_count만 보관.
+    community_count = len(results) if results else 0
+
     system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
     user_prompt = f"아래 검색 결과 중 하나를 골라 위 규칙대로 들려줘.\n\n검색 결과:\n{build_search_context(results)}"
 
@@ -451,15 +538,29 @@ def generate_via_groq(category: str) -> tuple:
     text = sanitize_text(text)
     chosen = [results[i - 1] for i in used_indices] if used_indices else results
     citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
-    return text, citations, [query], GROQ_MODEL
+
+    # 격차 탐지: 선정된 글의 content/title 로 언론 보도 여부 확인
+    gap_data = None
+    coverage = measure_news_coverage(chosen)
+    if coverage is not None:
+        news_count = coverage["news_count"]
+        gap_data = {
+            "community_count": community_count,
+            "news_count": news_count,
+            "gap_score": calculate_gap_score(community_count, news_count),
+            "gap_query": coverage["query_used"],
+        }
+
+    return text, citations, [query], GROQ_MODEL, gap_data
 
 
 def generate(category: str | None = None) -> dict:
     if category not in ("kindness", "critique"):
         category = "kindness" if random.random() < 0.5 else "critique"
 
+    gap_data = None
     if LLM_PROVIDER == "groq":
-        text, citations, queries, model_name = generate_via_groq(category)
+        text, citations, queries, model_name, gap_data = generate_via_groq(category)
     elif LLM_PROVIDER == "gemini":
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
@@ -482,4 +583,5 @@ def generate(category: str | None = None) -> dict:
         "search_queries": queries,
         "provider": LLM_PROVIDER,
         "model": model_name,
+        "gap_data": gap_data,
     }

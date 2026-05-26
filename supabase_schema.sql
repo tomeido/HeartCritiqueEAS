@@ -16,7 +16,11 @@ create table public.stories (
   archived_at     timestamptz,
   arweave_tx_id   text,
   arweave_url     text,
-  created_at      timestamptz not null default now()
+  created_at      timestamptz not null default now(),
+  -- 격차 탐지: 커뮤니티 vs 언론 보도 격차 (검열 신호)
+  gap_score       text,                -- none/low/medium/high/extreme
+  community_count int,
+  news_count      int
 );
 
 -- 투표 테이블 (유저당 스토리 1표)
