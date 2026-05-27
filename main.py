@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
-from routers import stats, stories, votes  # noqa: E402
+from routers import feed, stats, stories, votes  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop  # noqa: E402
 
@@ -63,6 +63,7 @@ app.add_middleware(
 app.include_router(stories.router)
 app.include_router(votes.router)
 app.include_router(stats.router)
+app.include_router(feed.router)
 
 
 @app.get("/api/config")

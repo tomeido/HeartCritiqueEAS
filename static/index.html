@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Heart &amp; Critique — 시간의 문지기</title>
+<link rel="alternate" type="application/atom+xml" title="Heart & Critique — 모든 이야기" href="/feed/all.xml"/>
+<link rel="alternate" type="application/atom+xml" title="Heart & Critique — 박제된 이야기" href="/feed/archived.xml"/>
+<link rel="alternate" type="application/atom+xml" title="Heart & Critique — 언론 격차 큰 이야기" href="/feed/extreme.xml"/>
+<link rel="alternate" type="application/atom+xml" title="Heart & Critique — 사라진 출처" href="/feed/deleted.xml"/>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 /* ── 변수 ─────────────────────────────────────────────────────────────────── */
@@ -80,7 +84,45 @@ body {
   -webkit-text-fill-color: transparent;
 }
 .brand .tagline { font-size: 13px; color: var(--muted); margin: 4px 0 0; }
+.header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
 .auth-area { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* 알림 벨 */
+.bell-btn {
+  background: transparent;
+  color: var(--text);
+  padding: 6px 11px;
+  font-size: 15px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  cursor: pointer;
+  position: relative;
+  display: inline-flex; align-items: center; gap: 5px;
+  transition: all .15s;
+  font-weight: 500;
+}
+.bell-btn:hover { background: var(--bg-card-2); }
+.bell-btn.has-new {
+  border-color: var(--err);
+  background: rgba(220, 38, 38, .06);
+  animation: bellShake 1.5s ease-in-out;
+}
+@keyframes bellShake {
+  0%, 100% { transform: rotate(0); }
+  10%, 30% { transform: rotate(-8deg); }
+  20%, 40% { transform: rotate(8deg); }
+  50% { transform: rotate(0); }
+}
+.bell-count {
+  display: none;
+  background: var(--err); color: #fff;
+  font-size: 11px; font-weight: 700;
+  border-radius: 999px;
+  padding: 1px 7px;
+  min-width: 18px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.bell-count.shown { display: inline-block; }
 .user-chip {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 12px; border-radius: 999px;
@@ -612,6 +654,49 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: var(--text); color: var(--bg);
   border-color: var(--text);
 }
+.chip-badge {
+  display: inline-block;
+  background: var(--err); color: #fff;
+  font-size: 9.5px; font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 999px;
+  margin-left: 4px;
+  min-width: 14px;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  vertical-align: middle;
+}
+
+/* 목록 아이템 NEW 배지 */
+.new-badge {
+  display: inline-block;
+  background: var(--accent-1); color: #fff;
+  font-size: 9.5px; font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: .04em;
+  margin-right: 4px;
+  vertical-align: middle;
+}
+
+/* RSS 피드 링크 */
+.feed-links {
+  display: flex; flex-wrap: wrap;
+  gap: 4px 14px; align-items: center;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+.feed-links .feed-label { color: var(--muted); font-weight: 600; }
+.feed-links a {
+  color: var(--accent-1);
+  text-decoration: none;
+  font-weight: 500;
+  border-bottom: 1px dotted transparent;
+  transition: border-color .15s;
+}
+.feed-links a:hover { border-bottom-color: var(--accent-1); }
 
 .list-item {
   display: flex; align-items: flex-start; gap: 12px;
@@ -741,8 +826,13 @@ a { color: inherit; }
       <h1>Heart &amp; Critique</h1>
       <p class="tagline">AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제</p>
     </div>
-    <div class="auth-area" id="auth-area">
-      <span class="muted" style="font-size:13px">로딩 중…</span>
+    <div class="header-right">
+      <button class="bell-btn" id="bell-btn" title="이전 방문 이후 새 이야기 보기" aria-label="새 이야기 알림">
+        🔔<span class="bell-count" id="bell-count"></span>
+      </button>
+      <div class="auth-area" id="auth-area">
+        <span class="muted" style="font-size:13px">로딩 중…</span>
+      </div>
     </div>
   </header>
 
@@ -793,6 +883,15 @@ a { color: inherit; }
         <span id="chart-start">·</span>
         <span id="chart-end">·</span>
       </div>
+    </div>
+
+    <!-- RSS 피드 링크 -->
+    <div class="feed-links">
+      <span class="feed-label">📡 RSS 구독:</span>
+      <a href="/feed/all.xml">전체</a>
+      <a href="/feed/archived.xml">박제됨</a>
+      <a href="/feed/extreme.xml">언론 격차</a>
+      <a href="/feed/deleted.xml">사라진 출처</a>
     </div>
   </div>
 
@@ -930,6 +1029,16 @@ let allStories = [];
 let currentFilter = 'all';
 let archivePollTimer = null;
 
+// ── 마지막 방문 추적 (localStorage) ────────────────────────────────────────
+const LAST_SEEN_KEY = 'hc_last_seen_v1';
+function getLastSeen() {
+  return localStorage.getItem(LAST_SEEN_KEY) || '';
+}
+function markAsSeen() {
+  localStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
+  updateBadges();
+}
+
 // ── 초기화 ─────────────────────────────────────────────────────────────────
 async function init() {
   try {
@@ -955,8 +1064,18 @@ async function init() {
     renderAuth();
     loadStoryList();
     loadStats();
+    handleHashRoute();
   }
 }
+
+// ── 해시 라우팅 ────────────────────────────────────────────────────────────
+function handleHashRoute() {
+  const m = window.location.hash.match(/^#story=([\w-]+)/);
+  if (m && m[1]) {
+    loadAndShowStory(m[1]);
+  }
+}
+window.addEventListener('hashchange', handleHashRoute);
 
 // ── 대시보드 ───────────────────────────────────────────────────────────────
 async function loadStats() {
@@ -1677,8 +1796,63 @@ async function loadStoryList() {
     const resp = await fetch('/api/stories?limit=100');
     allStories = await resp.json();
     renderStoryList();
+    updateBadges();
   } catch (_) {}
 }
+
+// ── 새 콘텐츠 배지 갱신 ────────────────────────────────────────────────────
+function updateBadges() {
+  const lastSeen = getLastSeen();
+  const bell = document.getElementById('bell-btn');
+  const cnt = document.getElementById('bell-count');
+  if (!bell || !cnt) return;
+
+  // 첫 방문이면 (lastSeen이 비어있으면) 배지 표시 안 함 — 일단 둘러보고 닫을 때 표시
+  if (!lastSeen) {
+    cnt.classList.remove('shown');
+    bell.classList.remove('has-new');
+  } else {
+    const newOnes = allStories.filter(s => (s.created_at || '') > lastSeen);
+    const count = newOnes.length;
+    if (count > 0) {
+      cnt.textContent = count > 99 ? '99+' : count;
+      cnt.classList.add('shown');
+      bell.classList.add('has-new');
+    } else {
+      cnt.classList.remove('shown');
+      bell.classList.remove('has-new');
+    }
+  }
+
+  // 필터 칩별 NEW 카운트
+  const chipFilters = {
+    kindness: s => s.category === 'kindness' && (s.created_at || '') > lastSeen,
+    critique: s => s.category === 'critique' && (s.created_at || '') > lastSeen,
+    archived: s => s.archived_at && s.archived_at > lastSeen,
+    gap:      s => ['high','extreme'].includes(s.gap_score) && (s.created_at || '') > lastSeen,
+    deleted:  s => (s.deleted_count || 0) > 0 && (s.created_at || '') > lastSeen,
+  };
+  for (const [f, predicate] of Object.entries(chipFilters)) {
+    const chip = document.querySelector(`.chip[data-filter="${f}"]`);
+    if (!chip) continue;
+    const oldBadge = chip.querySelector('.chip-badge');
+    if (oldBadge) oldBadge.remove();
+    if (!lastSeen) continue;
+    const n = allStories.filter(predicate).length;
+    if (n > 0) {
+      const b = document.createElement('span');
+      b.className = 'chip-badge';
+      b.textContent = n;
+      chip.appendChild(b);
+    }
+  }
+}
+
+// 벨 클릭 → 마지막 방문 시각 갱신, 목록으로 스크롤
+document.getElementById('bell-btn').onclick = () => {
+  markAsSeen();
+  document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+};
 
 function renderStoryList() {
   const el = document.getElementById('story-list');
@@ -1699,6 +1873,7 @@ function renderStoryList() {
   }
 
   const defaultTh = cfg?.vote_threshold || 3;
+  const lastSeen = getLastSeen();
   el.innerHTML = '';
   stories.forEach(s => {
     const div = document.createElement('div');
@@ -1709,6 +1884,8 @@ function renderStoryList() {
     const threshold = s.effective_threshold || defaultTh;
     const pct = Math.min(100, (s.vote_count / threshold) * 100);
     const urgent = s.urgency === 'high';
+    const isNew = lastSeen && (s.created_at || '') > lastSeen;
+    const newMark = isNew ? '<span class="new-badge">NEW</span>' : '';
 
     const deletedLine = (s.deleted_count || 0) > 0
       ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${s.deleted_count}개 삭제됨</div>`
@@ -1721,7 +1898,7 @@ function renderStoryList() {
       : `${s.vote_count}/${threshold}표`;
     div.innerHTML = `
       <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
-      <div class="list-body">${escHtml((s.body || '').slice(0, 140))}</div>
+      <div class="list-body">${newMark}${escHtml((s.body || '').slice(0, 140))}</div>
       <div class="list-meta">
         <div>${formatRelative(s.created_at)}</div>
         <div>
