@@ -67,11 +67,18 @@ app.include_router(stats.router)
 
 @app.get("/api/config")
 async def get_config():
+    from services.crypto import get_public_key_hex
+    try:
+        pubkey = get_public_key_hex()
+    except Exception:
+        pubkey = ""
     return {
         "supabase_url": os.environ.get("SUPABASE_URL", ""),
         "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
         "vote_threshold": int(os.environ.get("VOTE_THRESHOLD", "10")),
         "llm_provider": LLM_PROVIDER,
+        "agent_public_key": pubkey,
+        "irys_network": os.environ.get("IRYS_NETWORK", "devnet"),
     }
 
 

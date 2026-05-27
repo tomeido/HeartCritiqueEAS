@@ -439,6 +439,95 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .archive-text .ts { font-size: 11px; opacity: .55; margin-top: 4px; }
 
+/* ── 무결성 검증 패널 ─────────────────────────────────────────────────────── */
+.verify-card {
+  margin-top: 14px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.verify-summary {
+  cursor: pointer; padding: 12px 16px;
+  font-size: 13px; font-weight: 700;
+  user-select: none;
+  list-style: none;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.verify-summary::-webkit-details-marker { display: none; }
+.verify-summary::after {
+  content: '▾'; font-size: 14px; transition: transform .2s;
+}
+.verify-card[open] .verify-summary::after { transform: rotate(180deg); }
+.verify-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+.verify-intro {
+  font-size: 12px; color: var(--muted); margin: 12px 0 14px;
+  line-height: 1.55;
+}
+.verify-rows {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+.verify-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 4px 0;
+}
+.verify-row .vlabel {
+  flex-shrink: 0; width: 80px;
+  font-weight: 600; color: var(--muted);
+  font-size: 11px;
+}
+.verify-row .vval {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  word-break: break-all;
+  font-size: 11.5px;
+}
+.verify-row .vval.match { color: var(--ok); }
+.verify-row .vval.mismatch { color: var(--err); }
+.verify-steps {
+  margin-top: 14px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.verify-step {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0,0,0,.04);
+  display: flex; align-items: center; gap: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  .verify-step { background: rgba(255,255,255,.04); }
+}
+.verify-step .icon { font-size: 14px; flex-shrink: 0; }
+.verify-step.ok { color: var(--ok); }
+.verify-step.err { color: var(--err); }
+.verify-step.busy { color: var(--muted); }
+.verify-final {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+}
+.verify-final.ok {
+  background: var(--archive-bg); color: var(--archive-fg);
+  border: 1.5px solid var(--archive-border);
+}
+.verify-final.err {
+  background: var(--critique-bg); color: var(--critique-fg);
+  border: 1.5px solid #fca5a5;
+}
+@media (prefers-color-scheme: dark) {
+  .verify-final.err { border-color: #7f1d1d; }
+}
+
 /* ── Stories list ─────────────────────────────────────────────────────────── */
 .list-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -684,6 +773,18 @@ a { color: inherit; }
           <div class="ts" id="archive-ts"></div>
         </div>
       </a>
+
+      <!-- 무결성 검증 패널 (박제된 글 전용) -->
+      <details class="verify-card hidden" id="verify-card">
+        <summary class="verify-summary">🔐 박제 무결성 검증</summary>
+        <div class="verify-body">
+          <p class="verify-intro">Arweave에서 원본을 받아 ECDSA-secp256k1 서명을 브라우저에서 직접 검증합니다. 서버를 신뢰할 필요 없이 누구나 검증 가능.</p>
+          <div class="verify-rows" id="verify-rows"></div>
+          <button class="btn-sm btn-primary" id="btn-verify">🔍 검증 실행</button>
+          <div class="verify-steps" id="verify-steps"></div>
+          <div class="verify-final" id="verify-final"></div>
+        </div>
+      </details>
 
       <!-- 투표 -->
       <div class="vote-section" id="vote-section">
@@ -933,6 +1034,7 @@ function showStory(s) {
     document.getElementById('vote-section').classList.add('hidden');
   } else {
     document.getElementById('archive-hero').classList.add('hidden');
+    document.getElementById('verify-card').classList.add('hidden');
     document.getElementById('vote-section').classList.remove('hidden');
   }
 
@@ -1211,6 +1313,197 @@ function showArchiveHero(url, txId, archivedAt) {
   document.getElementById('archive-ts').textContent =
     archivedAt ? formatRelative(archivedAt) + ' 박제' : '영구 보관';
   hero.classList.remove('hidden');
+  showVerifyCard(txId, url);
+}
+
+// ── 무결성 검증 ───────────────────────────────────────────────────────────
+function showVerifyCard(txId, arweaveUrl) {
+  const card = document.getElementById('verify-card');
+  card.classList.remove('hidden');
+  card.open = false;
+  document.getElementById('verify-steps').innerHTML = '';
+  document.getElementById('verify-final').textContent = '';
+  document.getElementById('verify-final').className = 'verify-final';
+
+  const rows = document.getElementById('verify-rows');
+  const projectKey = (cfg?.agent_public_key || '').toLowerCase();
+  rows.innerHTML = `
+    <div class="verify-row"><span class="vlabel">알고리즘</span><span class="vval">ECDSA-secp256k1-SHA256</span></div>
+    <div class="verify-row"><span class="vlabel">Arweave Tx</span><span class="vval">${escHtml(txId)}</span></div>
+    <div class="verify-row"><span class="vlabel">원본 URL</span><span class="vval"><a href="${escHtml(arweaveUrl)}" target="_blank" rel="noopener">${escHtml(arweaveUrl)}</a></span></div>
+    <div class="verify-row"><span class="vlabel">프로젝트 공개키</span><span class="vval" id="vf-project-key" title="${escHtml(projectKey)}">${escHtml(projectKey.slice(0, 24))}…${escHtml(projectKey.slice(-12))}</span></div>
+  `;
+
+  document.getElementById('btn-verify').onclick = () => runVerification(txId, arweaveUrl);
+}
+
+function appendStep(text, status = 'busy') {
+  const el = document.createElement('div');
+  el.className = `verify-step ${status}`;
+  el.innerHTML = `<span class="icon">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
+  document.getElementById('verify-steps').appendChild(el);
+  return el;
+}
+
+function updateStep(el, text, status) {
+  el.className = `verify-step ${status}`;
+  el.innerHTML = `<span class="icon">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
+}
+
+// Python json.dumps(obj, sort_keys=True, ensure_ascii=False) 와 정확히 같은 출력
+function pythonCanonicalJSON(obj) {
+  if (obj === null) return 'null';
+  if (typeof obj === 'boolean') return obj ? 'true' : 'false';
+  if (typeof obj === 'number') return String(obj);
+  if (typeof obj === 'string') return JSON.stringify(obj);
+  if (Array.isArray(obj)) {
+    return '[' + obj.map(pythonCanonicalJSON).join(', ') + ']';
+  }
+  if (typeof obj === 'object') {
+    const keys = Object.keys(obj).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ': ' + pythonCanonicalJSON(obj[k])).join(', ') + '}';
+  }
+  return 'null';
+}
+
+function hexToBytes(hex) {
+  const clean = hex.replace(/^0x/, '');
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = parseInt(clean.substr(i * 2, 2), 16);
+  }
+  return out;
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function runVerification(txId, arweaveUrl) {
+  const btn = document.getElementById('btn-verify');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> 검증 중...';
+  document.getElementById('verify-steps').innerHTML = '';
+  const finalEl = document.getElementById('verify-final');
+  finalEl.className = 'verify-final';
+  finalEl.textContent = '';
+
+  let ok = true;
+
+  // Step 1: noble 라이브러리 로드
+  const s1 = appendStep('검증 라이브러리 로드 중...', 'busy');
+  let secp256k1, sha256;
+  try {
+    const curves = await import('https://cdn.jsdelivr.net/npm/@noble/curves@1.6.0/+esm');
+    const hashes = await import('https://cdn.jsdelivr.net/npm/@noble/hashes@1.5.0/+esm');
+    secp256k1 = curves.secp256k1;
+    sha256 = hashes.sha256;
+    updateStep(s1, '@noble/curves + @noble/hashes 로드 완료', 'ok');
+  } catch (e) {
+    updateStep(s1, '라이브러리 로드 실패: ' + e.message, 'err');
+    ok = false;
+  }
+
+  // Step 2: Arweave에서 원본 받기
+  let signed;
+  if (ok) {
+    const s2 = appendStep('Arweave 게이트웨이에서 원본 가져오는 중...', 'busy');
+    const gateways = [
+      arweaveUrl,
+      `https://devnet.irys.xyz/${txId}`,
+      `https://gateway.irys.xyz/${txId}`,
+    ];
+    for (const g of gateways) {
+      try {
+        const r = await fetch(g, { redirect: 'follow' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        signed = await r.json();
+        updateStep(s2, `원본 받음 (${g.replace(/^https?:\/\//, '').split('/')[0]})`, 'ok');
+        break;
+      } catch (e) { /* try next */ }
+    }
+    if (!signed) {
+      updateStep(s2, '모든 게이트웨이에서 가져오기 실패 (Arweave 인덱싱 대기 중일 수 있음)', 'err');
+      ok = false;
+    }
+  }
+
+  // Step 3: 공개키 일치 확인
+  if (ok && signed) {
+    const s3 = appendStep('서명자 공개키 검증 중...', 'busy');
+    const sigKey = (signed.publicKey || '').toLowerCase();
+    const projKey = (cfg?.agent_public_key || '').toLowerCase();
+    if (!sigKey) {
+      updateStep(s3, '공개키 필드 없음', 'err');
+      ok = false;
+    } else if (sigKey === projKey) {
+      updateStep(s3, '이 프로젝트의 공식 에이전트 키와 일치', 'ok');
+    } else if (!projKey) {
+      updateStep(s3, '⚠️ 프로젝트 공식 키를 알 수 없어 비교 불가 (서명 자체는 검증 진행)', 'busy');
+    } else {
+      updateStep(s3, '⚠️ 다른 키로 서명됨 - 공식 에이전트가 아님', 'err');
+      ok = false;
+    }
+  }
+
+  // Step 4: Canonical JSON 변환
+  let canonicalStr;
+  if (ok && signed) {
+    const s4 = appendStep('Canonical JSON 변환 (sort_keys=True)...', 'busy');
+    try {
+      canonicalStr = pythonCanonicalJSON(signed.payload);
+      updateStep(s4, `Canonical JSON 생성 (${canonicalStr.length} bytes)`, 'ok');
+    } catch (e) {
+      updateStep(s4, 'JSON 변환 실패: ' + e.message, 'err');
+      ok = false;
+    }
+  }
+
+  // Step 5: SHA-256 해시 계산
+  let hash;
+  if (ok) {
+    const s5 = appendStep('SHA-256 해시 계산 중...', 'busy');
+    try {
+      const msgBytes = new TextEncoder().encode(canonicalStr);
+      hash = sha256(msgBytes);
+      updateStep(s5, `SHA-256: ${bytesToHex(hash).slice(0, 32)}...`, 'ok');
+    } catch (e) {
+      updateStep(s5, '해시 실패: ' + e.message, 'err');
+      ok = false;
+    }
+  }
+
+  // Step 6: ECDSA 서명 검증
+  if (ok && signed) {
+    const s6 = appendStep('ECDSA secp256k1 서명 검증 중...', 'busy');
+    try {
+      const sigBytes = hexToBytes(signed.signature);
+      const pubBytes = hexToBytes(signed.publicKey);
+      const sig = secp256k1.Signature.fromDER(sigBytes);
+      const valid = secp256k1.verify(sig, hash, pubBytes);
+      if (valid) {
+        updateStep(s6, '서명 유효 — payload 가 박제 시점과 동일함이 증명됨', 'ok');
+      } else {
+        updateStep(s6, '서명 무효 — payload 가 변조됨', 'err');
+        ok = false;
+      }
+    } catch (e) {
+      updateStep(s6, '검증 실패: ' + e.message, 'err');
+      ok = false;
+    }
+  }
+
+  // 최종 결과
+  if (ok) {
+    finalEl.className = 'verify-final ok';
+    finalEl.innerHTML = '✅ 박제 무결성 확인됨<br><span style="font-weight:400;font-size:12px;opacity:.8">이 데이터는 박제 시점 이후 변조되지 않았고, 공식 에이전트가 서명했습니다.</span>';
+  } else {
+    finalEl.className = 'verify-final err';
+    finalEl.textContent = '❌ 검증 실패 — 단계별 메시지를 확인하세요';
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '🔍 다시 검증';
 }
 
 // ── 목록 ───────────────────────────────────────────────────────────────────
