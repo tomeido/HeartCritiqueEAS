@@ -1390,15 +1390,16 @@ async function runVerification(txId, arweaveUrl) {
 
   let ok = true;
 
-  // Step 1: noble 라이브러리 로드
+  // Step 1: noble 라이브러리 로드 (서브모듈 경로 사용 필수)
   const s1 = appendStep('검증 라이브러리 로드 중...', 'busy');
   let secp256k1, sha256;
   try {
-    const curves = await import('https://cdn.jsdelivr.net/npm/@noble/curves@1.6.0/+esm');
-    const hashes = await import('https://cdn.jsdelivr.net/npm/@noble/hashes@1.5.0/+esm');
+    const curves = await import('https://esm.sh/@noble/curves@1.6.0/secp256k1');
+    const hashes = await import('https://esm.sh/@noble/hashes@1.5.0/sha256');
     secp256k1 = curves.secp256k1;
     sha256 = hashes.sha256;
-    updateStep(s1, '@noble/curves + @noble/hashes 로드 완료', 'ok');
+    if (!secp256k1 || !sha256) throw new Error('모듈 export 없음');
+    updateStep(s1, '@noble/curves/secp256k1 + @noble/hashes/sha256 로드 완료', 'ok');
   } catch (e) {
     updateStep(s1, '라이브러리 로드 실패: ' + e.message, 'err');
     ok = false;
