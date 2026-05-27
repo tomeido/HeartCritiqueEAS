@@ -238,7 +238,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .dash-detail span { white-space: nowrap; }
 .dash-detail b { color: var(--text); font-weight: 700; }
 
-/* 동적 임계값 알림 */
+/* 동적 임계값 / 사냥꾼 상태 알림 */
 .threshold-info {
   margin-top: 14px;
   padding: 10px 14px;
@@ -246,11 +246,10 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   border: 1px solid rgba(99, 102, 241, .2);
   border-radius: 10px;
   font-size: 12px;
+  line-height: 1.7;
   display: none;
-  align-items: center;
-  gap: 8px;
 }
-.threshold-info.shown { display: flex; }
+.threshold-info.shown { display: block; }
 .threshold-info b { color: var(--accent-1); font-weight: 700; }
 @media (prefers-color-scheme: dark) {
   .threshold-info {
@@ -1104,11 +1103,34 @@ async function loadStats() {
     ];
     document.getElementById('dash-detail').innerHTML = detail.join('');
 
-    // 동적 임계값 정보
+    // 동적 임계값 정보 + 사냥꾼 상태
     const ti = document.getElementById('threshold-info');
     const th = d.threshold || {};
+    const h = d.hunter || {};
+    const lines = [];
     if (th.dynamic) {
-      ti.innerHTML = `⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) 기준 · 박제 임계값 <b>${th.base}</b>표`;
+      lines.push(`⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) · 박제 임계값 <b>${th.base}</b>표`);
+    }
+    if (h.enabled) {
+      const next = h.next_hunt_at ? new Date(h.next_hunt_at) : null;
+      let hunterLine = `🐕 자동 사냥꾼 동작 중`;
+      if (next) {
+        const diffMs = next - new Date();
+        if (diffMs > 0) {
+          const mins = Math.round(diffMs / 60000);
+          const human = mins > 60 ? `${Math.round(mins/60)}시간 ${mins % 60}분` : `${mins}분`;
+          hunterLine += ` · 다음 사냥 <b>${human}</b> 후`;
+        } else {
+          hunterLine += ` · <b>곧 사냥</b>`;
+        }
+      }
+      if (h.last_result?.skipped) {
+        hunterLine += ` <span style="opacity:.7">(${escHtml(h.last_result.reason || 'paused')})</span>`;
+      }
+      lines.push(hunterLine);
+    }
+    if (lines.length) {
+      ti.innerHTML = lines.join('<br>');
       ti.classList.add('shown');
     } else {
       ti.classList.remove('shown');

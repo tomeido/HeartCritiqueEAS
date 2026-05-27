@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter
 
 from services.db import get_db
+from services.hunter import get_status as get_hunter_status
 from services.threshold import (
     DEFAULT_THRESHOLD,
     get_dynamic_base_threshold,
@@ -93,6 +94,7 @@ async def get_stats():
             "dynamic": base_info["dynamic"],
             "fallback": DEFAULT_THRESHOLD,
         },
+        "hunter": get_hunter_status(),
     }
 
 

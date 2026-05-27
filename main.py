@@ -31,21 +31,26 @@ load_dotenv()
 
 from routers import feed, stats, stories, votes  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
-from services.tracker import TRACKER_ENABLED, background_loop  # noqa: E402
+from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
+from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = None
-    if TRACKER_ENABLED and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"):
-        task = asyncio.create_task(background_loop())
+    tasks: list[asyncio.Task] = []
+    has_supabase = bool(os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+    if has_supabase and TRACKER_ENABLED:
+        tasks.append(asyncio.create_task(tracker_loop(), name="tracker"))
+    if has_supabase and HUNTER_ENABLED:
+        tasks.append(asyncio.create_task(hunter_loop(), name="hunter"))
     try:
         yield
     finally:
-        if task:
-            task.cancel()
+        for t in tasks:
+            t.cancel()
+        for t in tasks:
             try:
-                await task
+                await t
             except asyncio.CancelledError:
                 pass
 
