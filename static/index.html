@@ -195,6 +195,67 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .dash-detail span { white-space: nowrap; }
 .dash-detail b { color: var(--text); font-weight: 700; }
+
+/* 동적 임계값 알림 */
+.threshold-info {
+  margin-top: 14px;
+  padding: 10px 14px;
+  background: rgba(99, 102, 241, .08);
+  border: 1px solid rgba(99, 102, 241, .2);
+  border-radius: 10px;
+  font-size: 12px;
+  display: none;
+  align-items: center;
+  gap: 8px;
+}
+.threshold-info.shown { display: flex; }
+.threshold-info b { color: var(--accent-1); font-weight: 700; }
+@media (prefers-color-scheme: dark) {
+  .threshold-info {
+    background: rgba(139, 92, 246, .12);
+    border-color: rgba(139, 92, 246, .25);
+  }
+}
+
+/* 시계열 차트 */
+.chart-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.chart-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; flex-wrap: wrap; gap: 8px;
+}
+.chart-title {
+  font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  color: var(--muted); text-transform: uppercase;
+}
+.chart-legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); }
+.legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.legend-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; flex-shrink: 0;
+}
+.chart-svg {
+  width: 100%; height: 180px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card-2);
+  display: block;
+}
+.chart-svg polyline { transition: opacity .2s; }
+.chart-svg .grid-line {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.chart-axis {
+  display: flex; justify-content: space-between;
+  margin-top: 6px;
+  font-size: 10px; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
 @media (max-width: 540px) {
   .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
   .stat-num { font-size: 22px; }
@@ -710,6 +771,29 @@ a { color: inherit; }
       </button>
     </div>
     <div class="dash-detail" id="dash-detail"></div>
+
+    <!-- 동적 임계값 알림 -->
+    <div class="threshold-info" id="threshold-info"></div>
+
+    <!-- 30일 시계열 차트 -->
+    <div class="chart-section">
+      <div class="chart-header">
+        <span class="chart-title">📈 30일 활동 추이</span>
+        <div class="chart-legend">
+          <span class="legend-item"><i class="legend-dot" style="background:#6b7280"></i>신규</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#16a34a"></i>박제</span>
+          <span class="legend-item"><i class="legend-dot" style="background:#dc2626"></i>삭제 감지</span>
+        </div>
+      </div>
+      <svg class="chart-svg" id="chart-ts" viewBox="0 0 600 180" preserveAspectRatio="none">
+        <g id="chart-grid"></g>
+        <g id="chart-lines"></g>
+      </svg>
+      <div class="chart-axis">
+        <span id="chart-start">·</span>
+        <span id="chart-end">·</span>
+      </div>
+    </div>
   </div>
 
   <!-- 생성기 -->
@@ -900,9 +984,89 @@ async function loadStats() {
       `<span>격차 분포: extreme <b>${d.gap.extreme}</b> / high <b>${d.gap.high}</b> / medium <b>${d.gap.medium}</b></span>`,
     ];
     document.getElementById('dash-detail').innerHTML = detail.join('');
+
+    // 동적 임계값 정보
+    const ti = document.getElementById('threshold-info');
+    const th = d.threshold || {};
+    if (th.dynamic) {
+      ti.innerHTML = `⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) 기준 · 박제 임계값 <b>${th.base}</b>표`;
+      ti.classList.add('shown');
+    } else {
+      ti.classList.remove('shown');
+    }
+
+    // 시계열 차트
+    loadTimeseries();
   } catch (e) {
     console.error('[stats] load failed', e);
   }
+}
+
+// ── 시계열 차트 ────────────────────────────────────────────────────────────
+async function loadTimeseries() {
+  try {
+    const r = await fetch('/api/stats/timeseries?days=30');
+    if (!r.ok) return;
+    const data = await r.json();
+    renderTimeseries(data);
+  } catch (e) {
+    console.error('[timeseries] failed', e);
+  }
+}
+
+function renderTimeseries(data) {
+  const svg = document.getElementById('chart-ts');
+  const lines = document.getElementById('chart-lines');
+  const grid = document.getElementById('chart-grid');
+  if (!data || data.length === 0) return;
+
+  const W = 600, H = 180, P = 12;
+  const innerW = W - P * 2, innerH = H - P * 2;
+  const n = data.length;
+  const maxVal = Math.max(1, ...data.flatMap(d => [d.stories, d.archives, d.deletions]));
+
+  // 가로 그리드 (4단)
+  let gridHTML = '';
+  for (let i = 0; i <= 4; i++) {
+    const y = P + (innerH * i / 4);
+    const val = Math.round(maxVal * (1 - i / 4));
+    gridHTML += `<line class="grid-line" x1="${P}" y1="${y}" x2="${W - P}" y2="${y}"/>`;
+    gridHTML += `<text x="${P - 4}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--muted)" font-family="ui-monospace,monospace">${val}</text>`;
+  }
+  grid.innerHTML = gridHTML;
+
+  const xStep = innerW / Math.max(1, n - 1);
+
+  function poly(key, color, fill) {
+    const pts = data.map((d, i) => {
+      const x = P + i * xStep;
+      const y = P + innerH - (d[key] / maxVal * innerH);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    let html = '';
+    if (fill) {
+      // 영역 채움용 닫힌 경로
+      const first = `${P.toFixed(1)},${(P + innerH).toFixed(1)}`;
+      const last  = `${(P + (n-1) * xStep).toFixed(1)},${(P + innerH).toFixed(1)}`;
+      html += `<polygon points="${first} ${pts} ${last}" fill="${color}" fill-opacity="0.08"/>`;
+    }
+    html += `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    // 마지막 포인트 강조
+    const last_d = data[n-1];
+    const lx = P + (n-1) * xStep;
+    const ly = P + innerH - (last_d[key] / maxVal * innerH);
+    html += `<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3" fill="${color}"/>`;
+    return html;
+  }
+
+  lines.innerHTML =
+    poly('stories', '#6b7280', true) +
+    poly('archives', '#16a34a', true) +
+    poly('deletions', '#dc2626', true);
+
+  // 축 라벨
+  document.getElementById('chart-start').textContent = data[0].date.slice(5);
+  document.getElementById('chart-end').textContent = data[n-1].date.slice(5) + ` (총 ${maxVal})`;
 }
 
 // 타일 클릭 → 목록 필터 점프
