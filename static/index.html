@@ -142,6 +142,64 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 .btn-voted:hover { transform: none; box-shadow: none; }
 
+/* ── Dashboard ────────────────────────────────────────────────────────────── */
+.dash-card { padding: 18px 22px; }
+.dash-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px; flex-wrap: wrap; gap: 8px;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.stat-tile {
+  appearance: none;
+  padding: 14px 10px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: transform .12s, box-shadow .12s, border-color .12s;
+  font-family: inherit;
+  color: inherit;
+}
+.stat-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--border-strong);
+}
+.stat-tile:active { transform: translateY(0); }
+.stat-num {
+  font-size: 26px; font-weight: 800;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+.stat-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+.stat-archive .stat-num { color: var(--ok); }
+.stat-deleted .stat-num { color: var(--err); }
+.stat-gap     .stat-num { color: #ea580c; }
+.dash-detail {
+  display: flex; flex-wrap: wrap; gap: 10px 16px;
+  margin-top: 14px;
+  font-size: 11.5px; color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.dash-detail span { white-space: nowrap; }
+.dash-detail b { color: var(--text); font-weight: 700; }
+@media (max-width: 540px) {
+  .stats-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .stat-num { font-size: 22px; }
+}
+
 /* ── Generator ────────────────────────────────────────────────────────────── */
 .gen-card {
   text-align: center;
@@ -538,6 +596,33 @@ a { color: inherit; }
     </div>
   </header>
 
+  <!-- 신호 누적 대시보드 -->
+  <div class="card dash-card">
+    <div class="dash-header">
+      <p class="section-title" style="margin:0">📊 박제 현황</p>
+      <span class="muted" style="font-size:11px" id="dash-recent"></span>
+    </div>
+    <div class="stats-grid">
+      <button class="stat-tile" data-jump="all" title="전체 보기">
+        <div class="stat-num" id="stat-total">·</div>
+        <div class="stat-label">📜 이야기</div>
+      </button>
+      <button class="stat-tile stat-archive" data-jump="archived" title="박제된 글만 보기">
+        <div class="stat-num" id="stat-archived">·</div>
+        <div class="stat-label">🗄 박제됨</div>
+      </button>
+      <button class="stat-tile stat-deleted" data-jump="deleted" title="삭제된 출처 있는 글">
+        <div class="stat-num" id="stat-deleted">·</div>
+        <div class="stat-label">🚨 삭제 출처</div>
+      </button>
+      <button class="stat-tile stat-gap" data-jump="gap" title="언론 보도 격차 큰 글">
+        <div class="stat-num" id="stat-gap">·</div>
+        <div class="stat-label">🔍 보도 격차</div>
+      </button>
+    </div>
+    <div class="dash-detail" id="dash-detail"></div>
+  </div>
+
   <!-- 생성기 -->
   <div class="card gen-card">
     <p class="copy" id="gen-copy">AI 사냥개에게 무엇을 시킬까요?<br>
@@ -628,7 +713,7 @@ a { color: inherit; }
   </div>
 
   <!-- 최근 이야기 -->
-  <div class="card">
+  <div class="card" id="list-card">
     <div class="list-header">
       <p class="section-title">최근 이야기</p>
       <div class="filters">
@@ -684,8 +769,52 @@ async function init() {
   } finally {
     renderAuth();
     loadStoryList();
+    loadStats();
   }
 }
+
+// ── 대시보드 ───────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch('/api/stats');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('stat-total').textContent    = d.stories.total;
+    document.getElementById('stat-archived').textContent = d.stories.archived;
+    document.getElementById('stat-deleted').textContent  = d.citations.deleted || 0;
+    document.getElementById('stat-gap').textContent      = d.gap.high_or_extreme || 0;
+
+    const recent = d.recent || {};
+    const parts = [];
+    if (recent.stories_24h)  parts.push(`📜 24h 신규 ${recent.stories_24h}`);
+    if (recent.archives_24h) parts.push(`🗄 24h 박제 ${recent.archives_24h}`);
+    document.getElementById('dash-recent').textContent = parts.join(' · ');
+
+    const bc = d.stories.by_category || {};
+    const ct = d.citations || {};
+    const detail = [
+      `<span><b>${bc.kindness || 0}</b> 선행 · <b>${bc.critique || 0}</b> 비판</span>`,
+      `<span>총 <b>${d.votes.total}</b>표</span>`,
+      `<span>출처 추적 <b>${ct.total || 0}</b>개 (살아있음 ${ct.live || 0} · 삭제 ${ct.deleted || 0} · 차단 ${ct.blocked || 0})</span>`,
+      `<span>격차 분포: extreme <b>${d.gap.extreme}</b> / high <b>${d.gap.high}</b> / medium <b>${d.gap.medium}</b></span>`,
+    ];
+    document.getElementById('dash-detail').innerHTML = detail.join('');
+  } catch (e) {
+    console.error('[stats] load failed', e);
+  }
+}
+
+// 타일 클릭 → 목록 필터 점프
+document.querySelectorAll('.stat-tile').forEach(tile => {
+  tile.onclick = () => {
+    const filter = tile.dataset.jump;
+    const chip = document.querySelector(`.chip[data-filter="${filter}"]`);
+    if (chip) {
+      chip.click();
+      document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+});
 
 // ── 인증 ───────────────────────────────────────────────────────────────────
 function renderAuth() {
@@ -752,6 +881,7 @@ async function generateStory(btn, category) {
       model: data.model,
     });
     loadStoryList();
+    loadStats();
   } catch (e) {
     setStatus('gen-status', '실패: ' + e.message, 'err');
     toast('이야기 생성 실패', 'error');
@@ -879,6 +1009,7 @@ async function recheckCurrent() {
     currentStory = s;
     redrawCitations(s.citations || [], s.deleted_count || 0, s.blocked_count || 0);
     loadStoryList();
+    loadStats();
   } catch (e) {
     toast('재검사 실패: ' + e.message, 'error');
   } finally {
@@ -1038,6 +1169,7 @@ async function castVote(storyId) {
 
     await refreshVoteStatus(storyId);
     loadStoryList();
+    loadStats();
   } catch (e) {
     setStatus('vote-status', '실패: ' + e.message, 'err');
     toast('투표 실패: ' + e.message, 'error');
@@ -1062,6 +1194,7 @@ function pollForArchive(storyId, attempt = 0) {
         document.getElementById('vote-section').classList.add('hidden');
         toast('🎉 Arweave 영구 박제 완료!', 'archive');
         loadStoryList();
+        loadStats();
       } else {
         pollForArchive(storyId, attempt + 1);
       }
