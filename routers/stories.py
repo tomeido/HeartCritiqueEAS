@@ -81,14 +81,14 @@ async def create_story(category: str | None = None):
 
 
 @router.get("/stories")
-async def list_stories(limit: int = 20):
+async def list_stories(limit: int = 50):
     db = get_db()
     resp = (
         db.table("stories")
         .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
                 "created_at,citations,gap_score,community_count,news_count")
         .order("created_at", desc=True)
-        .limit(min(limit, 50))
+        .limit(min(limit, 200))
         .execute()
     )
     stories = resp.data or []

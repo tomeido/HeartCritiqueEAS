@@ -1509,7 +1509,7 @@ async function runVerification(txId, arweaveUrl) {
 // ── 목록 ───────────────────────────────────────────────────────────────────
 async function loadStoryList() {
   try {
-    const resp = await fetch('/api/stories?limit=20');
+    const resp = await fetch('/api/stories?limit=100');
     allStories = await resp.json();
     renderStoryList();
   } catch (_) {}
