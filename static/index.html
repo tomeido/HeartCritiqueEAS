@@ -320,6 +320,36 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: linear-gradient(90deg, var(--ok), #22c55e);
   animation: pulse 1.5s ease-in-out infinite;
 }
+
+/* 임계값 감축 사유 배너 */
+.urgency-banner {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  display: flex; align-items: center; gap: 6px;
+}
+.urgency-banner.urgency-high {
+  background: var(--critique-bg);
+  color: var(--critique-fg);
+  border: 1px solid var(--archive-border, #fca5a5);
+}
+.urgency-banner.urgency-medium {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
+}
+@media (prefers-color-scheme: dark) {
+  .urgency-banner.urgency-high   { background: #450a0a; color: #fca5a5; border-color: #7f1d1d; }
+  .urgency-banner.urgency-medium { background: #451a03; color: #fcd34d; border-color: #92400e; }
+}
+.urgency-banner .uo {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  margin-left: auto;
+  opacity: .8;
+}
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: .7; }
@@ -576,6 +606,8 @@ a { color: inherit; }
           <span class="vote-label">공론화 투표</span>
           <span class="vote-num"><strong id="vote-num">0</strong> / <span id="vote-threshold">3</span> 표</span>
         </div>
+        <!-- 임계값 감축 사유 -->
+        <div class="urgency-banner hidden" id="urgency-banner"></div>
         <div class="vote-bar" id="vote-bar">
           <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
         </div>
@@ -945,6 +977,17 @@ function renderVoteArea(storyId, data) {
   document.getElementById('vote-bar-fill').style.width = pct + '%';
   document.getElementById('vote-bar').classList.toggle('complete', data.vote_count >= data.threshold);
 
+  // 긴급도 배너 (임계값이 기본보다 낮을 때)
+  const banner = document.getElementById('urgency-banner');
+  if (data.urgency && data.urgency !== 'normal' && data.urgency_reason) {
+    banner.className = `urgency-banner urgency-${data.urgency}`;
+    banner.innerHTML = `<span>${escHtml(data.urgency_reason)}</span>` +
+      `<span class="uo">임계값 ${data.default_threshold || 3}→${data.threshold}표</span>`;
+    banner.classList.remove('hidden');
+  } else {
+    banner.classList.add('hidden');
+  }
+
   if (currentStory?.arweave_tx_id) {
     document.getElementById('vote-section').classList.add('hidden');
     return;
@@ -1064,7 +1107,7 @@ function renderStoryList() {
     return;
   }
 
-  const threshold = cfg?.vote_threshold || 3;
+  const defaultTh = cfg?.vote_threshold || 3;
   el.innerHTML = '';
   stories.forEach(s => {
     const div = document.createElement('div');
@@ -1072,7 +1115,9 @@ function renderStoryList() {
     const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
     const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
     const isArchived = !!s.arweave_tx_id;
+    const threshold = s.effective_threshold || defaultTh;
     const pct = Math.min(100, (s.vote_count / threshold) * 100);
+    const urgent = s.urgency === 'high';
 
     const deletedLine = (s.deleted_count || 0) > 0
       ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${s.deleted_count}개 삭제됨</div>`
@@ -1080,6 +1125,9 @@ function renderStoryList() {
     const gapLine = ['high', 'extreme'].includes(s.gap_score)
       ? `<div style="color:${s.gap_score === 'extreme' ? 'var(--err)' : '#ea580c'};font-weight:600;font-size:11px">${s.gap_score === 'extreme' ? '🚨 언론 보도 없음' : '🔍 보도 격차'}</div>`
       : '';
+    const thresholdLabel = urgent
+      ? `<span style="color:var(--err);font-weight:700">${s.vote_count}/${threshold}표 ⚡</span>`
+      : `${s.vote_count}/${threshold}표`;
     div.innerHTML = `
       <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
       <div class="list-body">${escHtml((s.body || '').slice(0, 140))}</div>
@@ -1088,7 +1136,7 @@ function renderStoryList() {
         <div>
           ${isArchived
             ? `<span style="color:var(--ok);font-weight:600">🗄 박제됨</span>`
-            : `${s.vote_count}/${threshold}표
+            : `${thresholdLabel}
                <span class="mini-bar"><span class="mini-bar-fill" style="width:${pct}%"></span></span>`}
         </div>
         ${gapLine}

@@ -124,12 +124,21 @@ def register_citations(story_id: str, citations: list) -> None:
         print(f"[tracker] register failed for {story_id}: {e}")
 
 
+async def _trigger_auto_archive_if_needed(story_id: str) -> None:
+    """삭제·차단 감지 시 effective threshold 만큼 표가 모였는지 확인하고 박제."""
+    try:
+        from services.threshold import maybe_archive_now
+        await maybe_archive_now(story_id)
+    except Exception as e:
+        print(f"[tracker] auto-archive check failed for {story_id}: {e}")
+
+
 async def recheck_one_story(story_id: str) -> int:
     """특정 스토리의 모든 citation 즉시 재검사. 검사한 개수 반환."""
     db = get_db()
     resp = (
         db.table("citation_checks")
-        .select("id,url,check_count")
+        .select("id,url,check_count,status")
         .eq("story_id", story_id)
         .execute()
     )
@@ -137,9 +146,13 @@ async def recheck_one_story(story_id: str) -> int:
     if not rows:
         return 0
 
+    newly_deleted = False
     async with httpx.AsyncClient() as client:
         for row in rows:
             res = await check_url(row["url"], client)
+            prev_status = row.get("status")
+            if res["status"] in ("deleted", "blocked") and prev_status not in ("deleted", "blocked"):
+                newly_deleted = True
             try:
                 db.table("citation_checks").update({
                     "status": res["status"],
@@ -150,6 +163,11 @@ async def recheck_one_story(story_id: str) -> int:
                 }).eq("id", row["id"]).execute()
             except Exception as e:
                 print(f"[tracker] update fail {row['id']}: {e}")
+
+    # 새로 사라진 글이 있으면 자동 박제 검사
+    if newly_deleted:
+        await _trigger_auto_archive_if_needed(story_id)
+
     return len(rows)
 
 
@@ -159,7 +177,7 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
     db = get_db()
     resp = (
         db.table("citation_checks")
-        .select("id,url,check_count,status")
+        .select("id,story_id,url,check_count,status")
         .neq("status", "deleted")
         .order("last_checked", desc=False, nullsfirst=True)
         .limit(batch_size)
@@ -169,9 +187,15 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
     if not rows:
         return 0
 
+    newly_changed_stories: set[str] = set()
     async with httpx.AsyncClient() as client:
         for row in rows:
             res = await check_url(row["url"], client)
+            prev_status = row.get("status")
+            if (res["status"] in ("deleted", "blocked")
+                    and prev_status not in ("deleted", "blocked")):
+                # 이 row 의 story_id 도 가져와야 - select 에 추가 필요
+                pass  # 아래에서 처리
             try:
                 db.table("citation_checks").update({
                     "status": res["status"],
@@ -180,8 +204,18 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
                     "last_checked": datetime.now(timezone.utc).isoformat(),
                     "check_count": (row.get("check_count") or 0) + 1,
                 }).eq("id", row["id"]).execute()
+                # row 에 story_id 있어야 자동 박제 검사 가능
+                if (res["status"] in ("deleted", "blocked")
+                        and prev_status not in ("deleted", "blocked")
+                        and row.get("story_id")):
+                    newly_changed_stories.add(row["story_id"])
             except Exception as e:
                 print(f"[tracker] update fail {row['id']}: {e}")
+
+    # 새로 사라진/차단된 글이 발견된 스토리들에 대해 자동 박제 검사
+    for sid in newly_changed_stories:
+        await _trigger_auto_archive_if_needed(sid)
+
     return len(rows)
 
 

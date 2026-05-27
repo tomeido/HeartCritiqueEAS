@@ -1,13 +1,16 @@
-import os
+import asyncio
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 
 from services.archive import archive_story
 from services.db import get_db
+from services.threshold import (
+    DEFAULT_THRESHOLD,
+    compute_effective_threshold,
+    gather_story_signals,
+)
 
 router = APIRouter(prefix="/api")
-
-VOTE_THRESHOLD = int(os.environ.get("VOTE_THRESHOLD", "10"))
 
 
 def _verify_token(authorization: str | None) -> str:
@@ -33,23 +36,31 @@ async def vote(
     user_id = _verify_token(authorization)
     db = get_db()
 
-    # 중복 투표 방지 (unique constraint가 잡음)
+    # 중복 투표 방지 (unique constraint)
     try:
         db.table("votes").insert({"story_id": story_id, "user_id": user_id}).execute()
     except Exception:
         raise HTTPException(409, "이미 투표하셨습니다")
 
-    # 투표수 갱신 (atomic increment via RPC)
-    count_resp = (
-        db.table("votes").select("id", count="exact").eq("story_id", story_id).execute()
-    )
-    vote_count = count_resp.count or 0
+    # 신호 + 투표수 + effective threshold 한 번에
+    sig = await asyncio.to_thread(gather_story_signals, story_id)
+    vote_count = sig["vote_count"]
+    threshold = sig["threshold"]
+
+    # stories.vote_count 캐시 갱신
     db.table("stories").update({"vote_count": vote_count}).eq("id", story_id).execute()
 
-    if vote_count >= VOTE_THRESHOLD:
+    if vote_count >= threshold and not sig.get("archived"):
         background_tasks.add_task(archive_story, story_id)
 
-    return {"voted": True, "vote_count": vote_count, "threshold": VOTE_THRESHOLD}
+    return {
+        "voted": True,
+        "vote_count": vote_count,
+        "threshold": threshold,
+        "default_threshold": DEFAULT_THRESHOLD,
+        "urgency": sig["urgency"],
+        "urgency_reason": sig.get("reason"),
+    }
 
 
 @router.get("/vote/{story_id}/status")
@@ -58,10 +69,7 @@ async def vote_status(
     authorization: str | None = Header(default=None),
 ):
     db = get_db()
-    count_resp = (
-        db.table("votes").select("id", count="exact").eq("story_id", story_id).execute()
-    )
-    vote_count = count_resp.count or 0
+    sig = await asyncio.to_thread(gather_story_signals, story_id)
 
     already_voted = False
     if authorization and authorization.startswith("Bearer "):
@@ -80,7 +88,12 @@ async def vote_status(
             pass
 
     return {
-        "vote_count": vote_count,
-        "threshold": VOTE_THRESHOLD,
+        "vote_count": sig.get("vote_count", 0),
+        "threshold": sig.get("threshold", DEFAULT_THRESHOLD),
+        "default_threshold": DEFAULT_THRESHOLD,
+        "urgency": sig.get("urgency", "normal"),
+        "urgency_reason": sig.get("reason"),
+        "deleted_count": sig.get("deleted_count", 0),
+        "blocked_count": sig.get("blocked_count", 0),
         "already_voted": already_voted,
     }

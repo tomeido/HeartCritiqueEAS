@@ -4,6 +4,10 @@ from fastapi import APIRouter, HTTPException
 
 from services.db import get_db
 from services.llm import generate
+from services.threshold import (
+    DEFAULT_THRESHOLD,
+    compute_effective_threshold,
+)
 from services.tracker import (
     get_status_map,
     recheck_one_story,
@@ -99,6 +103,11 @@ async def list_stories(limit: int = 20):
         s["blocked_count"] = blocked
         s["citation_count"] = len(s.get("citations") or [])
         s.pop("citations", None)  # 무거우니 목록에서는 제거
+        # 동적 임계값
+        eff = compute_effective_threshold(s.get("gap_score"), deleted, blocked)
+        s["effective_threshold"] = eff["threshold"]
+        s["urgency"] = eff["urgency"]
+        s["default_threshold"] = DEFAULT_THRESHOLD
     return stories
 
 
@@ -118,7 +127,18 @@ async def get_story(story_id: str):
     if not by_url and story.get("citations"):
         await asyncio.to_thread(register_citations, story_id, story["citations"])
 
-    return _augment_with_status(story, by_url)
+    out = _augment_with_status(story, by_url)
+    # 동적 임계값 머지
+    eff = compute_effective_threshold(
+        out.get("gap_score"),
+        out.get("deleted_count", 0),
+        out.get("blocked_count", 0),
+    )
+    out["effective_threshold"] = eff["threshold"]
+    out["urgency"] = eff["urgency"]
+    out["urgency_reason"] = eff["reason"]
+    out["default_threshold"] = DEFAULT_THRESHOLD
+    return out
 
 
 @router.post("/recheck/{story_id}")
