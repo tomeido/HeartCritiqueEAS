@@ -105,7 +105,13 @@ async def hunt_once() -> dict:
     except Exception as e:
         msg = f"LLM 생성 실패: {e}"
         print(f"[hunter] {msg}")
-        result = {"error": msg, "at": datetime.now(timezone.utc).isoformat()}
+        # 429 (rate limit) 면 long backoff 표시
+        is_rate_limit = "429" in str(e) or "rate_limit" in str(e).lower()
+        result = {
+            "error": msg,
+            "rate_limited": is_rate_limit,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
         _last_result = result
         return result
 
@@ -166,16 +172,22 @@ async def background_loop() -> None:
         return
 
     while True:
+        rate_limited = False
         try:
-            await hunt_once()
+            result = await hunt_once()
+            rate_limited = bool(result and result.get("rate_limited"))
         except asyncio.CancelledError:
             return
         except Exception as e:
             print(f"[hunter] loop error: {e}")
 
-        # 다음 사냥 예약 (±10% 지터)
-        jitter = random.uniform(0.9, 1.1)
-        next_delay = max(60, int(HUNTER_INTERVAL_SEC * jitter))
+        # rate limit 걸렸으면 long backoff (1시간), 평소엔 interval +/- 10% 지터
+        if rate_limited:
+            next_delay = 3600  # 1시간
+            print(f"[hunter] rate limit → 1시간 대기")
+        else:
+            jitter = random.uniform(0.9, 1.1)
+            next_delay = max(60, int(HUNTER_INTERVAL_SEC * jitter))
         _next_hunt_at = datetime.now(timezone.utc) + timedelta(seconds=next_delay)
 
         try:
