@@ -1,4 +1,8 @@
 """
+⚠️ LEGACY / DEPRECATED — 이 러너는 레거시 api/index.py 를 구동하므로 프로덕션
+   (main.py)과 다른 코드 경로(x402 게이팅, 옛 모델/프롬프트)를 탄다. 로컬 개발은
+   프로덕션과 동일하게 `uvicorn main:app --reload --port 8000` 을 쓸 것.
+
 Local dev runner. Reuses the same handler that runs on Vercel
 (api/index.py) so behavior is identical between local and prod.
 

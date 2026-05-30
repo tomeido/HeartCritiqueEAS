@@ -1,4 +1,9 @@
 """
+⚠️ LEGACY / DEPRECATED — 런타임에서 사용되지 않음 (Docker 이미지에도 미포함).
+   프로덕션 진입점은 main.py + routers/ + services/ 다. 이 파일의 프롬프트·도메인
+   목록·정규식은 services/llm.py 와 갈라져 있으니 신규 변경은 services/ 에만 할 것.
+   참고/이관용으로만 보존.
+
 Heart & Critique - A2A serverless handler with x402-gated sources
 
 매 요청마다 동전을 던져:

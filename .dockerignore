@@ -1,0 +1,28 @@
+# 빌드 컨텍스트 축소 (이미지에 불필요/민감 파일 제외)
+.git
+.gitignore
+.env
+.env.*
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+node_modules/
+npm-debug.log*
+*.log
+.cache/
+.vscode/
+.idea/
+.DS_Store
+
+# 레거시/문서/테스트 — 런타임에 불필요
+api/
+agent.py
+tests/
+migrations/
+*.md
+supabase_schema.sql
+supabase_reset.sql
+vercel.json
+.claude/

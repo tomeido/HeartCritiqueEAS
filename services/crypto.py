@@ -10,6 +10,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 _cached_key: ec.EllipticCurvePrivateKey | None = None
 
 
+def has_configured_key() -> bool:
+    """AGENT_PRIVATE_KEY 가 설정되어 있는지. False 면 ephemeral 키라 재시작마다 바뀌어
+    과거 박제물 검증이 깨지므로, 박제 자체를 건너뛰어야 한다."""
+    return bool(os.environ.get("AGENT_PRIVATE_KEY", "").strip())
+
+
 def _load_private_key() -> ec.EllipticCurvePrivateKey:
     global _cached_key
     if _cached_key is not None:

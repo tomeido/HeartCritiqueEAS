@@ -84,8 +84,8 @@ Docker
 | `GROQ_API_KEY` | Groq 모드 | |
 | `TAVILY_API_KEY` | Groq 모드 | |
 | `GEMINI_API_KEY` | Gemini 모드 | |
-| `IRYS_NETWORK` | | `devnet`(기본/테스트) 또는 `mainnet` |
-| `VOTE_THRESHOLD` | | 박제 트리거 투표수 (기본: 10) |
+| `IRYS_NETWORK` | | `devnet`(기본/테스트, **약 60일 후 삭제 — 영구 아님**) 또는 `mainnet`(진짜 영구 박제, 소액 ETH 필요). devnet이면 UI가 자동으로 '임시' 라벨 + devnet.irys.xyz 링크 표시 |
+| `VOTE_THRESHOLD` | | 박제 트리거 투표수 (기본: 3, `services/threshold.py`의 `DEFAULT_THRESHOLD`가 단일 출처) |
 | `LLM_PROVIDER` | | `groq`(기본) 또는 `gemini` |
 
 ## Key Design Decisions

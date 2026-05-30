@@ -209,10 +209,13 @@ MD_HEADER_RE = re.compile(r'(?m)^#{1,6}[ \t]+')
 MD_HR_RE     = re.compile(r'(?m)^[ \t]*(?:-{3,}|={3,}|\*{3,})[ \t]*$')
 
 
-CJK_CHINESE_RE = re.compile(r'[一-鿿]+')  # 한자 (Chinese ideographs)
+# 한자: 연속 2자 이상만 제거(모델이 가끔 섞는 중국어 단어/구).
+# 단일 한자(예: 성씨 '李', 약칭 '中')는 정상 한국어 표현일 수 있어 보존한다.
+CJK_CHINESE_RE = re.compile(r'[一-鿿]{2,}')
 HIRAGANA_KATAKANA_RE = re.compile(r'[぀-ゟ゠-ヿ]+')  # 일본 가나
-# 'SOUTH Korea' 'CEO' 같이 한글 사이에 갑자기 튀어나오는 ALL-CAPS 영단어 잔재
-CAPS_NOISE_RE = re.compile(r'\b[A-Z]{3,}(?:\s+[A-Za-z]+)?\b')
+# 'SOUTH KOREA' 처럼 ALL-CAPS 영단어가 2개 이상 연속될 때만 제거.
+# 단일 약어(KTX·CCTV·GDP·CEO 등)는 정상 본문이므로 보존한다.
+CAPS_NOISE_RE = re.compile(r'\b[A-Z]{2,}(?:\s+[A-Z]{2,})+\b')
 
 
 def sanitize_text(text: str) -> str:
@@ -536,7 +539,16 @@ def generate_via_groq(category: str) -> tuple:
 
     text, used_indices = extract_used_indices(raw_text, len(results))
     text = sanitize_text(text)
-    chosen = [results[i - 1] for i in used_indices] if used_indices else results
+    if used_indices:
+        chosen = [results[i - 1] for i in used_indices]
+    elif results:
+        # LLM 이 USED_SOURCES 를 빠뜨린 경우: 검색결과 전부를 무차별 첨부하면 본문과
+        # 무관한 출처까지 박제·추적되어 gap/threshold 신호를 왜곡한다. 보수적으로
+        # 첫 결과 1개만 첨부하고 로그를 남긴다.
+        chosen = results[:1]
+        print(f"[llm] USED_SOURCES 누락 → 첫 출처만 첨부 (query={query!r})")
+    else:
+        chosen = []
     citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
 
     # 격차 탐지: 선정된 글의 content/title 로 언론 보도 여부 확인
@@ -567,6 +579,23 @@ def generate(category: str | None = None) -> dict:
         text, citations, queries = parse_gemini_response(raw)
         text = sanitize_text(text)
         model_name = GEMINI_MODEL
+        # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
+        # measure_news_coverage 가 graceful 하게 None 반환 → gap 없이 진행.
+        if citations:
+            chosen = [
+                {"title": c.get("title"), "content": "", "url": c.get("uri")}
+                for c in citations
+            ]
+            coverage = measure_news_coverage(chosen)
+            if coverage is not None:
+                community_count = len(citations)
+                news_count = coverage["news_count"]
+                gap_data = {
+                    "community_count": community_count,
+                    "news_count": news_count,
+                    "gap_score": calculate_gap_score(community_count, news_count),
+                    "gap_query": coverage["query_used"],
+                }
     else:
         raise RuntimeError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")
 

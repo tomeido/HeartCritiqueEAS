@@ -192,10 +192,6 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
         for row in rows:
             res = await check_url(row["url"], client)
             prev_status = row.get("status")
-            if (res["status"] in ("deleted", "blocked")
-                    and prev_status not in ("deleted", "blocked")):
-                # 이 row 의 story_id 도 가져와야 - select 에 추가 필요
-                pass  # 아래에서 처리
             try:
                 db.table("citation_checks").update({
                     "status": res["status"],
@@ -204,7 +200,7 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
                     "last_checked": datetime.now(timezone.utc).isoformat(),
                     "check_count": (row.get("check_count") or 0) + 1,
                 }).eq("id", row["id"]).execute()
-                # row 에 story_id 있어야 자동 박제 검사 가능
+                # 새로 삭제·차단된 글은 자동 박제 검사 대상
                 if (res["status"] in ("deleted", "blocked")
                         and prev_status not in ("deleted", "blocked")
                         and row.get("story_id")):
@@ -251,6 +247,19 @@ async def background_loop() -> None:
             return
         except Exception as e:
             print(f"[tracker] loop error: {e}")
+
+        # 박제 실패/누락 글 재시도 (sweeper): 임계값 넘겼지만 미박제인 글을
+        # 지수 백오프로 자동 복구. 일시 장애로 박제가 영영 누락되는 것 방지.
+        try:
+            from services.archive import reconcile_pending_archives
+            r = await reconcile_pending_archives()
+            if r:
+                print(f"[tracker] reconciled {r} pending archive(s)")
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            print(f"[tracker] reconcile error: {e}")
+
         try:
             await asyncio.sleep(CHECK_INTERVAL_SEC)
         except asyncio.CancelledError:

@@ -3,7 +3,7 @@ import asyncio
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
 
 from services.archive import archive_story
-from services.db import get_db
+from services.db import get_anon_db, get_db
 from services.threshold import (
     DEFAULT_THRESHOLD,
     compute_effective_threshold,
@@ -17,7 +17,8 @@ def _verify_token(authorization: str | None) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(401, "로그인이 필요합니다")
     token = authorization.removeprefix("Bearer ")
-    db = get_db()
+    # 토큰 검증은 최소권한 anon 클라이언트로 (service-role 싱글톤의 인증 컨텍스트 오염 방지)
+    db = get_anon_db()
     try:
         user_resp = db.auth.get_user(token)
     except Exception:

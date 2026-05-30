@@ -31,6 +31,7 @@ load_dotenv()
 
 from routers import feed, stats, stories, votes  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
+from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
 from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
 
@@ -73,7 +74,7 @@ app.include_router(feed.router)
 
 @app.get("/api/config")
 async def get_config():
-    from services.crypto import get_public_key_hex
+    from services.crypto import get_public_key_hex, has_configured_key
     try:
         pubkey = get_public_key_hex()
     except Exception:
@@ -81,9 +82,11 @@ async def get_config():
     return {
         "supabase_url": os.environ.get("SUPABASE_URL", ""),
         "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
-        "vote_threshold": int(os.environ.get("VOTE_THRESHOLD", "10")),
+        "vote_threshold": DEFAULT_THRESHOLD,
         "llm_provider": LLM_PROVIDER,
         "agent_public_key": pubkey,
+        # 고정 서명키 없음 = 재시작마다 키가 바뀜 → 박제물 검증 신뢰 불가
+        "ephemeral_signing_key": not has_configured_key(),
         "irys_network": os.environ.get("IRYS_NETWORK", "devnet"),
     }
 
@@ -110,7 +113,7 @@ def _build_agent_card(public_url: str) -> dict:
         "name": "Heart & Critique",
         "description": (
             f"50% 확률로 따뜻한 선행 또는 대기업 비위 사건을 전달하는 A2A 에이전트. "
-            f"{provider_desc}. 이야기 본문 무료, 인간 투표({os.environ.get('VOTE_THRESHOLD','10')}표)로 Arweave 영구 박제."
+            f"{provider_desc}. 이야기 본문 무료, 인간 투표({DEFAULT_THRESHOLD}표)로 Arweave 박제."
         ),
         "version": "6.0.0",
         "protocolVersion": "0.2.5",
@@ -154,6 +157,17 @@ async def jsonrpc_handler(request: Request):
         return {"jsonrpc": "2.0", "id": rpc_id, "result": _build_agent_card(_public_url(request))}
 
     if method in ("message/send", "tasks/send"):
+        # 레이트리밋: A2A 경로도 동일하게 보호 (무인증 LLM 호출 비용 폭탄 방어)
+        from services.ratelimit import check_story_ratelimit
+        allowed, retry_after, reason = check_story_ratelimit(request)
+        if not allowed:
+            return JSONResponse(
+                {"jsonrpc": "2.0", "id": rpc_id,
+                 "error": {"code": -32029,
+                           "message": f"Rate limited: {reason}. retry after {retry_after}s"}},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
         try:
             result = await asyncio.to_thread(generate)
         except Exception as e:

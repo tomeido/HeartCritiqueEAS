@@ -1,9 +1,13 @@
 import asyncio
+import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 
+from services.archive import PENDING_MARKER
 from services.db import get_db
+from services.hunter import count_recent_pending
 from services.llm import generate
+from services.ratelimit import check_story_ratelimit
 from services.threshold import (
     DEFAULT_THRESHOLD,
     compute_effective_threshold,
@@ -15,6 +19,16 @@ from services.tracker import (
 )
 
 router = APIRouter(prefix="/api")
+
+# 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
+STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
+
+
+def _mask_pending(story: dict) -> None:
+    """업로드 진행 중 임시 마커('__pending__')가 UI에 '박제됨'으로 새어나가지 않게 정리."""
+    if story.get("arweave_tx_id") == PENDING_MARKER:
+        story["arweave_tx_id"] = None
+        story["arweave_url"] = None
 
 
 def _augment_with_status(story: dict, status_by_url: dict) -> dict:
@@ -41,9 +55,26 @@ def _augment_with_status(story: dict, status_by_url: dict) -> dict:
 
 
 @router.post("/story")
-async def create_story(category: str | None = None):
+async def create_story(request: Request, category: str | None = None):
     if category and category not in ("kindness", "critique"):
         raise HTTPException(400, "category는 kindness 또는 critique만 허용")
+
+    # 레이트리밋: 무인증 생성 엔드포인트의 비용 폭탄·DoS 방어
+    allowed, retry_after, reason = check_story_ratelimit(request)
+    if not allowed:
+        raise HTTPException(
+            429, f"요청이 너무 많습니다. {reason}. {retry_after}초 후 다시 시도하세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    # 미박제 글 전역 상한: 익명 남용으로 인한 무한 적재 차단
+    pending = await asyncio.to_thread(count_recent_pending)
+    if pending >= STORY_MAX_PENDING:
+        raise HTTPException(
+            503, f"미박제 글이 한도({STORY_MAX_PENDING})에 도달했습니다. "
+                 f"기존 글에 투표해 박제가 진행된 뒤 다시 시도하세요.",
+        )
+
     try:
         result = await asyncio.to_thread(generate, category)
     except Exception as e:
@@ -95,6 +126,7 @@ async def list_stories(limit: int = 50):
     ids = [s["id"] for s in stories]
     status_map = await asyncio.to_thread(get_status_map, ids)
     for s in stories:
+        _mask_pending(s)
         # 목록에서는 본문 외 citations 자체는 빼고 카운트만 노출
         urls_status = status_map.get(s["id"], {})
         deleted = sum(1 for x in urls_status.values() if x["status"] == "deleted")
@@ -118,6 +150,7 @@ async def get_story(story_id: str):
     if not resp.data:
         raise HTTPException(404, "스토리를 찾을 수 없습니다")
     story = resp.data[0]
+    _mask_pending(story)
 
     # 추적 정보 머지
     status_map = await asyncio.to_thread(get_status_map, [story_id])

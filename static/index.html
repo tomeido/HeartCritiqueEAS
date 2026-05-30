@@ -540,6 +540,12 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .archive-text .ts { font-size: 11px; opacity: .55; margin-top: 4px; }
+.archive-warn {
+  margin-top: 7px; font-size: 11px; font-weight: 700; line-height: 1.4;
+  color: #b45309; background: #fef3c7; border: 1px solid #fcd34d;
+  border-radius: 7px; padding: 5px 8px;
+}
+.archive-warn.hidden { display: none; }
 
 /* ── 무결성 검증 패널 ─────────────────────────────────────────────────────── */
 .verify-card {
@@ -950,9 +956,10 @@ a { color: inherit; }
       <a class="archive-hero hidden" id="archive-hero" target="_blank" rel="noopener">
         <div class="archive-icon">🗄</div>
         <div class="archive-text">
-          <div class="lbl">Arweave 영구 박제됨</div>
+          <div class="lbl" id="archive-lbl">Arweave 영구 박제됨</div>
           <div class="tx" id="archive-tx"></div>
           <div class="ts" id="archive-ts"></div>
+          <div class="archive-warn hidden" id="archive-warn"></div>
         </div>
       </a>
 
@@ -1037,6 +1044,13 @@ function markAsSeen() {
   localStorage.setItem(LAST_SEEN_KEY, new Date().toISOString());
   updateBadges();
 }
+// ISO 문자열 사전식 비교는 타임존 표기('Z' vs '+00:00') 차이로 어긋날 수 있어
+// 실제 시각(ms)으로 비교한다.
+function newerThan(iso, ref) {
+  if (!iso || !ref) return false;
+  const a = Date.parse(iso), b = Date.parse(ref);
+  return Number.isFinite(a) && Number.isFinite(b) && a > b;
+}
 
 // ── 초기화 ─────────────────────────────────────────────────────────────────
 async function init() {
@@ -1056,6 +1070,11 @@ async function init() {
       session = data.session;
     }
     document.getElementById('vote-threshold').textContent = cfg?.vote_threshold || 3;
+    // devnet(테스트넷)이면 '영구' 약속을 톤다운해 실제 영속성과 카피를 일치시킨다.
+    if (!isPermanent()) {
+      const tl = document.querySelector('.tagline');
+      if (tl) tl.textContent = 'AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 박제 (현재 devnet 테스트넷 · 임시 보관)';
+    }
   } catch (e) {
     console.error('[init 오류]', e);
     toast('초기화 실패: ' + e.message, 'error');
@@ -1350,7 +1369,7 @@ function showStory(s) {
 
 function makeCitation(c) {
   const a = document.createElement('a');
-  a.href = c.uri;
+  a.href = safeUrl(c.uri);
   a.target = '_blank';
   a.rel = 'noopener noreferrer';
   a.className = 'cit-item';
@@ -1599,7 +1618,12 @@ function pollForArchive(storyId, attempt = 0) {
         currentStory = { ...currentStory, ...s };
         showArchiveHero(s.arweave_url, s.arweave_tx_id, s.archived_at);
         document.getElementById('vote-section').classList.add('hidden');
-        toast('🎉 Arweave 영구 박제 완료!', 'archive');
+        toast(
+          isPermanent()
+            ? '🎉 Arweave 영구 박제 완료!'
+            : '✅ 테스트 박제 완료 (devnet · 약 60일 후 삭제, 영구 아님)',
+          'archive'
+        );
         loadStoryList();
         loadStats();
       } else {
@@ -1611,12 +1635,28 @@ function pollForArchive(storyId, attempt = 0) {
   }, 8000);
 }
 
+// devnet(테스트넷)은 약 60일 후 삭제 → 영구 아님. cfg.irys_network 로 판별.
+function isPermanent() {
+  return (cfg?.irys_network || 'devnet') === 'mainnet';
+}
+
 function showArchiveHero(url, txId, archivedAt) {
   const hero = document.getElementById('archive-hero');
+  const permanent = isPermanent();
   hero.href = url;
+  document.getElementById('archive-lbl').textContent =
+    permanent ? 'Arweave 영구 박제됨' : 'Arweave 박제됨 (devnet · 임시)';
   document.getElementById('archive-tx').textContent = txId;
   document.getElementById('archive-ts').textContent =
-    archivedAt ? formatRelative(archivedAt) + ' 박제' : '영구 보관';
+    archivedAt ? formatRelative(archivedAt) + ' 박제' : (permanent ? '영구 보관' : '임시 보관');
+  const warn = document.getElementById('archive-warn');
+  if (permanent) {
+    warn.classList.add('hidden');
+    warn.textContent = '';
+  } else {
+    warn.textContent = '⚠️ 테스트넷(devnet) 박제 — 약 60일 후 삭제되며 영구 보관이 아닙니다. 진짜 영구 박제는 mainnet 설정이 필요합니다.';
+    warn.classList.remove('hidden');
+  }
   hero.classList.remove('hidden');
   showVerifyCard(txId, url);
 }
@@ -1632,7 +1672,12 @@ function showVerifyCard(txId, arweaveUrl) {
 
   const rows = document.getElementById('verify-rows');
   const projectKey = (cfg?.agent_public_key || '').toLowerCase();
+  const net = cfg?.irys_network || 'devnet';
+  const netLabel = isPermanent()
+    ? 'mainnet · 영구'
+    : `${escHtml(net)} · 테스트넷(약 60일 후 삭제, 영구 아님)`;
   rows.innerHTML = `
+    <div class="verify-row"><span class="vlabel">네트워크</span><span class="vval">${netLabel}</span></div>
     <div class="verify-row"><span class="vlabel">알고리즘</span><span class="vval">ECDSA-secp256k1-SHA256</span></div>
     <div class="verify-row"><span class="vlabel">Arweave Tx</span><span class="vval">${escHtml(txId)}</span></div>
     <div class="verify-row"><span class="vlabel">원본 URL</span><span class="vval"><a href="${escHtml(arweaveUrl)}" target="_blank" rel="noopener">${escHtml(arweaveUrl)}</a></span></div>
@@ -1834,7 +1879,7 @@ function updateBadges() {
     cnt.classList.remove('shown');
     bell.classList.remove('has-new');
   } else {
-    const newOnes = allStories.filter(s => (s.created_at || '') > lastSeen);
+    const newOnes = allStories.filter(s => newerThan(s.created_at, lastSeen));
     const count = newOnes.length;
     if (count > 0) {
       cnt.textContent = count > 99 ? '99+' : count;
@@ -1848,11 +1893,11 @@ function updateBadges() {
 
   // 필터 칩별 NEW 카운트
   const chipFilters = {
-    kindness: s => s.category === 'kindness' && (s.created_at || '') > lastSeen,
-    critique: s => s.category === 'critique' && (s.created_at || '') > lastSeen,
-    archived: s => s.archived_at && s.archived_at > lastSeen,
-    gap:      s => ['high','extreme'].includes(s.gap_score) && (s.created_at || '') > lastSeen,
-    deleted:  s => (s.deleted_count || 0) > 0 && (s.created_at || '') > lastSeen,
+    kindness: s => s.category === 'kindness' && newerThan(s.created_at, lastSeen),
+    critique: s => s.category === 'critique' && newerThan(s.created_at, lastSeen),
+    archived: s => newerThan(s.archived_at, lastSeen),
+    gap:      s => ['high','extreme'].includes(s.gap_score) && newerThan(s.created_at, lastSeen),
+    deleted:  s => (s.deleted_count || 0) > 0 && newerThan(s.created_at, lastSeen),
   };
   for (const [f, predicate] of Object.entries(chipFilters)) {
     const chip = document.querySelector(`.chip[data-filter="${f}"]`);
@@ -1987,7 +2032,16 @@ function setStatus(id, msg, cls) {
   el.className = 'status' + (cls ? ' ' + cls : '');
 }
 function escHtml(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// 비신뢰 URL(출처 링크)을 href 에 넣기 전 스킴 검증. javascript:/data: 등 차단.
+function safeUrl(u) {
+  try {
+    const p = new URL(u, window.location.origin);
+    return (p.protocol === 'http:' || p.protocol === 'https:') ? p.href : '#';
+  } catch { return '#'; }
 }
 
 init();
