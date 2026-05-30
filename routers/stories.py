@@ -7,7 +7,7 @@ from services.archive import PENDING_MARKER
 from services.db import get_db
 from services.hunter import count_recent_pending
 from services.llm import generate
-from services.ratelimit import check_story_ratelimit
+from services.ratelimit import check_recheck_ratelimit, check_story_ratelimit
 from services.threshold import (
     DEFAULT_THRESHOLD,
     compute_effective_threshold,
@@ -114,10 +114,11 @@ async def create_story(request: Request, category: str | None = None):
 @router.get("/stories")
 async def list_stories(limit: int = 50):
     db = get_db()
+    # 목록은 citations(jsonb) 자체를 전송하지 않는다(무겁다). 카운트는 추적 레코드 수로.
     resp = (
         db.table("stories")
         .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
-                "created_at,citations,gap_score,community_count,news_count")
+                "created_at,gap_score,community_count,news_count")
         .order("created_at", desc=True)
         .limit(min(limit, 200))
         .execute()
@@ -127,14 +128,12 @@ async def list_stories(limit: int = 50):
     status_map = await asyncio.to_thread(get_status_map, ids)
     for s in stories:
         _mask_pending(s)
-        # 목록에서는 본문 외 citations 자체는 빼고 카운트만 노출
         urls_status = status_map.get(s["id"], {})
         deleted = sum(1 for x in urls_status.values() if x["status"] == "deleted")
         blocked = sum(1 for x in urls_status.values() if x["status"] == "blocked")
         s["deleted_count"] = deleted
         s["blocked_count"] = blocked
-        s["citation_count"] = len(s.get("citations") or [])
-        s.pop("citations", None)  # 무거우니 목록에서는 제거
+        s["citation_count"] = len(urls_status)
         # 동적 임계값
         eff = compute_effective_threshold(s.get("gap_score"), deleted, blocked)
         s["effective_threshold"] = eff["threshold"]
@@ -175,8 +174,14 @@ async def get_story(story_id: str):
 
 
 @router.post("/recheck/{story_id}")
-async def manual_recheck(story_id: str):
+async def manual_recheck(story_id: str, request: Request):
     """수동 재검사 트리거. 응답에 새 상태 포함."""
+    allowed, retry_after, reason = check_recheck_ratelimit(request)
+    if not allowed:
+        raise HTTPException(
+            429, f"{reason}. {retry_after}초 후 다시 시도하세요.",
+            headers={"Retry-After": str(retry_after)},
+        )
     n = await recheck_one_story(story_id)
     if n == 0:
         # 추적 레코드가 없으면 등록 후 한 번 검사

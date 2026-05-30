@@ -17,6 +17,9 @@ from typing import Optional
 
 from services.db import get_db
 
+import logging
+logger = logging.getLogger(__name__)
+
 # 정적 fallback 값 (DB 조회 실패 시 또는 동적 비활성화 시 사용)
 DEFAULT_THRESHOLD = int(os.environ.get("VOTE_THRESHOLD", "3"))
 
@@ -65,7 +68,7 @@ def get_dynamic_base_threshold() -> dict:
         scaled = MIN_BASE_THRESHOLD + (unique_voters // VOTERS_PER_VOTE)
         threshold = max(MIN_BASE_THRESHOLD, min(MAX_BASE_THRESHOLD, scaled))
     except Exception as e:
-        print(f"[threshold] dynamic calc failed: {e}")
+        logger.warning(f"[threshold] dynamic calc failed: {e}")
         threshold = DEFAULT_THRESHOLD
         unique_voters = 0
 

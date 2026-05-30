@@ -10,6 +10,9 @@ import re
 import urllib.error
 import urllib.request
 
+import logging
+logger = logging.getLogger(__name__)
+
 LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "groq").strip().lower()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -505,7 +508,7 @@ def measure_news_coverage(chosen_items: list) -> dict | None:
             if isinstance(r, dict) and isinstance(r.get("url"), str)
         )
     except Exception as e:
-        print(f"[gap] news search failed: {e}")
+        logger.warning(f"[gap] news search failed: {e}")
         return None
 
     return {"news_count": news_count, "query_used": query[:100]}
@@ -546,7 +549,7 @@ def generate_via_groq(category: str) -> tuple:
         # 무관한 출처까지 박제·추적되어 gap/threshold 신호를 왜곡한다. 보수적으로
         # 첫 결과 1개만 첨부하고 로그를 남긴다.
         chosen = results[:1]
-        print(f"[llm] USED_SOURCES 누락 → 첫 출처만 첨부 (query={query!r})")
+        logger.info(f"[llm] USED_SOURCES 누락 → 첫 출처만 첨부 (query={query!r})")
     else:
         chosen = []
     citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]

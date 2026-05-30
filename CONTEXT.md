@@ -11,7 +11,7 @@
 유저의 UX는 완벽한 Web2 스타일을 따르고, 백엔드에서 AI 에이전트가 자율적으로 온체인 트랜잭션과 가스비를 처리합니다.
 
 ```text
-[User] OAuth Social Login (Google/Discord) ➔ Vote 'Approve' (공론화 찬성)
+[User] OAuth Social Login (Google) ➔ Vote 'Approve' (공론화 찬성)
    │
    ▼
 [Backend/DB] Supabase 테이블에 투표수 누적 & 중복 체크

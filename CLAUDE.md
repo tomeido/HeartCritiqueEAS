@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Heart & Critique (EAS-free Web2.5 Edition)** — AI 사냥개가 실시간 뉴스를 검색해 따뜻한 선행 또는 대기업 비위 사건을 전달하고, 소셜 로그인한 인간의 투표로 Arweave에 영구 박제하는 Web2.5 타임캡슐 아카이브.
 
 - **LLM**: Groq(Llama+Tavily) 또는 Gemini(Google Search grounding)
-- **DB/Auth**: Supabase (OAuth: Google/Discord)
+- **DB/Auth**: Supabase (OAuth: Google) — Discord 로그인은 제거됨
 - **박제**: Irys(Node.js) → Arweave
 - **배포**: Docker 홈서버 (FastAPI + uvicorn)
 
@@ -70,7 +70,7 @@ Docker
 ## Supabase 설정
 
 1. `supabase_schema.sql` 을 Supabase SQL Editor에서 실행
-2. Authentication > Providers 에서 Google, Discord OAuth 활성화
+2. Authentication > Providers 에서 Google OAuth 활성화
 3. Authentication > URL Configuration 에서 `http://your-server:8000` 추가
 
 ## Environment Variables

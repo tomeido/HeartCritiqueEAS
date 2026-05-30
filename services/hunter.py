@@ -20,6 +20,9 @@ from services.db import get_db
 from services.llm import generate
 from services.tracker import register_citations
 
+import logging
+logger = logging.getLogger(__name__)
+
 HUNTER_ENABLED = os.environ.get("AUTO_HUNT_ENABLED", "true").lower() != "false"
 HUNTER_INTERVAL_SEC = int(os.environ.get("AUTO_HUNT_INTERVAL_SEC", "21600"))  # 6시간
 HUNTER_MAX_PENDING = int(os.environ.get("AUTO_HUNT_MAX_PENDING", "30"))
@@ -61,7 +64,7 @@ def count_recent_pending() -> int:
         )
         return resp.count or 0
     except Exception as e:
-        print(f"[hunter] pending count failed: {e}")
+        logger.warning(f"[hunter] pending count failed: {e}")
         return 0
 
 
@@ -87,7 +90,7 @@ async def hunt_once() -> dict:
     pending = await asyncio.to_thread(count_recent_pending)
     if pending >= HUNTER_MAX_PENDING:
         reason = f"미박제 {pending}건 누적 (한계 {HUNTER_MAX_PENDING})"
-        print(f"[hunter] skipped: {reason}")
+        logger.warning(f"[hunter] skipped: {reason}")
         result = {
             "skipped": True,
             "reason": reason,
@@ -98,13 +101,13 @@ async def hunt_once() -> dict:
         return result
 
     category = pick_category()
-    print(f"[hunter] 사냥 시작: {category}")
+    logger.info(f"[hunter] 사냥 시작: {category}")
 
     try:
         gen_result = await asyncio.to_thread(generate, category)
     except Exception as e:
         msg = f"LLM 생성 실패: {e}"
-        print(f"[hunter] {msg}")
+        logger.warning(f"[hunter] {msg}")
         # 429 (rate limit) 면 long backoff 표시
         is_rate_limit = "429" in str(e) or "rate_limit" in str(e).lower()
         result = {
@@ -141,11 +144,11 @@ async def hunt_once() -> dict:
             "at": _last_hunt_at.isoformat(),
         }
         _last_result = result
-        print(f"[hunter] 새 글 {story_id[:8]} category={category} gap={gap.get('gap_score')}")
+        logger.info(f"[hunter] 새 글 {story_id[:8]} category={category} gap={gap.get('gap_score')}")
         return result
     except Exception as e:
         msg = f"DB insert 실패: {e}"
-        print(f"[hunter] {msg}")
+        logger.warning(f"[hunter] {msg}")
         result = {"error": msg, "at": datetime.now(timezone.utc).isoformat()}
         _last_result = result
         return result
@@ -156,10 +159,10 @@ async def background_loop() -> None:
     global _next_hunt_at
 
     if not HUNTER_ENABLED:
-        print("[hunter] 비활성화 (AUTO_HUNT_ENABLED=false)")
+        logger.info("[hunter] 비활성화 (AUTO_HUNT_ENABLED=false)")
         return
 
-    print(
+    logger.info(
         f"[hunter] 시작 · interval={HUNTER_INTERVAL_SEC}s · "
         f"max_pending={HUNTER_MAX_PENDING} · rotate={HUNTER_CATEGORY_ROTATE}"
     )
@@ -179,12 +182,12 @@ async def background_loop() -> None:
         except asyncio.CancelledError:
             return
         except Exception as e:
-            print(f"[hunter] loop error: {e}")
+            logger.warning(f"[hunter] loop error: {e}")
 
         # rate limit 걸렸으면 long backoff (1시간), 평소엔 interval +/- 10% 지터
         if rate_limited:
             next_delay = 3600  # 1시간
-            print(f"[hunter] rate limit → 1시간 대기")
+            logger.warning(f"[hunter] rate limit → 1시간 대기")
         else:
             jitter = random.uniform(0.9, 1.1)
             next_delay = max(60, int(HUNTER_INTERVAL_SEC * jitter))

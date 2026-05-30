@@ -23,6 +23,9 @@ import httpx
 from services.crypto import has_configured_key, sign_dataset
 from services.db import get_db
 
+import logging
+logger = logging.getLogger(__name__)
+
 UPLOADER_URL = os.environ.get("UPLOADER_URL", "http://uploader:3000").rstrip("/")
 
 # 업로드 진행 중임을 나타내는 선점 마커. NULL(미박제)도 실제 tx도 아닌 중간 상태.
@@ -67,7 +70,7 @@ def _record_archive_failure(db, story_id: str, err: Exception) -> None:
             "last_archive_error": str(err)[:500],
         }).eq("id", story_id).execute()
     except Exception as e2:
-        print(f"[archive] failure record failed for {story_id}: {e2}")
+        logger.warning(f"[archive] failure record failed for {story_id}: {e2}")
 
 
 async def archive_story(story_id: str) -> str | None:
@@ -75,7 +78,7 @@ async def archive_story(story_id: str) -> str | None:
     # ephemeral 키로 박제하면 재시작 후 과거 박제물 전부가 '다른 키로 서명됨'으로
     # 검증 실패한다. 검증 불가한 박제물을 만들지 않도록 키 없으면 박제 스킵.
     if not has_configured_key():
-        print(f"[archive] AGENT_PRIVATE_KEY 미설정 — 박제 스킵 (story {story_id})")
+        logger.info(f"[archive] AGENT_PRIVATE_KEY 미설정 — 박제 스킵 (story {story_id})")
         return None
 
     db = get_db()
@@ -165,7 +168,7 @@ async def archive_story(story_id: str) -> str | None:
             # mainnet→arweave.net). 구버전 호환을 위해 없으면 메인넷 게이트웨이로 폴백.
             arweave_url = up.get("arweaveUrl") or f"https://arweave.net/{tx_id}"
     except Exception as e:
-        print(f"[archive] Irys upload failed for story {story_id}: {e}")
+        logger.warning(f"[archive] Irys upload failed for story {story_id}: {e}")
         _record_archive_failure(db, story_id, e)  # 선점 해제 + 재시도 대상으로 표시
         return None
 
@@ -176,7 +179,7 @@ async def archive_story(story_id: str) -> str | None:
         "last_archive_error": None,
     }).eq("id", story_id).execute()
 
-    print(f"[archive] Story {story_id} archived → {arweave_url}")
+    logger.info(f"[archive] Story {story_id} archived → {arweave_url}")
     return tx_id
 
 
@@ -213,7 +216,7 @@ async def reconcile_pending_archives(limit: int = 5) -> int:
             "arweave_tx_id", PENDING_MARKER
         ).lt("last_archive_attempt", stale_before).execute()
     except Exception as e:
-        print(f"[archive] stale-pending recovery failed: {e}")
+        logger.warning(f"[archive] stale-pending recovery failed: {e}")
 
     try:
         resp = (
@@ -225,7 +228,7 @@ async def reconcile_pending_archives(limit: int = 5) -> int:
             .execute()
         )
     except Exception as e:
-        print(f"[archive] reconcile query failed: {e}")
+        logger.warning(f"[archive] reconcile query failed: {e}")
         return 0
 
     retried = 0
@@ -244,10 +247,10 @@ async def reconcile_pending_archives(limit: int = 5) -> int:
         if sig.get("vote_count", 0) < sig.get("threshold", 1):
             continue  # 아직 임계값 미달 → 박제 대상 아님
 
-        print(f"[archive] reconcile retry {row['id'][:8]} (attempt {attempts + 1})")
+        logger.info(f"[archive] reconcile retry {row['id'][:8]} (attempt {attempts + 1})")
         tx = await archive_story(row["id"])
         retried += 1
         if tx:
-            print(f"[archive] reconcile success {row['id'][:8]} → {tx[:12]}")
+            logger.info(f"[archive] reconcile success {row['id'][:8]} → {tx[:12]}")
 
     return retried

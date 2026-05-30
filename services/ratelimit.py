@@ -72,6 +72,10 @@ _GLOBAL = _env_int("STORY_RATELIMIT_GLOBAL", 20)             # 전역 10분 20�
 _ip_limiter = SlidingWindowLimiter(_PER_IP, _WINDOW)
 _global_limiter = SlidingWindowLimiter(_GLOBAL, _WINDOW)
 
+# 출처 재검사(/api/recheck)도 무인증 노출 → 온디맨드로 서버 GET 을 유발하므로 per-IP 제한
+_RECHECK_PER_IP = _env_int("RECHECK_RATELIMIT_PER_IP", 20)
+_recheck_limiter = SlidingWindowLimiter(_RECHECK_PER_IP, _WINDOW)
+
 
 def client_ip(request: Request) -> str:
     """리버스 프록시 뒤 실제 클라이언트 IP 추정."""
@@ -95,4 +99,14 @@ def check_story_ratelimit(request: Request) -> tuple[bool, int, str]:
     ok_g, retry_g = _global_limiter.hit("story:__global__")
     if not ok_g:
         return False, retry_g, f"전역 생성 한도 초과 ({_GLOBAL}회 / {_WINDOW // 60}분)"
+    return True, 0, ""
+
+
+def check_recheck_ratelimit(request: Request) -> tuple[bool, int, str]:
+    """출처 재검사 레이트리밋. (allowed, retry_after, reason)."""
+    if not RATELIMIT_ENABLED:
+        return True, 0, ""
+    ok, retry = _recheck_limiter.hit(f"recheck:{client_ip(request)}")
+    if not ok:
+        return False, retry, f"재검사 한도 초과 ({_RECHECK_PER_IP}회 / {_WINDOW // 60}분)"
     return True, 0, ""

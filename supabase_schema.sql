@@ -19,7 +19,7 @@ create table if not exists public.stories (
   arweave_url     text,
   created_at      timestamptz not null default now(),
   -- 격차 탐지: 커뮤니티 vs 언론 보도 격차 (검열 신호)
-  gap_score       text,                -- none/low/medium/high/extreme
+  gap_score       text,                -- none/medium/high/extreme (calculate_gap_score 가 산출)
   community_count int,
   news_count      int,
   -- 박제 재시도 추적 (sweeper 가 실패한 박제를 지수 백오프로 자동 재시도)

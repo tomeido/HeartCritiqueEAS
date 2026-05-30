@@ -35,6 +35,23 @@ from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
 from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
 
+import logging  # noqa: E402
+
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+
+def _on_task_done(task: asyncio.Task) -> None:
+    """백그라운드 루프가 예외로 죽으면 (조용히 좀비가 되지 않도록) 로깅."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning(f"[lifespan] ⚠️ 백그라운드 태스크 '{task.get_name()}' 비정상 종료: {exc!r}")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -44,6 +61,9 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(tracker_loop(), name="tracker"))
     if has_supabase and HUNTER_ENABLED:
         tasks.append(asyncio.create_task(hunter_loop(), name="hunter"))
+    for t in tasks:
+        t.add_done_callback(_on_task_done)
+    app.state.bg_tasks = tasks
     try:
         yield
     finally:
@@ -70,6 +90,27 @@ app.include_router(stories.router)
 app.include_router(votes.router)
 app.include_router(stats.router)
 app.include_router(feed.router)
+
+
+@app.get("/health")
+async def health(request: Request):
+    """헬스체크 + 백그라운드 루프 생존 상태. compose healthcheck 가 사용."""
+    tasks = getattr(request.app.state, "bg_tasks", [])
+    bg: dict[str, str] = {}
+    all_alive = True
+    for t in tasks:
+        if t.done():
+            all_alive = False
+            if t.cancelled():
+                bg[t.get_name()] = "cancelled"
+            else:
+                exc = t.exception()
+                bg[t.get_name()] = f"dead:{type(exc).__name__}" if exc else "finished"
+        else:
+            bg[t.get_name()] = "running"
+    body = {"ok": all_alive, "background_alive": all_alive, "background": bg}
+    # 백그라운드 루프가 죽었으면 503 → compose 가 컨테이너를 unhealthy 로 표시
+    return JSONResponse(body, status_code=200 if all_alive else 503)
 
 
 @app.get("/api/config")

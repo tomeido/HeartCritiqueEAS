@@ -13,12 +13,16 @@ from services.threshold import (
     get_dynamic_base_threshold,
 )
 
+import logging
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api")
 
 # /api/stats 는 프론트가 init·생성·투표·재검사·박제 폴링마다 호출하므로 빈도가 높다.
 # 전체 테이블 풀스캔 대신 count 쿼리로 집계하고, 60초 프로세스 캐시로 폴링 폭주를 흡수.
 _STATS_TTL = 60
 _stats_cache: dict = {"value": None, "expires_at": 0.0}
+_ts_cache: dict = {}  # days -> {"value", "expires_at"}
 
 
 def _count(table: str, build=None) -> int:
@@ -29,7 +33,7 @@ def _count(table: str, build=None) -> int:
     try:
         return q.execute().count or 0
     except Exception as e:
-        print(f"[stats] count failed ({table}): {e}")
+        logger.warning(f"[stats] count failed ({table}): {e}")
         return 0
 
 
@@ -107,6 +111,10 @@ async def get_stats():
 async def timeseries(days: int = 30):
     """일별 신규/박제/삭제 감지 카운트. UI 차트용."""
     days = max(1, min(days, 90))
+    now_t = time.time()
+    cached = _ts_cache.get(days)
+    if cached and now_t < cached["expires_at"]:
+        return cached["value"]
     db = get_db()
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
@@ -160,4 +168,5 @@ async def timeseries(days: int = 30):
         date = (today - timedelta(days=i)).isoformat()
         b = by_date.get(date, {"stories": 0, "archives": 0, "deletions": 0, "votes": 0})
         out.append({"date": date, **b})
+    _ts_cache[days] = {"value": out, "expires_at": now_t + _STATS_TTL}
     return out
