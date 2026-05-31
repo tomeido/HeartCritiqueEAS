@@ -34,6 +34,7 @@ from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noq
 from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
 from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
+from services.cleanup import CLEANUP_ENABLED, background_loop as cleanup_loop  # noqa: E402
 
 import logging  # noqa: E402
 
@@ -61,6 +62,8 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(tracker_loop(), name="tracker"))
     if has_supabase and HUNTER_ENABLED:
         tasks.append(asyncio.create_task(hunter_loop(), name="hunter"))
+    if has_supabase and CLEANUP_ENABLED:
+        tasks.append(asyncio.create_task(cleanup_loop(), name="cleanup"))
     for t in tasks:
         t.add_done_callback(_on_task_done)
     app.state.bg_tasks = tasks
