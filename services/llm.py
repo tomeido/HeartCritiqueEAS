@@ -213,23 +213,26 @@ USED_SOURCES: [번호, 번호]
 회계 부정. 사소한 광고 트집·개인 분쟁은 피하고 다수에게 영향 가는 사건 우선.
 """
 
-# 모호한 감상 위주 쿼리는 빈약·비미담 글을 물어와 모델이 공허해진다. '구체적 선행 행위 +
-# 미담/훈훈 프레이밍 + 구체적 행위자'로 좁혀 실제 사건이 적힌 따뜻한 글을 끌어온다.
+# 검색어에서 '미담/훈훈/감동' 같은 추상 프레이밍 명사를 뺀다 — 그런 단어는 '미담 모음'·
+# '이거 미담임?' 같은 메타·큐레이션 글을 의미 매칭으로 끌어오기 때문. 대신 행위자+구체
+# 행위+수혜자의 일상 장면 어휘만 둔다. 또 심폐소생·구조·화재 같은 '언론 머리표(속보/화제)'가
+# 붙는 사건은 looks_like_news 가 1차에서 컷해 도메인·필터 푼 3차 폴백으로 역류하므로,
+# 언론이 잘 안 다루는 커뮤니티 일상 미담 장면 위주로 둔다.
 SEARCH_QUERIES_KINDNESS = [
-    "지하철에서 낯선 사람 도와준 미담",
-    "길에서 쓰러진 사람 도와준 후기",
-    "병원에서 낯선 사람 도와준 훈훈한 사연",
-    "어르신 도와드린 훈훈한 미담",
-    "아이 도와준 사람 후기",
-    "익명 기부 선행 사연",
-    "모르는 사람이 도와준 훈훈한 후기",
-    "버스에서 자리 양보 받은 사연",
-    "위급 상황에서 도와준 시민 미담",
-    "잃어버린 지갑 찾아준 사람 후기",
-    "택시 기사 선행 미담",
-    "이웃이 도와준 훈훈한 사연",
-    "가게 사장님 훈훈한 미담",
-    "낯선 사람의 친절 받은 후기",
+    "지하철에서 자리 양보 받은 사연",
+    "버스에서 무거운 짐 들어준 사람 후기",
+    "택시에 두고 내린 지갑 돌려받은 후기",
+    "길 잃었을 때 길 안내해 준 사람 사연",
+    "편의점 알바생이 친절했던 후기",
+    "가게 사장님이 더 챙겨준 사연",
+    "버스 기사님이 친절했던 후기",
+    "잃어버린 휴대폰 찾아서 돌려준 사람",
+    "비 올 때 우산 씌워준 낯선 사람 사연",
+    "넘어진 어르신 일으켜 드린 후기",
+    "길 헤매던 외국인 도와준 사연",
+    "지하철에서 몸 안 좋은 사람 도와준 후기",
+    "이웃이 챙겨준 따뜻한 사연",
+    "낯선 사람이 베푼 친절 후기",
 ]
 
 SEARCH_QUERIES_CRITIQUE = [
@@ -506,7 +509,40 @@ def looks_like_news(item: dict) -> bool:
     return False
 
 
-def normalize_search_results(data: dict, drop_news: bool = True) -> list:
+# 미담 카테고리에 자주 새어드는 '비-미담' 신호. 뉴스 머리표가 없어 looks_like_news 를
+# 통과하는 사기 호소·돈분쟁·창작 괴담·협박/스토킹·상담 글 등을 결정적으로 컷한다.
+KINDNESS_OFFTOPIC_RE = re.compile(
+    r'보이스\s?피싱|스미싱|피싱|사기(?:꾼|범|단|당|\s?쳐|\s?피해|\s?행각)|'
+    r'스토킹|스토커|협박|공갈|갈취|몰카|몰래카메라|'
+    r'괴담|무서운\s*이야기|소름|귀신|미스터리|'
+    r'빌려준\s*돈|빌려줬다|빌린\s*돈|떼인\s*돈|돈\s*떼|먹튀|갚지\s*(?:않|못)|안\s*갚|'
+    r'잡아\s?주세요|도와\s?주세요|찾아\s?주세요|'
+    r'상담|하소연|고민\s*있|고민입니다|고소|소송|법적\s*대응'
+)
+# OFFTOPIC 이 걸려도 같은 글에 '선행 완료' 신호가 있으면 살린다(예: '사기 막아준 시민',
+# '스토킹 피해자 도운 이웃'). 과필터(진짜 미담 손실)를 막는 화이트리스트.
+KINDNESS_RESCUE_RE = re.compile(
+    r'도와줬|도와주신|도와주셔|도와준|구해줬|구해주신|구해준|되찾아|돌려줬|돌려주신|돌려준|'
+    r'지켜줬|지켜준|막아줬|막아준|찾아줬|찾아주신|찾아준|양보|기부|선행|베풀|베푼|'
+    r'챙겨줬|챙겨주신|챙겨준|데려다|일으켜|들어줬|씌워줬|업어|업고'
+)
+
+
+def looks_off_topic_kindness(item: dict) -> bool:
+    """미담이 아닌 글(사기 호소·돈분쟁·괴담·협박·상담 등)로 보이면 True.
+    제목+본문 앞부분(200자)에서 비-미담 신호가 잡혀도, 본문 전체(600자)에 '선행 완료'
+    신호가 있으면 진짜 미담으로 보고 살린다(RESCUE 화이트리스트로 과필터 억제)."""
+    title = item.get("title") or ""
+    content = item.get("content") or ""
+    if not KINDNESS_OFFTOPIC_RE.search(title + " " + content[:200]):
+        return False
+    # RESCUE 는 본문 전체에서 찾아 200~600자 구간의 해결 동사까지 포착(과필터 회피 우선)
+    if KINDNESS_RESCUE_RE.search(title + " " + content):
+        return False
+    return True
+
+
+def normalize_search_results(data: dict, drop_news: bool = True, drop_off_topic: bool = False) -> list:
     out = []
     for r in data.get("results") or []:
         if not isinstance(r, dict):
@@ -520,6 +556,8 @@ def normalize_search_results(data: dict, drop_news: bool = True) -> list:
             "content": (r.get("content") or "")[:600],
         }
         if drop_news and looks_like_news(item):
+            continue
+        if drop_off_topic and looks_off_topic_kindness(item):
             continue
         out.append(item)
     return out
@@ -614,16 +652,19 @@ def generate_via_groq(category: str) -> tuple:
     domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
         DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
     )
-    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터
+    # 비-미담(사기·괴담·돈분쟁·상담) 부정필터는 kindness 에만. critique 엔 그것이 정상
+    # 주제(사기·갑질·횡령)이므로 절대 켜지 않는다.
+    off = (category == "kindness")
+    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + (kindness) 비미담 필터
     search_data = tavily_search(query, include_domains=domains)
-    results = normalize_search_results(search_data, drop_news=True)
-    # 2차: 같은 도메인이지만 뉴스 필터 해제 (전부 뉴스 복붙이었을 때)
+    results = normalize_search_results(search_data, drop_news=True, drop_off_topic=off)
+    # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 비미담 필터는 유지
     if not results:
-        results = normalize_search_results(search_data, drop_news=False)
-    # 3차: 도메인 제한도 풀고 검색 다시
+        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=off)
+    # 3차: 도메인·필터 모두 풀고 재검색 (부정필터로 과필터돼 비는 것까지 폴백으로 흡수)
     if not results:
         search_data = tavily_search(query)
-        results = normalize_search_results(search_data, drop_news=False)
+        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=False)
 
     # 격차 신호의 '커뮤니티 회자량'은 빈약 필터 이전의 전체 검색 결과 수로 측정한다.
     # (rich 필터는 LLM 선정 후보만 좁힐 뿐, 실제 논의량을 줄여 보고하면 검열 격차가 왜곡됨.)
@@ -669,6 +710,9 @@ def generate_via_groq(category: str) -> tuple:
     else:
         chosen = []
     citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
+    if chosen and category == "kindness":
+        # 메타글·비미담 잔류를 운영 로그로 사후 관찰 (어떤 글이 미담으로 선정되는지)
+        logger.info(f"[llm] kindness 선정: {chosen[0]['title']!r} (query={query!r})")
 
     # 격차 탐지: 선정된 글의 content/title 로 언론 보도 여부 확인
     gap_data = None
