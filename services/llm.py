@@ -272,11 +272,10 @@ MD_HEADER_RE = re.compile(r'(?m)^#{1,6}[ \t]+')
 MD_HR_RE     = re.compile(r'(?m)^[ \t]*(?:-{3,}|={3,}|\*{3,})[ \t]*$')
 
 
-# 한자: 연속 2자 이상은 모델이 섞는 중국어 단어/구이므로 제거.
+# 한자: 연속 2자 이상만 제거(모델이 가끔 섞는 중국어 단어/구).
+# 단일 한자는 한글에 붙어 있어도 보존한다 — 익명화 '김某'·성씨 '李'·약칭 '中'·서수 '제3者'
+# 처럼 정상 한국어 표현이라, 일괄 제거하면 적법한 본문을 손상시킨다(드문 단독 '某' 노이즈는 감수).
 CJK_CHINESE_RE = re.compile(r'[一-鿿]{2,}')
-# 단독 한자라도 한글에 바로 붙어 있으면(예: '전부터某') 중국어 끼워넣기 노이즈로 보고 제거.
-# 공백으로 분리된 진짜 단독 한자(예: 약칭 '中', 성씨 '李')는 정상 표현일 수 있어 보존한다.
-SINGLE_CJK_GLUED_RE = re.compile(r'(?<=[가-힣])[一-鿿]|[一-鿿](?=[가-힣])')
 HIRAGANA_KATAKANA_RE = re.compile(r'[぀-ゟ゠-ヿ]+')  # 일본 가나
 # 'SOUTH KOREA' 처럼 ALL-CAPS 영단어가 2개 이상 연속될 때만 제거.
 # 단일 약어(KTX·CCTV·GDP·CEO 등)는 정상 본문이므로 보존한다.
@@ -299,7 +298,6 @@ def sanitize_text(text: str) -> str:
 
     # 한자/일본 가나 잔재 제거 (모델이 가끔 섞음)
     text = CJK_CHINESE_RE.sub('', text)
-    text = SINGLE_CJK_GLUED_RE.sub('', text)
     text = HIRAGANA_KATAKANA_RE.sub('', text)
 
     # SOUTH KOREA, CEO 같은 ALL-CAPS 영어 잡음 제거
@@ -543,7 +541,9 @@ def extract_used_indices(text: str, total: int) -> tuple:
         if 1 <= i <= total and i not in seen:
             seen.add(i)
             indices.append(i)
-    return cleaned, sorted(indices)
+    # 모델이 USED_SOURCES 에 적은 순서를 보존한다(먼저 적은 글 = 주 출처). 단일 선택 가드가
+    # 이 순서의 첫 글을 쓰므로, 정렬하면 '번호가 가장 작은 글'로 바뀌어 본문과 어긋난다.
+    return cleaned, indices
 
 
 def build_search_context(results: list) -> str:
@@ -625,15 +625,17 @@ def generate_via_groq(category: str) -> tuple:
         search_data = tavily_search(query)
         results = normalize_search_results(search_data, drop_news=False)
 
+    # 격차 신호의 '커뮤니티 회자량'은 빈약 필터 이전의 전체 검색 결과 수로 측정한다.
+    # (rich 필터는 LLM 선정 후보만 좁힐 뿐, 실제 논의량을 줄여 보고하면 검열 격차가 왜곡됨.)
+    # 격차 탐지 자체는 LLM 선정 후 measure_news_coverage()에서 진행.
+    community_count = len(results) if results else 0
+
     # 본문 스니펫이 빈약한 출처(실제 사연 없는 게시글)는 모델이 골라 일반론으로 공허하게
-    # 장황해진다 — 코히런스의 마지막 뿌리. 충분한 본문을 가진 결과만 후보로 남기되,
+    # 장황해진다 — 코히런스의 마지막 뿌리. 충분한 본문을 가진 결과만 선택 후보로 남기되,
     # 전부 빈약하면 필터를 풀어 '결과 없음'을 피한다.
     rich = [r for r in results if len((r.get("content") or "").strip()) >= MIN_SOURCE_CONTENT]
     if rich:
         results = rich
-
-    # 격차 탐지는 LLM 선정 후 measure_news_coverage()에서 진행. 일단 community_count만 보관.
-    community_count = len(results) if results else 0
 
     system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
     user_prompt = (
@@ -649,11 +651,11 @@ def generate_via_groq(category: str) -> tuple:
     text = sanitize_text(text)
     if used_indices:
         # 한 편 = 한 게시글 원칙. 모델이 여러 글을 골라 한 본문에 뒤섞으면(코히런스 붕괴)
-        # 첫 글만 박제해 본문과 출처의 정합을 지킨다. 프롬프트로도 단일 선택을 강제하지만
-        # 모델이 어길 때를 대비한 가드.
+        # 모델이 먼저 적은 글(주 출처)만 박제해 본문과 출처의 정합을 지킨다. 프롬프트로도
+        # 단일 선택을 강제하지만 모델이 어길 때를 대비한 가드.
         if len(used_indices) > 1:
             logger.info(
-                f"[llm] 모델이 {len(used_indices)}건 선택 → 첫 글만 박제 "
+                f"[llm] 모델이 {len(used_indices)}건 선택 → 첫 출처만 박제 "
                 f"(블렌딩 방지, query={query!r})"
             )
             used_indices = used_indices[:1]
@@ -694,6 +696,9 @@ def generate(category: str | None = None) -> dict:
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
+        # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
+        # (groq 는 extract_used_indices 가 떼지만 gemini 경로는 거치지 않아 본문에 새는 것 방지).
+        text = USED_SOURCES_RE.sub('', text)
         text = sanitize_text(text)
         model_name = GEMINI_MODEL
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면

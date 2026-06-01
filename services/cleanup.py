@@ -14,6 +14,7 @@
 import asyncio
 import logging
 import os
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from services.db import get_db
@@ -21,34 +22,71 @@ from services.db import get_db
 logger = logging.getLogger(__name__)
 
 CLEANUP_ENABLED = os.environ.get("STORY_CLEANUP_ENABLED", "true").lower() != "false"
-# 생성 후 이 일수가 지난 미박제 글만 정리 대상
-CLEANUP_AGE_DAYS = int(os.environ.get("STORY_CLEANUP_AGE_DAYS", "14"))
+# 생성 후 이 일수가 지난 미박제 글만 정리 대상. 0/음수면 갓 생성된 글까지 즉시
+# 삭제되므로 최소 1일로 하한 고정(운영자 오설정 가드).
+CLEANUP_AGE_DAYS = max(1, int(os.environ.get("STORY_CLEANUP_AGE_DAYS", "14")))
 # 이 표 수 이하만 삭제(기본 0 → 한 표도 없는 글만). 투표받은 후보는 보존.
 CLEANUP_MAX_VOTES = int(os.environ.get("STORY_CLEANUP_MAX_VOTES", "0"))
 CLEANUP_INTERVAL_SEC = int(os.environ.get("STORY_CLEANUP_INTERVAL_SEC", "21600"))  # 6시간
 # 부팅 안정화 + tracker/hunter 와 시간 분산
 CLEANUP_INITIAL_DELAY_SEC = int(os.environ.get("STORY_CLEANUP_INITIAL_DELAY_SEC", "120"))
+# .in_() 는 ID 를 URL 에 나열하므로, 대량 후보 시 URI 한도 초과(414)를 막으려 배치로 끊는다.
+CLEANUP_BATCH = int(os.environ.get("STORY_CLEANUP_BATCH", "200"))
 
 
 def cleanup_old_pending() -> int:
     """오래된 저득표 미박제 글을 삭제하고 삭제된 글 수를 반환.
-    박제된 글(arweave_tx_id 있음)은 필터로 제외되어 절대 삭제되지 않는다."""
+    박제된 글(arweave_tx_id 있음)은 필터로 제외되어 절대 삭제되지 않는다.
+    삭제 전 votes 테이블의 '실제' 표수로 재확인하고, 삭제 statement 에도 동일 술어를
+    다시 걸어 (1) 비정규화 캐시 stories.vote_count 드리프트, (2) select 이후 들어온
+    투표/박제(TOCTOU) 두 경우 모두에서 투표받은 글(과 그 votes 행)이 cascade 로
+    소실되지 않게 한다. .in_() URL 한도를 피하려 후보를 배치로 끊어 처리한다."""
     try:
         db = get_db()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=CLEANUP_AGE_DAYS)).isoformat()
-        resp = (
+        # 1) 후보: 미박제 + 오래됨 + 캐시상 저득표 (id 만; WHERE 술어라 URL 나열 없음)
+        cand = (
             db.table("stories")
-            .delete()
+            .select("id")
             .is_("arweave_tx_id", "null")
             .lte("vote_count", CLEANUP_MAX_VOTES)
             .lt("created_at", cutoff)
             .execute()
         )
-        deleted = len(resp.data or [])
+        cand_ids = [r["id"] for r in (cand.data or [])]
+        if not cand_ids:
+            return 0
+
+        deleted = 0
+        for i in range(0, len(cand_ids), CLEANUP_BATCH):
+            batch = cand_ids[i:i + CLEANUP_BATCH]
+            # 2) 캐시 드리프트 방어: votes 테이블의 실제 표수로 재확인해 투표받은 글은 제외
+            vrows = (
+                db.table("votes")
+                .select("story_id")
+                .in_("story_id", batch)
+                .execute()
+            )
+            actual = Counter(r["story_id"] for r in (vrows.data or []))
+            to_delete = [sid for sid in batch if actual.get(sid, 0) <= CLEANUP_MAX_VOTES]
+            if not to_delete:
+                continue
+            # 3) 삭제 statement 에도 동일 술어 재적용 → select 이후 들어온 투표/박제는
+            #    서버측에서 제외(TOCTOU 창 최소화). votes·citation_checks 는 cascade 정리.
+            resp = (
+                db.table("stories")
+                .delete()
+                .in_("id", to_delete)
+                .is_("arweave_tx_id", "null")
+                .lte("vote_count", CLEANUP_MAX_VOTES)
+                .execute()
+            )
+            deleted += len(resp.data or [])
+
         if deleted:
             logger.info(
                 f"[cleanup] {deleted}건 정리 "
-                f"(미박제·{CLEANUP_AGE_DAYS}일↑·{CLEANUP_MAX_VOTES}표↓)"
+                f"(미박제·{CLEANUP_AGE_DAYS}일↑·실표 {CLEANUP_MAX_VOTES}↓)"
             )
         return deleted
     except Exception as e:
