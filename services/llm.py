@@ -646,15 +646,54 @@ def measure_news_coverage(chosen_items: list) -> dict | None:
     return {"news_count": news_count, "query_used": query[:100]}
 
 
-def generate_via_groq(category: str) -> tuple:
-    seeds = SEARCH_QUERIES_KINDNESS if category == "kindness" else SEARCH_QUERIES_CRITIQUE
-    query = random.choice(seeds)
-    domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
-        DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
-    )
-    # 비-미담(사기·괴담·돈분쟁·상담) 부정필터는 kindness 에만. critique 엔 그것이 정상
-    # 주제(사기·갑질·횡령)이므로 절대 켜지 않는다.
-    off = (category == "kindness")
+# ── 적합성 게이트 ────────────────────────────────────────────────────────────
+# 검색 결과 중 진짜 해당 카테고리 글이 없으면 모델이 첫 줄에 NO_FIT 을 내고, 쿼리를
+# 바꿔가며 제한 재시도한다(과도한 거부를 새 검색으로 흡수). 좋은 매치가 흔한 경우 추가
+# 호출 0, 부실할 때만 시도당 +1. 모든 시도가 NO_FIT/빈 결과면 no_fit 신호를 올린다.
+RELEVANCE_GATE_ENABLED = os.environ.get("RELEVANCE_GATE_ENABLED", "true").lower() != "false"
+# 2 = 한 번 재시도. 단일 generate 의 최악 Groq 토큰(약 2×4.5k≈9k)을 12000 TPM 아래로
+# 묶어 self-429 를 막는다(3이면 ~13k 로 단독 초과 가능). 비용/지연도 절반.
+RELEVANCE_MAX_ATTEMPTS = max(1, int(os.environ.get("RELEVANCE_MAX_ATTEMPTS", "2")))
+
+_GATE_CRITERIA = {
+    "kindness": (
+        "낯선 이를 도운 실제 선행·미담(자리 양보·길 안내·분실물 반환·위기 도움·기부·친절 등)이 "
+        "하나라도 있는가? 사기 호소·돈 분쟁 상담·창작이나 번역 괴담·미담을 논하는 메타글·"
+        "단순 잡담이나 광고는 미담이 아니다."
+    ),
+    "critique": (
+        "대기업이나 기업의 실제 비위·갑질·부정 제보(직장 갑질·하청 갑질·오너 비위·제품 결함·"
+        "임금 체불·회계 부정 등)가 하나라도 있는가? 개인 간 분쟁·사소한 불만·일반 잡담은 "
+        "기업 비위가 아니다."
+    ),
+}
+
+
+# 모델이 NO_FIT 마커 대신 한국어 거부 산문을 낼 때를 첫 줄에서만 보수적으로 포착.
+# '적합한 글이 없습니다'·'해당하는 사연을 찾을 수 없' 등. (글/사연/미담/내용/제보/이야기에
+# 한정해 '도와줄 사람이 없던' 같은 정상 본문은 매칭하지 않음.)
+_NO_FIT_PROSE_RE = re.compile(
+    r'(적합한|해당하는|관련된|마땅한)\s*(글|사연|미담|내용|제보|이야기)\S{0,4}\s*(없|찾을 수 없|찾지 못)'
+)
+
+
+def _is_no_fit(raw_text: str) -> bool:
+    """모델이 '적합한 글 없음'을 알리는 NO_FIT 신호를 첫 줄에 냈는지 결정적으로 판정.
+    sanitize/extract_used_indices 이전에 검사해 파싱 충돌·메타발화 규칙과의 경합을 피한다."""
+    lines = raw_text.strip().splitlines()
+    first = lines[0] if lines else ""
+    # 마커를 감싼 따옴표·대시·대괄호·별표·공백을 벗긴 뒤 첫 토큰이 NO_FIT 으로 시작하는지
+    # (모델이 "NO_FIT"·- NO_FIT·**NO_FIT**·[NO_FIT] 처럼 감싸 출력하는 경우까지 포착).
+    marker = re.sub(r'^[\s"\'`*\-\[\(]+', '', first).upper().replace(" ", "")
+    if marker.startswith("NO_FIT") or marker.startswith("NOFIT"):
+        return True
+    # 마커 대신 한국어 거부 산문을 낸 경우(첫 줄 한정)
+    return bool(_NO_FIT_PROSE_RE.search(first))
+
+
+def _groq_search(query: str, category: str, domains, off: bool) -> tuple:
+    """한 쿼리에 대해 3단 폴백 검색 → (results, community_count).
+    community_count 는 빈약(rich)필터 이전의 전체 결과 수(검열 격차 신호 왜곡 방지)."""
     # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + (kindness) 비미담 필터
     search_data = tavily_search(query, include_domains=domains)
     results = normalize_search_results(search_data, drop_news=True, drop_off_topic=off)
@@ -666,67 +705,95 @@ def generate_via_groq(category: str) -> tuple:
         search_data = tavily_search(query)
         results = normalize_search_results(search_data, drop_news=False, drop_off_topic=False)
 
-    # 격차 신호의 '커뮤니티 회자량'은 빈약 필터 이전의 전체 검색 결과 수로 측정한다.
-    # (rich 필터는 LLM 선정 후보만 좁힐 뿐, 실제 논의량을 줄여 보고하면 검열 격차가 왜곡됨.)
-    # 격차 탐지 자체는 LLM 선정 후 measure_news_coverage()에서 진행.
     community_count = len(results) if results else 0
-
-    # 본문 스니펫이 빈약한 출처(실제 사연 없는 게시글)는 모델이 골라 일반론으로 공허하게
-    # 장황해진다 — 코히런스의 마지막 뿌리. 충분한 본문을 가진 결과만 선택 후보로 남기되,
-    # 전부 빈약하면 필터를 풀어 '결과 없음'을 피한다.
+    # 본문 스니펫이 빈약한 출처는 모델이 일반론으로 공허해지므로 선택 후보에서 제외(전부 빈약하면 폴백)
     rich = [r for r in results if len((r.get("content") or "").strip()) >= MIN_SOURCE_CONTENT]
     if rich:
         results = rich
+    return results, community_count
 
-    system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
-    user_prompt = (
-        "아래 검색 결과 중 가장 사연다운 글 정확히 하나만 골라, 그 한 글에 적힌 내용만으로 "
-        "위 규칙대로 들려줘. 서로 다른 글을 한 본문에 섞지 마. USED_SOURCES 에는 네가 고른 "
-        "그 한 글의 번호 하나만 적어.\n\n검색 결과:\n" + build_search_context(results)
+
+def generate_via_groq(category: str) -> tuple:
+    seeds = SEARCH_QUERIES_KINDNESS if category == "kindness" else SEARCH_QUERIES_CRITIQUE
+    domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
+        DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
     )
+    # 비-미담(사기·괴담·돈분쟁·상담) 부정필터는 kindness 에만. critique 엔 그것이 정상
+    # 주제(사기·갑질·횡령)이므로 절대 켜지 않는다.
+    off = (category == "kindness")
+    system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
 
-    chat = call_groq(user_prompt, system=system_prompt)
-    raw_text = parse_groq_chat_text(chat)
+    # 적합성 게이트: 결과에 진짜 해당 글이 없으면 NO_FIT → 서로 다른 쿼리로 제한 재시도
+    # (같은 '판'을 다시 묻지 않도록 비복원 추출). 게이트 OFF면 1회만 시도(기존 동작).
+    n = min(RELEVANCE_MAX_ATTEMPTS if RELEVANCE_GATE_ENABLED else 1, len(seeds))
+    queries = random.sample(seeds, n)
 
-    text, used_indices = extract_used_indices(raw_text, len(results))
-    text = sanitize_text(text)
-    if used_indices:
-        # 한 편 = 한 게시글 원칙. 모델이 여러 글을 골라 한 본문에 뒤섞으면(코히런스 붕괴)
-        # 모델이 먼저 적은 글(주 출처)만 박제해 본문과 출처의 정합을 지킨다. 프롬프트로도
-        # 단일 선택을 강제하지만 모델이 어길 때를 대비한 가드.
-        if len(used_indices) > 1:
-            logger.info(
-                f"[llm] 모델이 {len(used_indices)}건 선택 → 첫 출처만 박제 "
-                f"(블렌딩 방지, query={query!r})"
+    last_query = queries[0]
+    for query in queries:
+        last_query = query
+        results, community_count = _groq_search(query, category, domains, off)
+        if not results:
+            continue
+
+        gate = ""
+        if RELEVANCE_GATE_ENABLED:
+            gate = (
+                "먼저 판단하라: 아래 결과 중 " + _GATE_CRITERIA[category] +
+                " 해당하는 글이 하나도 없으면, 다른 어떤 것도 쓰지 말고 첫 줄에 정확히 "
+                "NO_FIT 한 단어만 출력하라. 있으면 NO_FIT 을 쓰지 말고 아래 지시대로 한 편을 써라.\n\n"
             )
-            used_indices = used_indices[:1]
-        chosen = [results[i - 1] for i in used_indices]
-    elif results:
-        # LLM 이 USED_SOURCES 를 빠뜨린 경우: 검색결과 전부를 무차별 첨부하면 본문과
-        # 무관한 출처까지 박제·추적되어 gap/threshold 신호를 왜곡한다. 보수적으로
-        # 첫 결과 1개만 첨부하고 로그를 남긴다.
-        chosen = results[:1]
-        logger.info(f"[llm] USED_SOURCES 누락 → 첫 출처만 첨부 (query={query!r})")
-    else:
-        chosen = []
-    citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
-    if chosen and category == "kindness":
-        # 메타글·비미담 잔류를 운영 로그로 사후 관찰 (어떤 글이 미담으로 선정되는지)
-        logger.info(f"[llm] kindness 선정: {chosen[0]['title']!r} (query={query!r})")
+        user_prompt = (
+            gate +
+            "아래 검색 결과 중 가장 사연다운 글 정확히 하나만 골라, 그 한 글에 적힌 내용만으로 "
+            "위 규칙대로 들려줘. 서로 다른 글을 한 본문에 섞지 마. USED_SOURCES 에는 네가 고른 "
+            "그 한 글의 번호 하나만 적어.\n\n검색 결과:\n" + build_search_context(results)
+        )
 
-    # 격차 탐지: 선정된 글의 content/title 로 언론 보도 여부 확인
-    gap_data = None
-    coverage = measure_news_coverage(chosen)
-    if coverage is not None:
-        news_count = coverage["news_count"]
-        gap_data = {
-            "community_count": community_count,
-            "news_count": news_count,
-            "gap_score": calculate_gap_score(community_count, news_count),
-            "gap_query": coverage["query_used"],
-        }
+        chat = call_groq(user_prompt, system=system_prompt)
+        raw_text = parse_groq_chat_text(chat)
 
-    return text, citations, [query], GROQ_MODEL, gap_data
+        # NO_FIT 판정은 sanitize/파싱 이전에(첫 줄 결정적 마커). 적합 글 없음 → 다음 쿼리로.
+        if RELEVANCE_GATE_ENABLED and _is_no_fit(raw_text):
+            logger.info(f"[llm] {category} NO_FIT → 쿼리 변경 재시도 (query={query!r})")
+            continue
+
+        text, used_indices = extract_used_indices(raw_text, len(results))
+        text = sanitize_text(text)
+        if used_indices:
+            # 한 편 = 한 게시글. 모델이 여러 글을 골라 뒤섞으면 먼저 적은(주) 출처만 박제.
+            if len(used_indices) > 1:
+                logger.info(
+                    f"[llm] 모델이 {len(used_indices)}건 선택 → 첫 출처만 박제 "
+                    f"(블렌딩 방지, query={query!r})"
+                )
+                used_indices = used_indices[:1]
+            chosen = [results[i - 1] for i in used_indices]
+        elif results:
+            # USED_SOURCES 누락: 본문과 무관한 출처 무차별 첨부는 신호 왜곡 → 첫 결과만 보수적 첨부.
+            chosen = results[:1]
+            logger.info(f"[llm] USED_SOURCES 누락 → 첫 출처만 첨부 (query={query!r})")
+        else:
+            chosen = []
+        citations = [{"title": r["title"], "uri": r["url"]} for r in chosen]
+        if chosen and category == "kindness":
+            logger.info(f"[llm] kindness 선정: {chosen[0]['title']!r} (query={query!r})")
+
+        # 격차 탐지: 선정된 글의 content/title 로 언론 보도 여부 확인
+        gap_data = None
+        coverage = measure_news_coverage(chosen)
+        if coverage is not None:
+            news_count = coverage["news_count"]
+            gap_data = {
+                "community_count": community_count,
+                "news_count": news_count,
+                "gap_score": calculate_gap_score(community_count, news_count),
+                "gap_query": coverage["query_used"],
+            }
+        return text, citations, [query], GROQ_MODEL, gap_data
+
+    # 모든 시도가 NO_FIT(또는 결과 없음) → no_fit 신호. text=None 으로 상위에 알린다.
+    logger.info(f"[llm] {category} 적합 글 미발견 ({len(queries)}회 시도) → no_fit")
+    return None, [], [last_query], GROQ_MODEL, None
 
 
 def generate(category: str | None = None) -> dict:
@@ -765,6 +832,21 @@ def generate(category: str | None = None) -> dict:
     else:
         raise RuntimeError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")
 
+    # 적합성 게이트가 모든 시도를 거부했거나 본문이 비면 no_fit. 박제하지 않고 상위
+    # (routers/stories.py·hunter.py)가 503/스킵으로 처리하도록 신호만 올린다.
+    if text is None or not text.strip():
+        return {
+            "category": category,
+            "no_fit": True,
+            "text": "",
+            "body": "",
+            "citations": [],
+            "search_queries": queries,
+            "provider": LLM_PROVIDER,
+            "model": model_name,
+            "gap_data": None,
+        }
+
     # 코히런스 보강: 단락 합치기 + 동일 문장 반복 제거 (provider 공통)
     text = tidy_body(text)
 
@@ -775,6 +857,7 @@ def generate(category: str | None = None) -> dict:
 
     return {
         "category": category,
+        "no_fit": False,
         "text": header + "\n\n" + text.strip(),
         "body": text,
         "citations": citations,

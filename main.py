@@ -227,6 +227,22 @@ async def jsonrpc_handler(request: Request):
                 },
             }
 
+        # 적합성 게이트: 적합 글 미발견(no_fit)이면 빈 text 를 'completed'로 위장하지 않고
+        # 사람이 읽을 메시지로 알린다(HTTP /api/story 의 503·hunter 스킵과 정합).
+        if result.get("no_fit") or not (result.get("text") or "").strip():
+            task_id = str(uuid.uuid4())
+            return {
+                "jsonrpc": "2.0", "id": rpc_id,
+                "result": {
+                    "kind": "task", "id": task_id,
+                    "status": {"state": "completed", "timestamp": _now_iso(),
+                               "message": {"kind": "message", "role": "agent",
+                                           "parts": [{"kind": "text",
+                                                      "text": "지금은 들려드릴 적합한 이야기를 찾지 못했어요. 잠시 후 다시 시도해 주세요."}]}},
+                    "history": [], "artifacts": [],
+                },
+            }
+
         task_id = str(uuid.uuid4())
         ctx_id = str(uuid.uuid4())
         return {

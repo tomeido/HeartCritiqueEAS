@@ -118,6 +118,19 @@ async def hunt_once() -> dict:
         _last_result = result
         return result
 
+    # 적합성 게이트: 적합 글 미발견(no_fit)이면 빈 본문을 박제하지 않고 이번 주기만 스킵
+    # (에러 아님 → rate-limit 백오프 없이 다음 주기에 정상 재시도).
+    if gen_result.get("no_fit"):
+        logger.info(f"[hunter] no_fit (적합 글 미발견) category={category} → 이번 주기 스킵")
+        result = {
+            "skipped": True,
+            "reason": "no_fit",
+            "category": category,
+            "at": datetime.now(timezone.utc).isoformat(),
+        }
+        _last_result = result
+        return result
+
     gap = gen_result.get("gap_data") or {}
     try:
         db = get_db()

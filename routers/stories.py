@@ -80,6 +80,13 @@ async def create_story(request: Request, category: str | None = None):
     except Exception as e:
         raise HTTPException(500, f"LLM 생성 실패: {e}")
 
+    # 적합성 게이트: 검색 결과에 진짜 해당 카테고리 글이 없으면 빈 본문을 박제하지 않고
+    # 503 으로 알린다(잠시 후 재시도 유도). no_fit 응답을 INSERT 하면 안 된다.
+    if result.get("no_fit") or not (result.get("body") or "").strip():
+        raise HTTPException(
+            503, "지금은 박제할 만한 적합한 글을 찾지 못했습니다. 잠시 후 다시 시도하세요.",
+        )
+
     gap = result.get("gap_data") or {}
     db = get_db()
     resp = db.table("stories").insert({
