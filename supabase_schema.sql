@@ -50,6 +50,9 @@ create table if not exists public.votes (
 create index if not exists idx_stories_created_at on public.stories (created_at desc);
 create index if not exists idx_stories_unarchived on public.stories (vote_count desc)
   where arweave_tx_id is null;
+-- 박제글 조회(feed/archived.xml · stats archived count)용 부분 인덱스
+create index if not exists idx_stories_archived on public.stories (archived_at desc)
+  where arweave_tx_id is not null;
 create index if not exists idx_votes_story_id     on public.votes (story_id);
 create index if not exists idx_votes_user_id      on public.votes (user_id);
 

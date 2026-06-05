@@ -70,24 +70,34 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
 # 커뮤니티 게시판에서 글이 삭제되었을 때 자주 보이는 본문 패턴.
 # 주의: FM코리아 등 일부 사이트는 없는 글을 메인 페이지로 리다이렉트 → 본문 패턴으로
 # 잡을 수 없음 (알려진 한계). 명확한 표식이 있는 더쿠/클리앙/네이트판 등은 잘 감지.
+#
+# 오탐 방지(중요): 패턴은 살아있는 페이지의 정상 UI 문구와 충돌하지 않도록 '게시물 단위'
+# 대상 명사에 앵커링한다. 과거 무앵커 패턴이 일으킨 치명적 오탐 사례:
+#   - '글이? 없습니다'  → '댓글이 없습니다'(댓글 0개인 살아있는 글)에 매치
+#   - '찾을 수 없'       → '검색 결과를/관련 상품을 찾을 수 없습니다'(위젯)에 매치
+#   - '존재하지 않는'    → '존재하지 않는 회원/상품'(프로필·쇼핑)에 매치
+#   - '차단된 글'·'블라인드 처리' → 'X 보기 설정'·'X 안내'(기능 라벨)에 매치
+#   - 'page/404 not found' → 살아있는 페이지의 JS·임베드 문구에 매치(HTTP 404/410 으로 이미 커버)
+# 영문 404 류와 순수 HTTP 신호는 위 check_url 의 상태코드 분기(404/410)가 담당한다.
 DELETION_PATTERNS = re.compile(
-    r"삭제된\s*(?:글|톡|게시[물글]?|댓글)"
+    r"삭제된\s*(?:글|톡|게시[물글]?)"
     r"|이미\s*삭제"
-    r"|존재하지\s*않는"
     r"|이\s*글을\s*볼\s*권한"
     r"|접근\s*권한이?\s*없"
     r"|신고에?\s*의해\s*삭제"
-    r"|차단된\s*(?:글|게시[물글]?)"
     r"|숨김\s*처리된\s*(?:글|게시[물글]?)"
     r"|글쓴이에?\s*의해\s*삭제"
-    r"|블라인드\s*처리"
-    r"|찾을\s*수\s*없(?:는|습)"
-    r"|페이지를?\s*찾을\s*수\s*없"
-    r"|글이?\s*없습니다"
+    # '존재하지 않는' 은 대상 명사(글/게시물/페이지) 동반 시에만 — 회원/상품 오탐 차단
+    r"|존재하지\s*않는\s*(?:글|게시물|게시글|페이지)"
     r"|글이?\s*존재하지\s*않"
-    r"|deleted\s+(?:post|by)"
-    r"|page\s+not\s+found"
-    r"|404\s+not\s+found",
+    # '찾을 수 없' 은 글/게시물/페이지/주소 대상일 때만 — 검색결과/상품 오탐 차단
+    r"|(?:글|게시물|게시글|페이지|주소)[을를이가]?\s*찾을\s*수\s*없(?:는|습)"
+    # '차단된 글' 은 신고/운영 맥락 또는 종결형일 때만 — '차단된 글 보기 설정' 오탐 차단
+    r"|(?:신고|운영자|운영진|관리자|다수\s*신고)[로은는이가]?\s*(?:에\s*의해\s*)?차단된\s*(?:글|게시[물글]?)"
+    r"|차단된\s*(?:글|게시[물글]?)\s*(?:입니다|이에요|예요|이다)"
+    # '블라인드 처리' 는 완료형일 때만 — '블라인드 처리 안내/하기' 오탐 차단
+    r"|블라인드\s*처리(?:된|됨|되었|됐)"
+    r"|deleted\s+(?:post|by)",
     re.IGNORECASE,
 )
 
@@ -107,44 +117,55 @@ USER_AGENT = (
 
 
 async def check_url(url: str, client: httpx.AsyncClient) -> dict:
-    """단일 URL 의 생존 여부 확인. dict 반환: status/http_code/reason."""
-    safe, why = await asyncio.to_thread(_is_safe_url, url)
-    if not safe:
-        return {"status": "error", "http_code": None, "reason": f"unsafe_url:{why}"}
+    """단일 URL 의 생존 여부 확인. dict 반환: status/http_code/reason.
 
+    SSRF 방어: 리다이렉트를 자동 추종하지 않고, 홉마다 _is_safe_url 로 다시 검증한다.
+    (안전한 외부 URL 이 30x 로 사설/루프백/메타데이터/내부서비스 IP 로 리다이렉트해
+    초기 1회 검증을 우회하는 것을 차단. follow_redirects=True 면 최종 목적지가 재검증되지 않음.)"""
     headers = {"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5"}
-    try:
-        # 스트리밍으로 헤더 먼저 받고, 본문은 앞 MAX_BODY_BYTES 만 읽는다.
-        async with client.stream(
-            "GET", url, timeout=HTTP_TIMEOUT, follow_redirects=True, headers=headers,
-        ) as resp:
-            code = resp.status_code
-            if code in (404, 410):
-                return {"status": "deleted", "http_code": code, "reason": f"HTTP {code}"}
-            if code == 403:
-                return {"status": "blocked", "http_code": code, "reason": "HTTP 403"}
-            if code >= 400:
-                return {"status": "error", "http_code": code, "reason": f"HTTP {code}"}
+    cur = url
+    for _ in range(MAX_REDIRECTS + 1):
+        safe, why = await asyncio.to_thread(_is_safe_url, cur)
+        if not safe:
+            return {"status": "error", "http_code": None, "reason": f"unsafe_url:{why}"}
+        try:
+            # 스트리밍으로 헤더 먼저 받고, 본문은 앞 MAX_BODY_BYTES 만 읽는다.
+            async with client.stream(
+                "GET", cur, timeout=HTTP_TIMEOUT, follow_redirects=False, headers=headers,
+            ) as resp:
+                code = resp.status_code
+                # 리다이렉트는 직접 따라가되 다음 홉 URL 을 루프 상단에서 재검증
+                if 300 <= code < 400 and "location" in resp.headers:
+                    cur = str(httpx.URL(cur).join(resp.headers["location"]))
+                    continue
+                if code in (404, 410):
+                    return {"status": "deleted", "http_code": code, "reason": f"HTTP {code}"}
+                if code == 403:
+                    return {"status": "blocked", "http_code": code, "reason": "HTTP 403"}
+                if code >= 400:
+                    return {"status": "error", "http_code": code, "reason": f"HTTP {code}"}
 
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in resp.aiter_bytes():
-                chunks.append(chunk)
-                total += len(chunk)
-                if total >= MAX_BODY_BYTES:
-                    break
-            text = b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
-    except httpx.TimeoutException:
-        return {"status": "error", "http_code": None, "reason": "timeout"}
-    except Exception as e:
-        return {"status": "error", "http_code": None, "reason": f"net:{type(e).__name__}"}
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= MAX_BODY_BYTES:
+                        break
+                text = b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+        except httpx.TimeoutException:
+            return {"status": "error", "http_code": None, "reason": "timeout"}
+        except Exception as e:
+            return {"status": "error", "http_code": None, "reason": f"net:{type(e).__name__}"}
 
-    if (m := DELETION_PATTERNS.search(text)):
-        return {"status": "deleted", "http_code": code, "reason": f"matched:{m.group(0)[:40]}"}
-    if (m := BLOCKED_PATTERNS.search(text)):
-        return {"status": "blocked", "http_code": code, "reason": f"matched:{m.group(0)[:40]}"}
+        if (m := DELETION_PATTERNS.search(text)):
+            return {"status": "deleted", "http_code": code, "reason": f"matched:{m.group(0)[:40]}"}
+        if (m := BLOCKED_PATTERNS.search(text)):
+            return {"status": "blocked", "http_code": code, "reason": f"matched:{m.group(0)[:40]}"}
 
-    return {"status": "live", "http_code": code, "reason": None}
+        return {"status": "live", "http_code": code, "reason": None}
+
+    return {"status": "error", "http_code": None, "reason": "too_many_redirects"}
 
 
 def register_citations(story_id: str, citations: list) -> None:
@@ -219,12 +240,16 @@ async def recheck_one_story(story_id: str) -> int:
 
 async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
     """오래된 (또는 한 번도 안 본) 레코드 N 개를 재검사. 검사한 개수 반환.
-    한 번 deleted 로 확정된 URL 은 다시 검사하지 않음."""
+
+    sticky 정책: HTTP 404/410 으로 확정된 'hard deleted' 만 영구 제외한다(진짜 사라짐).
+    본문 패턴으로만 잡힌 'soft deleted'(http_code 가 404/410 이 아님)는 오탐 가능성이 있어
+    재검사 대상에 남겨, 실제로 살아있으면 다음 검사에서 live 로 자동 정정되게 한다.
+    (last_checked 오름차순 정렬이라 방금 확인한 soft deleted 는 큐 뒤로 밀려 starvation 방지)"""
     db = get_db()
     resp = (
         db.table("citation_checks")
-        .select("id,story_id,url,check_count,status")
-        .neq("status", "deleted")
+        .select("id,story_id,url,check_count,status,http_code")
+        .or_("status.neq.deleted,and(status.eq.deleted,http_code.not.in.(404,410))")
         .order("last_checked", desc=False, nullsfirst=True)
         .limit(batch_size)
         .execute()

@@ -6,6 +6,7 @@ from xml.sax.saxutils import escape as xml_escape
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
+from services.archive import PENDING_MARKER
 from services.db import get_db
 
 router = APIRouter()
@@ -68,7 +69,9 @@ def _make_atom(
             signal_parts.append("🚨 언론 보도 0건")
         elif s.get("gap_score") == "high":
             signal_parts.append("🔍 보도 격차 큼")
-        if s.get("arweave_tx_id"):
+        # 업로드 진행 중('__pending__') 선점 마커는 '박제됨'으로 새어나가지 않게 제외
+        tx = s.get("arweave_tx_id")
+        if tx and tx != PENDING_MARKER:
             signal_parts.append("🗄 Arweave 박제됨")
 
         # HTML content 구성
@@ -149,6 +152,7 @@ async def feed_archived(request: Request):
         db.table("stories")
         .select("*")
         .not_.is_("arweave_tx_id", "null")
+        .neq("arweave_tx_id", PENDING_MARKER)  # 업로드 진행 중 글은 박제 피드에서 제외
         .order("archived_at", desc=True)
         .limit(50)
         .execute()

@@ -120,6 +120,42 @@ def compute_effective_threshold(
     return {"threshold": base, "urgency": "normal", "reason": None, **extra}
 
 
+# 자동 박제(되돌릴 수 없음)의 임계값 인하는 '확실한' 신호에만 반응한다.
+#   - hard deleted: HTTP 404/410 (본문 패턴 오탐이 끼어들 수 없음)
+#   - hard blocked: HTTP 403
+# 본문 패턴으로만 잡힌 soft 삭제/차단은 표시(배지/알림)·집계엔 들어가지만, 임계값을 낮춰
+# 1표짜리 글을 자동·영구 박제하는 사고를 막기 위해 임계값 인하에는 쓰지 않는다.
+# (soft 삭제글도 사람 투표로는 base 임계값에서 정상 박제된다.)
+_HARD_DELETED_CODES = (404, 410)
+_HARD_BLOCKED_CODE = 403
+# 업로드 진행 중 선점 마커 — '박제 완료'로 오인하면 안 됨 (services.archive.PENDING_MARKER).
+# 순환 import 회피를 위해 리터럴로 비교.
+_PENDING_MARKER = "__pending__"
+
+
+def count_citation_signals(rows: list) -> dict:
+    """citation_checks 행(또는 status/http_code 를 가진 dict)들에서 신호를 집계.
+    반환: {deleted, blocked}=표시용 raw, {hard_deleted, hard_blocked}=임계값용."""
+    deleted = blocked = hard_deleted = hard_blocked = 0
+    for r in rows or []:
+        st = r.get("status")
+        code = r.get("http_code")
+        if st == "deleted":
+            deleted += 1
+            if code in _HARD_DELETED_CODES:
+                hard_deleted += 1
+        elif st == "blocked":
+            blocked += 1
+            if code == _HARD_BLOCKED_CODE:
+                hard_blocked += 1
+    return {
+        "deleted": deleted,
+        "blocked": blocked,
+        "hard_deleted": hard_deleted,
+        "hard_blocked": hard_blocked,
+    }
+
+
 def gather_story_signals(story_id: str) -> dict:
     """스토리 ID 로 현재 신호 정보(gap_score, deleted/blocked count)를 모은 뒤
     effective threshold 계산까지 한 번에. 반환에 vote_count 도 포함."""
@@ -138,12 +174,11 @@ def gather_story_signals(story_id: str) -> dict:
 
     checks_resp = (
         db.table("citation_checks")
-        .select("status")
+        .select("status,http_code")
         .eq("story_id", story_id)
         .execute()
     )
-    deleted = sum(1 for c in (checks_resp.data or []) if c["status"] == "deleted")
-    blocked = sum(1 for c in (checks_resp.data or []) if c["status"] == "blocked")
+    sig = count_citation_signals(checks_resp.data)
 
     votes_resp = (
         db.table("votes")
@@ -153,13 +188,18 @@ def gather_story_signals(story_id: str) -> dict:
     )
     vote_count = votes_resp.count or 0
 
-    eff = compute_effective_threshold(story.get("gap_score"), deleted, blocked)
+    # 임계값 인하는 hard 신호만 — soft 본문매치 오탐이 조기 영구박제를 일으키지 않게.
+    eff = compute_effective_threshold(
+        story.get("gap_score"), sig["hard_deleted"], sig["hard_blocked"]
+    )
+    tx = story.get("arweave_tx_id")
     return {
         "vote_count": vote_count,
-        "deleted_count": deleted,
-        "blocked_count": blocked,
+        "deleted_count": sig["deleted"],   # 표시용 raw (배지/알림)
+        "blocked_count": sig["blocked"],
         "gap_score": story.get("gap_score"),
-        "archived": bool(story.get("arweave_tx_id")),
+        # 선점 마커는 '박제 완료' 아님 → 조기 트리거 스킵/완료 오인 방지
+        "archived": bool(tx and tx != _PENDING_MARKER),
         **eff,  # threshold, urgency, reason
     }
 

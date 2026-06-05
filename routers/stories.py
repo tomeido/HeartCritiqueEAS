@@ -11,6 +11,7 @@ from services.ratelimit import check_recheck_ratelimit, check_story_ratelimit
 from services.threshold import (
     DEFAULT_THRESHOLD,
     compute_effective_threshold,
+    count_citation_signals,
 )
 from services.tracker import (
     get_status_map,
@@ -32,7 +33,8 @@ def _mask_pending(story: dict) -> None:
 
 
 def _augment_with_status(story: dict, status_by_url: dict) -> dict:
-    """citations 배열에 track_status / track_last_checked / deleted_count 머지."""
+    """citations 배열에 track_status / track_last_checked / deleted_count 머지.
+    deleted_count/blocked_count 는 표시용 raw 카운트(soft 포함)다."""
     citations = story.get("citations") or []
     deleted = 0
     blocked = 0
@@ -136,13 +138,14 @@ async def list_stories(limit: int = 50):
     for s in stories:
         _mask_pending(s)
         urls_status = status_map.get(s["id"], {})
-        deleted = sum(1 for x in urls_status.values() if x["status"] == "deleted")
-        blocked = sum(1 for x in urls_status.values() if x["status"] == "blocked")
-        s["deleted_count"] = deleted
-        s["blocked_count"] = blocked
+        sig = count_citation_signals(list(urls_status.values()))
+        s["deleted_count"] = sig["deleted"]      # 표시용 raw (배지/필터)
+        s["blocked_count"] = sig["blocked"]
         s["citation_count"] = len(urls_status)
-        # 동적 임계값
-        eff = compute_effective_threshold(s.get("gap_score"), deleted, blocked)
+        # 동적 임계값: 자동 박제 판단과 일치하도록 hard 신호(404/410/403)로만 인하
+        eff = compute_effective_threshold(
+            s.get("gap_score"), sig["hard_deleted"], sig["hard_blocked"]
+        )
         s["effective_threshold"] = eff["threshold"]
         s["urgency"] = eff["urgency"]
         s["default_threshold"] = DEFAULT_THRESHOLD
@@ -167,11 +170,12 @@ async def get_story(story_id: str):
         await asyncio.to_thread(register_citations, story_id, story["citations"])
 
     out = _augment_with_status(story, by_url)
-    # 동적 임계값 머지
+    # 동적 임계값 머지: 자동 박제 판단과 일치하도록 hard 신호(404/410/403)로만 인하
+    sig = count_citation_signals(list(by_url.values()))
     eff = compute_effective_threshold(
         out.get("gap_score"),
-        out.get("deleted_count", 0),
-        out.get("blocked_count", 0),
+        sig["hard_deleted"],
+        sig["hard_blocked"],
     )
     out["effective_threshold"] = eff["threshold"]
     out["urgency"] = eff["urgency"]
