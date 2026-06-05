@@ -44,6 +44,7 @@ def _augment_with_status(story: dict, status_by_url: dict) -> dict:
             c["track_status"] = info["status"]
             c["track_last_checked"] = info["last_checked"]
             c["track_http_code"] = info["http_code"]
+            c["track_reason"] = info.get("reason")
             if info["status"] == "deleted":
                 deleted += 1
             elif info["status"] == "blocked":

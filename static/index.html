@@ -1432,7 +1432,7 @@ function makeCitation(c) {
   a.className = 'cit-item';
   const domain = extractDomain(c.uri);
   const status = c.track_status || 'unchecked';
-  const statusBadge = renderStatusBadge(status);
+  const statusBadge = renderStatusBadge(status, c.track_reason);
   if (status === 'deleted') a.classList.add('is-deleted');
   a.innerHTML = `
     <img class="cit-favicon" src="https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32"
@@ -1445,11 +1445,12 @@ function makeCitation(c) {
   return a;
 }
 
-function renderStatusBadge(status) {
+function renderStatusBadge(status, reason) {
+  const t = reason ? ` title="${escHtml(reason)}"` : '';
   switch (status) {
-    case 'deleted':   return ' <span class="cit-status cit-status-deleted">❌ 삭제됨</span>';
-    case 'blocked':   return ' <span class="cit-status cit-status-blocked">⛔ 차단됨</span>';
-    case 'error':     return ' <span class="cit-status cit-status-error">⚠ 오류</span>';
+    case 'deleted':   return ` <span class="cit-status cit-status-deleted"${t}>❌ 삭제됨</span>`;
+    case 'blocked':   return ` <span class="cit-status cit-status-blocked"${t}>⛔ 차단됨</span>`;
+    case 'error':     return ` <span class="cit-status cit-status-error"${t}>⚠ 오류</span>`;
     case 'unchecked': return ' <span class="cit-status cit-status-unchecked">⏳ 확인 중</span>';
     case 'live':
     default:          return '';

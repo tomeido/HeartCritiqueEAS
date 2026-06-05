@@ -88,6 +88,12 @@ create table if not exists public.citation_checks (
   first_seen    timestamptz not null default now(),
   last_checked  timestamptz,
   check_count   int         not null default 0,
+  -- 기준선(첫 'live' 확인 시 1회 캡처): 이후 검사는 이 값 대비 '변화'로 삭제/차단 판정.
+  baseline_final_url text,
+  baseline_len       int,
+  baseline_del_match boolean not null default false,
+  baseline_blk_match boolean not null default false,
+  baseline_at        timestamptz,
   unique (story_id, url)
 );
 
