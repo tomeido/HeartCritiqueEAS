@@ -165,8 +165,18 @@ async def archive_story(story_id: str) -> str | None:
             up = resp.json()
             tx_id = up["txId"]
             # 업로더가 네트워크에 맞는 조회 URL을 반환(devnet→devnet.irys.xyz,
-            # mainnet→arweave.net). 구버전 호환을 위해 없으면 메인넷 게이트웨이로 폴백.
-            arweave_url = up.get("arweaveUrl") or f"https://arweave.net/{tx_id}"
+            # mainnet→gateway.irys.xyz). 구버전/응답 누락 대비 폴백도 network-aware 로:
+            # devnet 행에 arweave.net 이 박혀 404 나는 것을 방지(BUG: 링크 미연결).
+            net = up.get("network") or os.environ.get("IRYS_NETWORK", "devnet")
+            fallback_base = (
+                "https://gateway.irys.xyz/" if net == "mainnet"
+                else "https://devnet.irys.xyz/"
+            )
+            arweave_url = up.get("arweaveUrl") or f"{fallback_base}{tx_id}"
+            if not up.get("arweaveUrl"):
+                logger.warning(
+                    f"[archive] uploader 가 arweaveUrl 누락 — net={net} 폴백 사용 (story {story_id})"
+                )
     except Exception as e:
         logger.warning(f"[archive] Irys upload failed for story {story_id}: {e}")
         _record_archive_failure(db, story_id, e)  # 선점 해제 + 재시도 대상으로 표시

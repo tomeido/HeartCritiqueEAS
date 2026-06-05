@@ -24,11 +24,16 @@ const RPC_URLS = {
   mainnet: "https://rpc.ankr.com/eth",
 };
 
-// 네트워크별 조회 게이트웨이. devnet 업로드는 메인넷 arweave.net 에서 영구 조회되지
-// 않고 devnet.irys.xyz 에서만 (삭제 전까지) 임시 조회된다.
+// 네트워크별 조회 게이트웨이.
+// - devnet: 업로드는 메인넷 arweave.net 에서 조회되지 않고 devnet.irys.xyz 에서만
+//   (삭제 전까지) 임시 조회된다.
+// - mainnet: Irys 게이트웨이는 번들이 Arweave 에 정산되기 전에도 optimistic 하게 즉시
+//   서빙한다. arweave.net 은 정산이 끝나야 해당 tx 를 서빙하므로 박제 '직후'엔 404 가 난다.
+//   따라서 박제 직후에도 바로 열리도록 mainnet 도 gateway.irys.xyz 를 1차 링크로 쓴다.
+//   (영구성 증빙용 arweave.net 링크는 UI 에서 보조로 안내)
 const GATEWAYS = {
   devnet:  (txId) => `https://devnet.irys.xyz/${txId}`,
-  mainnet: (txId) => `https://arweave.net/${txId}`,
+  mainnet: (txId) => `https://gateway.irys.xyz/${txId}`,
 };
 const gatewayUrl = (txId) => (GATEWAYS[NETWORK] || GATEWAYS.devnet)(txId);
 const IS_PERMANENT = NETWORK === "mainnet";

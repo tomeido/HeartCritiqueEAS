@@ -1116,7 +1116,7 @@ async function init() {
       sb.auth.onAuthStateChange((_event, s) => {
         session = s;
         renderAuth();
-        if (currentStory?.story_id) refreshVoteStatus(currentStory.story_id);
+        if (currentStory?.id) refreshVoteStatus(currentStory.id);
       });
       const { data } = await sb.auth.getSession();
       session = data.session;
@@ -1414,6 +1414,11 @@ function showStory(s) {
     document.getElementById('vote-section').classList.remove('hidden');
   }
 
+  // 투표 버튼은 전역 단일 요소라 직전 스토리 상태가 잠깐 보이거나(깜빡임) 직전 글 id로
+  // 오클릭될 수 있다. 비동기 갱신 전에 동기적으로 중립화(비활성+핸들러 제거)한다.
+  const vbtn = document.getElementById('btn-vote');
+  vbtn.disabled = true;
+  vbtn.onclick = null;
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1695,10 +1700,25 @@ function isPermanent() {
   return (cfg?.irys_network || 'devnet') === 'mainnet';
 }
 
+// 박제 데이터의 표준 조회 URL을 txId+네트워크로 재구성한다.
+// DB에 저장된 arweave_url 이 NULL(구버전 박제)이거나 오염값(devnet인데 arweave.net →
+// 404)이어도, 항상 현재 네트워크에 맞는 '동작하는' 링크를 만든다.
+// - mainnet: gateway.irys.xyz 는 Arweave 정산 전에도 optimistic 즉시 서빙
+// - devnet : devnet.irys.xyz 에서만 (삭제 전까지) 조회 가능
+function gatewayUrl(txId) {
+  if (!txId) return '';
+  return isPermanent()
+    ? `https://gateway.irys.xyz/${txId}`
+    : `https://devnet.irys.xyz/${txId}`;
+}
+
 function showArchiveHero(url, txId, archivedAt) {
   const hero = document.getElementById('archive-hero');
   const permanent = isPermanent();
-  hero.href = url;
+  // 저장된 arweave_url(구버전 NULL/오염 가능)보다 txId+network 재구성 링크를 우선한다.
+  // safeUrl 로 스킴 검증까지 거쳐 깨진/위험 링크가 href 에 들어가지 않게 한다.
+  const link = safeUrl(gatewayUrl(txId) || url || '');
+  hero.href = link;
   document.getElementById('archive-lbl').textContent =
     permanent ? 'Arweave 영구 박제됨' : 'Arweave 박제됨 (devnet · 임시)';
   document.getElementById('archive-tx').textContent = txId;
@@ -1713,7 +1733,7 @@ function showArchiveHero(url, txId, archivedAt) {
     warn.classList.remove('hidden');
   }
   hero.classList.remove('hidden');
-  showVerifyCard(txId, url);
+  showVerifyCard(txId, link);
 }
 
 // ── 무결성 검증 ───────────────────────────────────────────────────────────
@@ -2022,9 +2042,14 @@ function renderStoryList() {
     const isNew = lastSeen && (s.created_at || '') > lastSeen;
     const newMark = isNew ? '<span class="new-badge">NEW</span>' : '';
 
-    const deletedLine = (s.deleted_count || 0) > 0
-      ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${s.deleted_count}개 삭제됨</div>`
-      : '';
+    const dC = s.deleted_count || 0, bC = s.blocked_count || 0;
+    const deletedLine = dC > 0 && bC > 0
+      ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${dC}개 삭제 · ⛔ ${bC}개 차단</div>`
+      : dC > 0
+        ? `<div style="color:var(--err);font-weight:600;font-size:11px">🚨 ${dC}개 삭제됨</div>`
+        : bC > 0
+          ? `<div style="color:#92400e;font-weight:600;font-size:11px">⛔ ${bC}개 차단됨</div>`
+          : '';
     const gapLine = ['high', 'extreme'].includes(s.gap_score)
       ? `<div style="color:${s.gap_score === 'extreme' ? 'var(--err)' : '#ea580c'};font-weight:600;font-size:11px">${s.gap_score === 'extreme' ? '🚨 언론 보도 없음' : '🔍 보도 격차'}</div>`
       : '';
