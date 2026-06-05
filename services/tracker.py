@@ -297,12 +297,6 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
     # --- net == 'ok' : 2xx 본문 확보 ---
     final_url = obs.get("final_url") or original_url
     have_base = bool(baseline and baseline.get("captured"))
-    new_base = {
-        "final_url": final_url,
-        "len": obs.get("text_len"),
-        "del_match": obs.get("del_match", False),
-        "blk_match": obs.get("blk_match", False),
-    }
 
     if not have_base:
         # 콜드스타트(기준선 없음): 비교 불가. 잘 앵커링된 '삭제' 표식만 신뢰하고,
@@ -313,6 +307,12 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
         # 매 회 재판정되고, 실제 복구 시 del_match 가 사라지며 그때 기준선을 잡는다).
         if obs.get("del_match"):
             return _verdict("deleted", code, f"삭제 표식: {obs.get('del_snip')}")
+        new_base = {
+            "final_url": final_url,
+            "len": obs.get("text_len"),
+            "del_match": obs.get("del_match", False),
+            "blk_match": obs.get("blk_match", False),
+        }
         return _verdict("live", code, None, baseline=new_base)
 
     # --- 기준선 보유: 변화 기반 판정 ---
@@ -342,8 +342,8 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
         return _verdict("blocked", code, f"차단 표식 새로 등장: {obs.get('blk_snip')}")
     if collapsed:
         return _verdict("deleted", code, f"본문 급감 {base_len}→{cur_len}자")
-    # 경로만 바뀐 리다이렉트(근거 없음)는 정규화/슬러그 변경일 수 있어 live 유지(보수적)
-    _ = moved  # 진단용으로 계산하지만 단독으론 판정하지 않음
+    # 경로만 바뀐 리다이렉트(moved 이지만 root 도 아니고 근거 없음)는 정규화/슬러그
+    # 변경일 수 있어 live 유지(보수적). moved 단독으론 삭제로 판정하지 않는다.
     return _verdict("live", code, None)
 
 
@@ -413,6 +413,29 @@ async def _trigger_auto_archive_if_needed(story_id: str) -> None:
         logger.warning(f"[tracker] auto-archive check failed for {story_id}: {e}")
 
 
+def _newly_gone(res: dict, prev_status) -> bool:
+    """이번 판정이 '삭제·차단'이고 직전엔 아니었으면(새로 사라짐) True."""
+    return (res["status"] in ("deleted", "blocked")
+            and prev_status not in ("deleted", "blocked"))
+
+
+async def _process_row(db, row: dict, client: httpx.AsyncClient) -> tuple[dict, object, bool]:
+    """citation 한 행을 재검사(관측 → 판정 → DB 갱신).
+    반환: (판정 dict, 직전 status, 갱신 성공 여부)."""
+    obs = await fetch_observation(row["url"], client)
+    res = decide_status(obs, row["url"], _baseline_from_row(row))
+    prev_status = row.get("status")
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        db.table("citation_checks").update(
+            _build_update(res, row, now_iso)
+        ).eq("id", row["id"]).execute()
+        return res, prev_status, True
+    except Exception as e:
+        logger.warning(f"[tracker] update fail {row['id']}: {e}")
+        return res, prev_status, False
+
+
 async def recheck_one_story(story_id: str) -> int:
     """특정 스토리의 모든 citation 즉시 재검사. 검사한 개수 반환."""
     db = get_db()
@@ -432,18 +455,9 @@ async def recheck_one_story(story_id: str) -> int:
     newly_deleted = False
     async with httpx.AsyncClient(max_redirects=MAX_REDIRECTS) as client:
         for row in rows:
-            obs = await fetch_observation(row["url"], client)
-            res = decide_status(obs, row["url"], _baseline_from_row(row))
-            prev_status = row.get("status")
-            if res["status"] in ("deleted", "blocked") and prev_status not in ("deleted", "blocked"):
+            res, prev_status, _ok = await _process_row(db, row, client)
+            if _newly_gone(res, prev_status):
                 newly_deleted = True
-            try:
-                now_iso = datetime.now(timezone.utc).isoformat()
-                db.table("citation_checks").update(
-                    _build_update(res, row, now_iso)
-                ).eq("id", row["id"]).execute()
-            except Exception as e:
-                logger.warning(f"[tracker] update fail {row['id']}: {e}")
 
     # 새로 사라진 글이 있으면 자동 박제 검사
     if newly_deleted:
@@ -478,21 +492,10 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
     newly_changed_stories: set[str] = set()
     async with httpx.AsyncClient(max_redirects=MAX_REDIRECTS) as client:
         for row in rows:
-            obs = await fetch_observation(row["url"], client)
-            res = decide_status(obs, row["url"], _baseline_from_row(row))
-            prev_status = row.get("status")
-            try:
-                now_iso = datetime.now(timezone.utc).isoformat()
-                db.table("citation_checks").update(
-                    _build_update(res, row, now_iso)
-                ).eq("id", row["id"]).execute()
-                # 새로 삭제·차단된 글은 자동 박제 검사 대상
-                if (res["status"] in ("deleted", "blocked")
-                        and prev_status not in ("deleted", "blocked")
-                        and row.get("story_id")):
-                    newly_changed_stories.add(row["story_id"])
-            except Exception as e:
-                logger.warning(f"[tracker] update fail {row['id']}: {e}")
+            res, prev_status, ok = await _process_row(db, row, client)
+            # 새로 삭제·차단된 글은 자동 박제 검사 대상 (DB 갱신 성공 시에만)
+            if ok and _newly_gone(res, prev_status) and row.get("story_id"):
+                newly_changed_stories.add(row["story_id"])
 
     # 새로 사라진/차단된 글이 발견된 스토리들에 대해 자동 박제 검사
     for sid in newly_changed_stories:
