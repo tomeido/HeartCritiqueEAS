@@ -1480,7 +1480,7 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 재검사 중...';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1632,7 +1632,7 @@ async function castVote(storyId) {
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 투표 중...';
   setStatus('vote-status', '');
 
   try {
