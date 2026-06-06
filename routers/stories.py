@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 
 from fastapi import APIRouter, HTTPException, Request
@@ -20,6 +21,7 @@ from services.tracker import (
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 # 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
 STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
@@ -135,7 +137,13 @@ async def list_stories(limit: int = 50):
     )
     stories = resp.data or []
     ids = [s["id"] for s in stories]
-    status_map = await asyncio.to_thread(get_status_map, ids)
+    # 출처 추적 상태는 배지/임계값 보조 정보일 뿐 — 조회가 실패해도 목록 자체는
+    # 내려준다(추적 조회 한 번의 일시 오류로 전체 목록이 500 나지 않게).
+    try:
+        status_map = await asyncio.to_thread(get_status_map, ids)
+    except Exception as e:
+        logger.warning(f"[stories] get_status_map 실패 — 추적 정보 없이 목록 반환: {e}")
+        status_map = {}
     for s in stories:
         _mask_pending(s)
         urls_status = status_map.get(s["id"], {})

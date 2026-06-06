@@ -25,8 +25,9 @@ _stats_cache: dict = {"value": None, "expires_at": 0.0}
 _ts_cache: dict = {}  # days -> {"value", "expires_at"}
 
 
-def _count(table: str, build=None) -> int:
-    """count='exact' + head=True 로 행 전송 없이 개수만 조회."""
+def _count(table: str, build=None) -> int | None:
+    """count='exact' + head=True 로 행 전송 없이 개수만 조회.
+    실패 시 None 을 돌려 '진짜 0' 과 '조회 실패' 를 구분한다(0 캐시 굳음 방지)."""
     q = get_db().table(table).select("*", count="exact", head=True)
     if build is not None:
         q = build(q)
@@ -34,7 +35,7 @@ def _count(table: str, build=None) -> int:
         return q.execute().count or 0
     except Exception as e:
         logger.warning(f"[stats] count failed ({table}): {e}")
-        return 0
+        return None
 
 
 @router.get("/stats")
@@ -74,11 +75,34 @@ async def get_stats():
 
     base_info = get_dynamic_base_threshold()
 
+    # 카운트가 하나라도 일시적 DB 오류로 실패(None)하면, 0 을 60초간 캐시해 잘못된
+    # 0(예: '이야기 0', '박제 0')으로 굳히는 대신 직전 캐시본(있으면)을 그대로 돌려준다.
+    all_counts = [
+        total, archived, citations_total, votes_total, stories_24h, archives_24h,
+        *by_category.values(), *gap_dist.values(), *citation_status.values(),
+    ]
+    complete = all(c is not None for c in all_counts)
+    if not complete:
+        stale = _stats_cache["value"]
+        if stale is not None:
+            stale["hunter"] = get_hunter_status()
+            return stale
+        # 캐시도 없으면(콜드스타트) 0 으로 표시하되 캐시는 남기지 않아 다음 호출이 곧 재시도.
+
+    def z(v):  # None(조회 실패) → 0 으로 표시만 보정
+        return v or 0
+
+    by_category = {k: z(v) for k, v in by_category.items()}
+    gap_dist = {k: z(v) for k, v in gap_dist.items()}
+    citation_status = {k: z(v) for k, v in citation_status.items()}
+    total_z = z(total)
+    archived_z = z(archived)
+
     result = {
         "stories": {
-            "total": total,
-            "archived": archived,
-            "pending": total - archived,
+            "total": total_z,
+            "archived": archived_z,
+            "pending": max(0, total_z - archived_z),
             "by_category": by_category,
         },
         "gap": {
@@ -86,13 +110,13 @@ async def get_stats():
             "high_or_extreme": gap_dist["high"] + gap_dist["extreme"],
         },
         "citations": {
-            "total": citations_total,
+            "total": z(citations_total),
             **citation_status,
         },
-        "votes": {"total": votes_total},
+        "votes": {"total": z(votes_total)},
         "recent": {
-            "stories_24h": stories_24h,
-            "archives_24h": archives_24h,
+            "stories_24h": z(stories_24h),
+            "archives_24h": z(archives_24h),
         },
         "threshold": {
             "base": base_info["threshold"],
@@ -102,8 +126,10 @@ async def get_stats():
         },
         "hunter": get_hunter_status(),
     }
-    _stats_cache["value"] = result
-    _stats_cache["expires_at"] = now_t + _STATS_TTL
+    # 모든 카운트가 성공했을 때만 캐시(실패분을 60초 동안 0 으로 들고 있지 않게).
+    if complete:
+        _stats_cache["value"] = result
+        _stats_cache["expires_at"] = now_t + _STATS_TTL
     return result
 
 
@@ -119,28 +145,36 @@ async def timeseries(days: int = 30):
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).isoformat()
 
-    # 스토리 (created_at + archived_at)
-    stories_resp = (
-        db.table("stories")
-        .select("created_at,archived_at")
-        .gte("created_at", (now - timedelta(days=days + 90)).isoformat())  # archived는 더 옛것도
-        .execute()
-    )
-    # 삭제 감지 (last_checked 시점 사용)
-    deletions_resp = (
-        db.table("citation_checks")
-        .select("last_checked")
-        .eq("status", "deleted")
-        .gte("last_checked", cutoff)
-        .execute()
-    )
-    # 투표
-    votes_resp = (
-        db.table("votes")
-        .select("created_at")
-        .gte("created_at", cutoff)
-        .execute()
-    )
+    # 일시적 DB 오류(끊긴 keepalive 등)에 차트 전체가 500 나지 않게 — 직전 캐시(만료됐어도)
+    # 가 있으면 그걸, 없으면 빈 시계열을 돌려준다.
+    try:
+        # 스토리 (created_at + archived_at)
+        stories_resp = (
+            db.table("stories")
+            .select("created_at,archived_at")
+            .gte("created_at", (now - timedelta(days=days + 90)).isoformat())  # archived는 더 옛것도
+            .execute()
+        )
+        # 삭제 감지 (last_checked 시점 사용)
+        deletions_resp = (
+            db.table("citation_checks")
+            .select("last_checked")
+            .eq("status", "deleted")
+            .gte("last_checked", cutoff)
+            .execute()
+        )
+        # 투표
+        votes_resp = (
+            db.table("votes")
+            .select("created_at")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+    except Exception as e:
+        logger.warning(f"[stats] timeseries 조회 실패: {e}")
+        if cached:
+            return cached["value"]
+        return []
 
     by_date: dict = defaultdict(
         lambda: {"stories": 0, "archives": 0, "deletions": 0, "votes": 0}
