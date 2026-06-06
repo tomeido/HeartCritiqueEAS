@@ -859,7 +859,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 a { color: inherit; }
 
 /* ── 접근성: 키보드 포커스 링 (포인터 클릭엔 미노출) ── */
-button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible {
+button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible, .list-item:focus-visible {
   outline: 2px solid var(--accent-1);
   outline-offset: 2px;
 }
@@ -962,7 +962,7 @@ button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-v
       <button class="btn-gen btn-gen-critique" data-category="critique">🔥 대기업 비위</button>
       <button class="btn-gen btn-gen-random" data-category="">🎲 무작위</button>
     </div>
-    <div class="status" id="gen-status"></div>
+    <div class="status" id="gen-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- 현재 스토리 -->
@@ -2033,6 +2033,8 @@ function renderStoryList() {
   stories.forEach(s => {
     const div = document.createElement('div');
     div.className = 'list-item';
+    div.setAttribute('role', 'button');
+    div.setAttribute('tabindex', '0');
     const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
     const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
     const isArchived = !!s.arweave_tx_id;
@@ -2071,6 +2073,12 @@ function renderStoryList() {
         ${deletedLine}
       </div>`;
     div.onclick = () => loadAndShowStory(s.id);
+    div.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        loadAndShowStory(s.id);
+      }
+    };
     el.appendChild(div);
   });
 }
