@@ -55,10 +55,11 @@ def count_recent_pending() -> int:
     try:
         db = get_db()
         cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+        # 업로드 중('__pending__')도 아직 박제 안 된 상태 — NULL 과 함께 pending 으로 집계.
         resp = (
             db.table("stories")
             .select("id", count="exact")
-            .is_("arweave_tx_id", "null")
+            .or_("arweave_tx_id.is.null,arweave_tx_id.eq.__pending__")
             .gte("created_at", cutoff)
             .execute()
         )

@@ -55,7 +55,9 @@ async def get_stats():
         "kindness": _count("stories", lambda q: q.eq("category", "kindness")),
         "critique": _count("stories", lambda q: q.eq("category", "critique")),
     }
-    archived = _count("stories", lambda q: q.not_.is_("arweave_tx_id", "null"))
+    # 진짜 박제만 카운트 — archived_at 은 업로드 성공 시에만 기록된다('__pending__' 마커가
+    # arweave_tx_id 에 들어가 not-null 매칭으로 과대집계되던 것 방지).
+    archived = _count("stories", lambda q: q.not_.is_("archived_at", "null"))
     gap_dist = {
         "extreme": _count("stories", lambda q: q.eq("gap_score", "extreme")),
         "high":    _count("stories", lambda q: q.eq("gap_score", "high")),
@@ -143,7 +145,9 @@ async def timeseries(days: int = 30):
         return cached["value"]
     db = get_db()
     now = datetime.now(timezone.utc)
-    cutoff = (now - timedelta(days=days)).isoformat()
+    # 출력은 today-(days-1)..today 의 days 일을 그린다. 쿼리 하한도 그 최저일의 자정에
+    # 맞춰야 경계일(부분일)의 행이 버킷에서 누락되지 않는다.
+    cutoff = (now - timedelta(days=days - 1)).date().isoformat()
 
     # 일시적 DB 오류(끊긴 keepalive 등)에 차트 전체가 500 나지 않게 — 직전 캐시(만료됐어도)
     # 가 있으면 그걸, 없으면 빈 시계열을 돌려준다.

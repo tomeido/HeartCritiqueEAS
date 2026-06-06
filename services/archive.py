@@ -161,7 +161,11 @@ async def archive_story(story_id: str) -> str | None:
     signed = sign_dataset(dataset)
 
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        # Irys 정산이 90s 를 넘기면 Python 이 먼저 타임아웃→선점 해제하는데 업로더의
+        # irys.upload() 는 계속 돌며 (mainnet) ETH 를 지불한다. 이후 reconcile 가 재시도해
+        # 이중 박제·이중 지불이 발생. 타임아웃을 정산 여유까지 넓혀 거짓 타임아웃을 줄인다
+        # (잔여 케이스는 업로더의 Story-Id 멱등 조회가 방어).
+        async with httpx.AsyncClient(timeout=300) as client:
             resp = await client.post(f"{UPLOADER_URL}/upload", json=signed)
             resp.raise_for_status()
             up = resp.json()

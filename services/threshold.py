@@ -21,16 +21,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 정적 fallback 값 (DB 조회 실패 시 또는 동적 비활성화 시 사용)
-DEFAULT_THRESHOLD = int(os.environ.get("VOTE_THRESHOLD", "3"))
+# 1표 미만은 '인간 합의 없는 자동·영구 박제'라 무조건 1로 하한 고정(운영자 오설정 가드).
+DEFAULT_THRESHOLD = max(1, int(os.environ.get("VOTE_THRESHOLD", "3")))
 
 # 동적 임계값: 활성 투표자 수에 따라 자동 스케일
 DYNAMIC_THRESHOLD_ENABLED = (
     os.environ.get("DYNAMIC_THRESHOLD", "true").lower() != "false"
 )
-MIN_BASE_THRESHOLD = int(os.environ.get("MIN_VOTE_THRESHOLD", str(DEFAULT_THRESHOLD)))
-MAX_BASE_THRESHOLD = int(os.environ.get("MAX_VOTE_THRESHOLD", "12"))
-# +1 임계값 / N 활성 투표자
-VOTERS_PER_VOTE = int(os.environ.get("VOTERS_PER_VOTE", "30"))
+MIN_BASE_THRESHOLD = max(1, int(os.environ.get("MIN_VOTE_THRESHOLD", str(DEFAULT_THRESHOLD))))
+MAX_BASE_THRESHOLD = max(MIN_BASE_THRESHOLD, int(os.environ.get("MAX_VOTE_THRESHOLD", "12")))
+# +1 임계값 / N 활성 투표자 (0 이면 ZeroDivisionError → 최소 1)
+VOTERS_PER_VOTE = max(1, int(os.environ.get("VOTERS_PER_VOTE", "30")))
 # 활성 기간 (며칠 안에 투표한 유저를 활성으로 카운트)
 ACTIVE_WINDOW_DAYS = int(os.environ.get("ACTIVE_WINDOW_DAYS", "7"))
 # 캐시 TTL
@@ -66,10 +67,10 @@ def get_dynamic_base_threshold() -> dict:
         )
         unique_voters = len({v["user_id"] for v in (resp.data or [])})
         scaled = MIN_BASE_THRESHOLD + (unique_voters // VOTERS_PER_VOTE)
-        threshold = max(MIN_BASE_THRESHOLD, min(MAX_BASE_THRESHOLD, scaled))
+        threshold = max(1, min(MAX_BASE_THRESHOLD, scaled))
     except Exception as e:
         logger.warning(f"[threshold] dynamic calc failed: {e}")
-        threshold = DEFAULT_THRESHOLD
+        threshold = max(1, DEFAULT_THRESHOLD)
         unique_voters = 0
 
     _base_cache["value"] = threshold
