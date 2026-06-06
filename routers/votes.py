@@ -66,10 +66,11 @@ async def vote(
         logger.warning(f"[vote] insert 비APIError story={story_id}: {e}")
         raise HTTPException(503, "투표 처리에 실패했습니다. 잠시 후 다시 시도하세요.")
 
-    # 신호 + 투표수 + effective threshold 한 번에
+    # 신호 + 투표수 + effective threshold 한 번에. 삽입과 이 조회 사이에 스토리가
+    # 사라졌으면(예: cleanup cascade) 빈 dict 일 수 있어 .get 으로 방어(KeyError 500 방지).
     sig = await asyncio.to_thread(gather_story_signals, story_id)
-    vote_count = sig["vote_count"]
-    threshold = sig["threshold"]
+    vote_count = sig.get("vote_count", 0)
+    threshold = sig.get("threshold", DEFAULT_THRESHOLD)
 
     # stories.vote_count 캐시 갱신 — 동시 투표 시 느린 코루틴이 낮은 카운트로 덮어쓰지
     # 않게 단조 증가(.lt)로 가드. (투표는 삽입 전용이라 카운트는 증가만 함)

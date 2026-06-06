@@ -34,31 +34,38 @@ CHECK_BATCH_SIZE   = int(os.environ.get("CHECK_BATCH_SIZE", "15"))
 HTTP_TIMEOUT       = 15
 MAX_BODY_BYTES     = 80000   # 본문은 앞 80KB 만 읽음 (대용량 응답 남용 방지)
 MAX_REDIRECTS      = 5
+FETCH_DEADLINE_SEC = 30      # 한 citation 의 전체 fetch(모든 리다이렉트 홉 합산) 절대 한도
 TRACKER_ENABLED    = os.environ.get("TRACKER_ENABLED", "true").lower() != "false"
 
 # 내부 서비스명 차단 목록 (docker 네트워크)
 _BLOCKED_HOSTNAMES = {"localhost", "uploader", "app", "db"}
 
 
-def _is_safe_url(url: str) -> tuple[bool, str]:
+def _is_safe_url(url: str) -> tuple[bool, str, str]:
     """citation URL 은 LLM/Tavily 가 만든 비신뢰 값이다. 서버가 GET 하기 전에
     스킴(http/https)과 호스트(사설·루프백·링크로컬·내부서비스 아님)를 검증해 SSRF 차단.
-    DNS resolve 후 IP 대역까지 본다."""
+    DNS resolve 후 IP 대역까지 본다.
+
+    반환: (safe, reason, pinned_ip). pinned_ip 은 검증을 통과한 '실제로 연결할' IP 다.
+    호출부는 이 IP 로 직접 연결(핀)해야 DNS rebinding(검증과 연결 사이 재resolve 로
+    내부 IP 로 바꿔치기)을 막을 수 있다. 호스트명으로 다시 연결하면 httpx 가 독립적으로
+    재resolve 해 우회된다."""
     try:
         p = urlparse(url)
     except Exception:
-        return False, "bad_url"
+        return False, "bad_url", ""
     if p.scheme not in ("http", "https"):
-        return False, f"scheme:{p.scheme or 'none'}"
+        return False, f"scheme:{p.scheme or 'none'}", ""
     host = p.hostname
     if not host:
-        return False, "no_host"
+        return False, "no_host", ""
     if host.lower() in _BLOCKED_HOSTNAMES:
-        return False, "internal_host"
+        return False, "internal_host", ""
     try:
         infos = socket.getaddrinfo(host, None)
     except Exception:
-        return False, "dns_fail"
+        return False, "dns_fail", ""
+    pinned = ""
     for info in infos:
         ip = info[4][0]
         try:
@@ -67,8 +74,20 @@ def _is_safe_url(url: str) -> tuple[bool, str]:
             continue
         if (addr.is_private or addr.is_loopback or addr.is_link_local
                 or addr.is_reserved or addr.is_multicast or addr.is_unspecified):
-            return False, f"blocked_ip:{ip}"
-    return True, ""
+            return False, f"blocked_ip:{ip}", ""
+        if not pinned:
+            pinned = ip
+    if not pinned:
+        return False, "no_ip", ""
+    return True, "", pinned
+
+
+def _host_header(u: "httpx.URL") -> str:
+    """원본 URL 의 Host 헤더 값(host[:port], IPv6 는 브래킷)."""
+    h = u.host
+    if ":" in h:  # IPv6 리터럴
+        h = f"[{h}]"
+    return h if u.port is None else f"{h}:{u.port}"
 
 # 커뮤니티 게시판에서 글이 삭제되었을 때 자주 보이는 본문 패턴.
 # 주의: FM코리아 등 일부 사이트는 없는 글을 메인 페이지로 리다이렉트 → 본문 패턴으로
@@ -237,51 +256,65 @@ async def fetch_observation(url: str, client: httpx.AsyncClient) -> dict:
     초기 1회 검증을 우회하는 것을 차단. follow_redirects=True 면 최종 목적지가 재검증되지 않음.)"""
     headers = {"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5"}
     cur = url
-    for _ in range(MAX_REDIRECTS + 1):
-        safe, why = await asyncio.to_thread(_is_safe_url, cur)
-        if not safe:
-            return {"net": "unsafe", "http_code": None, "final_url": cur,
-                    "reason": f"unsafe_url:{why}"}
-        try:
-            # 스트리밍으로 헤더 먼저 받고, 본문은 앞 MAX_BODY_BYTES 만 읽는다.
-            async with client.stream(
-                "GET", cur, timeout=HTTP_TIMEOUT, follow_redirects=False, headers=headers,
-            ) as resp:
-                code = resp.status_code
-                # 리다이렉트는 직접 따라가되 다음 홉 URL 을 루프 상단에서 재검증
-                if 300 <= code < 400 and "location" in resp.headers:
-                    cur = str(httpx.URL(cur).join(resp.headers["location"]))
-                    continue
-                if code >= 400:
-                    return {"net": "http", "http_code": code, "final_url": cur}
+    # 인터-청크 간격이 아니라 '전체' 마감시한. 느린 드립/슬로로리스 서버가 직렬 추적
+    # 루프를 무한정 붙들지 못하게 모든 홉을 합쳐 절대 한도를 건다.
+    try:
+        async with asyncio.timeout(FETCH_DEADLINE_SEC):
+            for _ in range(MAX_REDIRECTS + 1):
+                safe, why, ip = await asyncio.to_thread(_is_safe_url, cur)
+                if not safe:
+                    return {"net": "unsafe", "http_code": None, "final_url": cur,
+                            "reason": f"unsafe_url:{why}"}
+                # DNS rebinding 방어: 검증한 그 IP 로 직접 연결(핀)하고, Host 헤더와
+                # TLS SNI 는 원래 호스트명으로 유지(인증서 검증 정상). 호스트명으로 다시
+                # 연결하면 httpx 가 독립 재resolve → 내부 IP 로 바꿔치기 가능.
+                u = httpx.URL(cur)
+                connect_url = u.copy_with(host=ip)
+                req_headers = {**headers, "Host": _host_header(u)}
+                try:
+                    # 스트리밍으로 헤더 먼저 받고, 본문은 앞 MAX_BODY_BYTES 만 읽는다.
+                    async with client.stream(
+                        "GET", connect_url, timeout=HTTP_TIMEOUT, follow_redirects=False,
+                        headers=req_headers, extensions={"sni_hostname": u.host},
+                    ) as resp:
+                        code = resp.status_code
+                        # 리다이렉트는 직접 따라가되 다음 홉 URL 을 루프 상단에서 재검증+재핀
+                        if 300 <= code < 400 and "location" in resp.headers:
+                            cur = str(httpx.URL(cur).join(resp.headers["location"]))
+                            continue
+                        if code >= 400:
+                            return {"net": "http", "http_code": code, "final_url": cur}
 
-                chunks: list[bytes] = []
-                total = 0
-                async for chunk in resp.aiter_bytes():
-                    chunks.append(chunk)
-                    total += len(chunk)
-                    if total >= MAX_BODY_BYTES:
-                        break
-                raw = _decode_body(
-                    b"".join(chunks), resp.encoding, resp.headers.get("content-type", "")
-                )
-        except httpx.TimeoutException:
-            return {"net": "timeout", "http_code": None, "final_url": cur}
-        except Exception as e:
-            return {"net": "neterr", "http_code": None, "final_url": cur,
-                    "reason": f"net:{type(e).__name__}"}
+                        chunks: list[bytes] = []
+                        total = 0
+                        async for chunk in resp.aiter_bytes():
+                            chunks.append(chunk)
+                            total += len(chunk)
+                            if total >= MAX_BODY_BYTES:
+                                break
+                        raw = _decode_body(
+                            b"".join(chunks), resp.encoding,
+                            resp.headers.get("content-type", ""),
+                        )
+                except httpx.TimeoutException:
+                    return {"net": "timeout", "http_code": None, "final_url": cur}
+                except Exception as e:
+                    return {"net": "neterr", "http_code": None, "final_url": cur,
+                            "reason": f"net:{type(e).__name__}"}
 
-        text = _visible_text(raw)
-        dm = DELETION_PATTERNS.search(text)
-        bm = BLOCKED_PATTERNS.search(text)
-        return {
-            "net": "ok", "http_code": code, "final_url": cur, "text_len": len(text),
-            "del_match": bool(dm), "blk_match": bool(bm),
-            "del_snip": (dm.group(0)[:40] if dm else ""),
-            "blk_snip": (bm.group(0)[:40] if bm else ""),
-        }
+                text = _visible_text(raw)
+                dm = DELETION_PATTERNS.search(text)
+                bm = BLOCKED_PATTERNS.search(text)
+                return {
+                    "net": "ok", "http_code": code, "final_url": cur, "text_len": len(text),
+                    "del_match": bool(dm), "blk_match": bool(bm),
+                    "del_snip": (dm.group(0)[:40] if dm else ""),
+                    "blk_snip": (bm.group(0)[:40] if bm else ""),
+                }
 
-    return {"net": "redirect_loop", "http_code": None, "final_url": cur}
+            return {"net": "redirect_loop", "http_code": None, "final_url": cur}
+    except (asyncio.TimeoutError, TimeoutError):
+        return {"net": "timeout", "http_code": None, "final_url": cur, "reason": "deadline"}
 
 
 def _verdict(status: str, http_code, reason, baseline=None) -> dict:

@@ -92,7 +92,10 @@ async def create_story(request: Request, category: str | None = None):
     try:
         result = await asyncio.to_thread(generate, category)
     except Exception as e:
-        raise HTTPException(500, f"LLM 생성 실패: {e}")
+        # 원시 예외 텍스트(내부 upstream URL·provider 응답본문)를 클라이언트에 그대로
+        # 노출하지 않는다 — 서버에만 로깅하고 일반 메시지로 응답.
+        logger.warning(f"[story] 생성 실패: {e!r}")
+        raise HTTPException(503, "이야기 생성에 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.")
 
     # 적합성 게이트: 검색 결과에 진짜 해당 카테고리 글이 없으면 빈 본문을 박제하지 않고
     # 503 으로 알린다(잠시 후 재시도 유도). no_fit 응답을 INSERT 하면 안 된다.

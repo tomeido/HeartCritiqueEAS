@@ -223,6 +223,8 @@ async def jsonrpc_handler(request: Request):
         try:
             result = await asyncio.to_thread(generate)
         except Exception as e:
+            # 원시 예외 텍스트(내부 URL·provider 응답)를 클라이언트에 노출하지 않음.
+            logger.warning(f"[jsonrpc] generate 실패: {e!r}")
             task_id = str(uuid.uuid4())
             return {
                 "jsonrpc": "2.0", "id": rpc_id,
@@ -230,7 +232,8 @@ async def jsonrpc_handler(request: Request):
                     "kind": "task", "id": task_id,
                     "status": {"state": "failed", "timestamp": _now_iso(),
                                "message": {"kind": "message", "role": "agent",
-                                           "parts": [{"kind": "text", "text": str(e)}]}},
+                                           "parts": [{"kind": "text",
+                                                      "text": "이야기 생성에 일시적으로 실패했습니다. 잠시 후 다시 시도해 주세요."}]}},
                     "history": [], "artifacts": [],
                 },
             }
