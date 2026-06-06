@@ -168,14 +168,25 @@ async def timeseries(days: int = 30):
             .gte("archived_at", cutoff)
             .execute()
         )
-        # 삭제 감지 (last_checked 시점 사용)
-        deletions_resp = (
-            db.table("citation_checks")
-            .select("last_checked")
-            .eq("status", "deleted")
-            .gte("last_checked", cutoff)
-            .execute()
-        )
+        # 삭제 감지: 최초감지 시각(deleted_at)으로 버킷팅. 매 재검사로 갱신되는
+        # last_checked 를 쓰면 막대가 드리프트하므로, 컬럼이 있으면 deleted_at 우선.
+        from services.tracker import _has_deleted_at
+        if _has_deleted_at(db):
+            deletions_resp = (
+                db.table("citation_checks")
+                .select("deleted_at,last_checked")
+                .eq("status", "deleted")
+                .gte("deleted_at", cutoff)
+                .execute()
+            )
+        else:
+            deletions_resp = (
+                db.table("citation_checks")
+                .select("last_checked")
+                .eq("status", "deleted")
+                .gte("last_checked", cutoff)
+                .execute()
+            )
         # 투표
         votes_resp = (
             db.table("votes")
@@ -202,7 +213,8 @@ async def timeseries(days: int = 30):
         if a and a >= cutoff[:10]:
             by_date[a]["archives"] += 1
     for d in deletions_resp.data or []:
-        k = (d.get("last_checked") or "")[:10]
+        # deleted_at(최초감지) 우선, 없으면 last_checked 폴백.
+        k = ((d.get("deleted_at") or d.get("last_checked") or ""))[:10]
         if k:
             by_date[k]["deletions"] += 1
     for v in votes_resp.data or []:

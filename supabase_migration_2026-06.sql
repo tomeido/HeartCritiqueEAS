@@ -14,6 +14,16 @@ alter table public.stories
   add column if not exists last_archive_attempt timestamptz,
   add column if not exists last_archive_error   text;
 
+-- ── 1b) 출처 '최초 삭제 감지' 시각 ──────────────────────────────────────────
+-- 시계열 삭제 그래프가 매 재검사마다 갱신되는 last_checked 로 드리프트하지 않게,
+-- status 가 처음 'deleted' 로 바뀐 시각을 한 번만 기록한다.
+alter table public.citation_checks
+  add column if not exists deleted_at timestamptz;
+-- 기존 'deleted' 행 1회 백필(최초감지 시각 미상 → last_checked 로 근사).
+update public.citation_checks
+  set deleted_at = last_checked
+  where status = 'deleted' and deleted_at is null;
+
 -- ── 2) 미박제 글 원자적 정리 함수 ───────────────────────────────────────────
 -- PostgREST 의 캐시 vote_count·.in_() 기반 삭제는 select 와 delete 사이 들어온 투표를
 -- 놓쳐 투표받은 글(과 votes 행)을 cascade 로 날릴 수 있다. 이 함수는 votes 테이블을

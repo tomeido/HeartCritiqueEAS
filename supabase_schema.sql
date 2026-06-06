@@ -94,6 +94,8 @@ create table if not exists public.citation_checks (
   baseline_del_match boolean not null default false,
   baseline_blk_match boolean not null default false,
   baseline_at        timestamptz,
+  -- 최초 'deleted' 전환 시각(시계열 그래프가 last_checked 로 드리프트하지 않게 1회 기록)
+  deleted_at         timestamptz,
   unique (story_id, url)
 );
 

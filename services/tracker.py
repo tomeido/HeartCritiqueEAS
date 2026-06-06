@@ -482,6 +482,24 @@ def _newly_gone(res: dict, prev_status) -> bool:
             and prev_status not in ("deleted", "blocked"))
 
 
+# citation_checks.deleted_at 컬럼 지원 여부(마이그레이션 전이면 None→False 로 1회 탐지).
+# 미설치 상태에서 deleted_at 을 update 에 넣으면 400 으로 상태 갱신 자체가 실패하므로 가드.
+_deleted_at_supported: bool | None = None
+
+
+def _has_deleted_at(db) -> bool:
+    global _deleted_at_supported
+    if _deleted_at_supported is None:
+        try:
+            db.table("citation_checks").select("deleted_at").limit(1).execute()
+            _deleted_at_supported = True
+        except Exception:
+            _deleted_at_supported = False
+            logger.info("[tracker] citation_checks.deleted_at 미설치 — 시계열은 "
+                        "last_checked 폴백 (supabase_migration_2026-06.sql 적용 권장)")
+    return _deleted_at_supported
+
+
 async def _process_row(db, row: dict, client: httpx.AsyncClient) -> tuple[dict, object, bool]:
     """citation 한 행을 재검사(관측 → 판정 → DB 갱신).
     반환: (판정 dict, 직전 status, 갱신 성공 여부)."""
@@ -490,9 +508,11 @@ async def _process_row(db, row: dict, client: httpx.AsyncClient) -> tuple[dict, 
     prev_status = row.get("status")
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
-        db.table("citation_checks").update(
-            _build_update(res, row, now_iso)
-        ).eq("id", row["id"]).execute()
+        upd = _build_update(res, row, now_iso)
+        # 처음 'deleted' 로 바뀐 순간에만 최초감지 시각 기록(컬럼 있을 때만).
+        if res["status"] == "deleted" and prev_status != "deleted" and _has_deleted_at(db):
+            upd["deleted_at"] = now_iso
+        db.table("citation_checks").update(upd).eq("id", row["id"]).execute()
         return res, prev_status, True
     except Exception as e:
         logger.warning(f"[tracker] update fail {row['id']}: {e}")
