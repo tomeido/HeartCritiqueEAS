@@ -111,3 +111,33 @@ create policy "citation_checks_read"  on public.citation_checks
   for select using (true);
 create policy "citation_checks_write" on public.citation_checks
   for all using (auth.role() = 'service_role');
+
+-- ── 미박제 글 원자적 정리 함수 ──────────────────────────────────────────────
+-- cleanup 이 캐시 vote_count 가 아니라 votes 테이블을 같은 스냅샷에서 직접 확인해
+-- 삭제하도록 해, select↔delete 사이 들어온 투표(와 votes 행)가 cascade 로 소실되는
+-- TOCTOU 를 막는다. (services/cleanup.py 가 호출; 없으면 레거시 배치 삭제로 폴백)
+create or replace function public.delete_orphan_pending_stories(
+  p_cutoff    timestamptz,
+  p_max_votes int
+) returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  n integer;
+begin
+  with del as (
+    delete from public.stories s
+    where s.arweave_tx_id is null
+      and s.created_at < p_cutoff
+      and (select count(*) from public.votes v where v.story_id = s.id) <= p_max_votes
+    returning 1
+  )
+  select count(*) into n from del;
+  return n;
+end;
+$$;
+
+revoke all on function public.delete_orphan_pending_stories(timestamptz, int) from public, anon, authenticated;
+grant execute on function public.delete_orphan_pending_stories(timestamptz, int) to service_role;
