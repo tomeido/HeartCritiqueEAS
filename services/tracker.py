@@ -139,6 +139,34 @@ _TRACKING_PARAMS = {
 }
 
 
+_CHARSET_RE = re.compile(rb'charset\s*=\s*["\']?\s*([a-zA-Z0-9_\-]+)', re.I)
+
+
+def _decode_body(body: bytes, resp_encoding: str | None, content_type: str) -> str:
+    """한국 구형 게시판은 EUC-KR/CP949 가 흔하다. resp.encoding(없으면 UTF-8 추정)만
+    믿고 디코딩하면 한글이 깨져 삭제/차단 패턴이 매칭되지 않는다(오탐 음성).
+    Content-Type → <meta charset> → 폴백 체인으로 인코딩을 결정한다."""
+    enc = None
+    m = re.search(r'charset=([a-zA-Z0-9_\-]+)', content_type or "", re.I)
+    if m:
+        enc = m.group(1)
+    if not enc and (resp_encoding and resp_encoding.lower() not in ("utf-8", "utf8", "ascii")):
+        enc = resp_encoding  # httpx 가 헤더에서 명시적으로 잡은 경우만 신뢰
+    if not enc:
+        mm = _CHARSET_RE.search(body[:2048])
+        if mm:
+            enc = mm.group(1).decode("ascii", "ignore")
+    enc = (enc or "utf-8").lower()
+    if enc in ("euc-kr", "euckr", "ks_c_5601-1987", "ksc5601"):
+        enc = "cp949"
+    for codec in (enc, "cp949", "utf-8"):
+        try:
+            return body.decode(codec)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return body.decode("utf-8", errors="replace")
+
+
 def _visible_text(html: str) -> str:
     """HTML 에서 스크립트/스타일/태그/주석을 제거한 가시 텍스트만 반환.
     본문 패턴 매칭과 길이 비교를 script 내 JSON 등 비가시 영역과 분리해
@@ -234,7 +262,9 @@ async def fetch_observation(url: str, client: httpx.AsyncClient) -> dict:
                     total += len(chunk)
                     if total >= MAX_BODY_BYTES:
                         break
-                raw = b"".join(chunks).decode(resp.encoding or "utf-8", errors="replace")
+                raw = _decode_body(
+                    b"".join(chunks), resp.encoding, resp.headers.get("content-type", "")
+                )
         except httpx.TimeoutException:
             return {"net": "timeout", "http_code": None, "final_url": cur}
         except Exception as e:

@@ -12,6 +12,12 @@ from services.db import get_db
 router = APIRouter()
 
 
+def _attr(value) -> str:
+    """XML 속성값 이스케이프. 기본 xml_escape 는 따옴표를 안 바꿔서 큰따옴표가 든
+    citation uri/title·Host 헤더가 속성을 깨거나 주입할 수 있다(따옴표까지 escape)."""
+    return xml_escape(str(value), {'"': "&quot;", "'": "&apos;"})
+
+
 def _base_url(request: Request) -> str:
     host = (
         request.headers.get("x-forwarded-host")
@@ -41,8 +47,8 @@ def _make_atom(
         '<feed xmlns="http://www.w3.org/2005/Atom">',
         f"  <title>{xml_escape(title)}</title>",
         f"  <subtitle>{xml_escape(subtitle)}</subtitle>",
-        f'  <link href="{xml_escape(feed_url)}" rel="self" type="application/atom+xml"/>',
-        f'  <link href="{xml_escape(home_url)}" rel="alternate" type="text/html"/>',
+        f'  <link href="{_attr(feed_url)}" rel="self" type="application/atom+xml"/>',
+        f'  <link href="{_attr(home_url)}" rel="alternate" type="text/html"/>',
         f"  <id>{xml_escape(feed_url)}</id>",
         f"  <updated>{xml_escape(updated)}</updated>",
         "  <author><name>Heart &amp; Critique Agent</name></author>",
@@ -90,13 +96,13 @@ def _make_atom(
                 uri = c.get("uri", "")
                 ctitle = c.get("title", uri)
                 cite_items.append(
-                    f'<li><a href="{xml_escape(uri)}">{xml_escape(ctitle)}</a></li>'
+                    f'<li><a href="{_attr(uri)}">{xml_escape(ctitle)}</a></li>'
                 )
             parts_html.append("<p>참고 출처:</p><ul>" + "".join(cite_items) + "</ul>")
 
         if s.get("arweave_url"):
             parts_html.append(
-                f'<p><a href="{xml_escape(s["arweave_url"])}">🗄 Arweave 영구 박제 원본 보기</a></p>'
+                f'<p><a href="{_attr(s["arweave_url"])}">🗄 Arweave 영구 박제 원본 보기</a></p>'
             )
 
         content_html = "".join(parts_html)
@@ -108,10 +114,10 @@ def _make_atom(
             "  <entry>",
             f"    <id>{xml_escape(entry_link)}</id>",
             f"    <title>{xml_escape(entry_title)}</title>",
-            f'    <link href="{xml_escape(entry_link)}" rel="alternate" type="text/html"/>',
+            f'    <link href="{_attr(entry_link)}" rel="alternate" type="text/html"/>',
             f"    <published>{xml_escape(published)}</published>",
             f"    <updated>{xml_escape(entry_updated)}</updated>",
-            f'    <category term="{xml_escape(category)}"/>',
+            f'    <category term="{_attr(category)}"/>',
             f"    <summary>{xml_escape(summary_text)}</summary>",
             f'    <content type="html">{xml_escape(content_html)}</content>',
             "  </entry>",

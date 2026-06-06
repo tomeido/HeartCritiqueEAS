@@ -670,10 +670,14 @@ _GATE_CRITERIA = {
 
 
 # 모델이 NO_FIT 마커 대신 한국어 거부 산문을 낼 때를 첫 줄에서만 보수적으로 포착.
-# '적합한 글이 없습니다'·'해당하는 사연을 찾을 수 없' 등. (글/사연/미담/내용/제보/이야기에
-# 한정해 '도와줄 사람이 없던' 같은 정상 본문은 매칭하지 않음.)
+# '적합한 글이 없습니다'·'해당하는 사연을 찾을 수 없' 등 '거부 종결'이 줄 끝에 와야 매칭.
+# '마땅한 사연 없을 줄 알았던 골목에서…' 같은 정상 서사 도입부(부정이 줄 끝이 아니고
+# 종결형도 아님)는 매칭하지 않아 멀쩡한 글을 버리지 않는다.
 _NO_FIT_PROSE_RE = re.compile(
-    r'(적합한|해당하는|관련된|마땅한)\s*(글|사연|미담|내용|제보|이야기)\S{0,4}\s*(없|찾을 수 없|찾지 못)'
+    r'(적합한|해당하는|관련된|마땅한)\s*(글|사연|미담|내용|제보|이야기)'
+    r'[^\n]{0,10}?'
+    r'(없습니다|없음|없어요|없네요|찾을\s*수\s*없\S*|찾지\s*못\S*)'
+    r'\s*[.。!]?\s*$'
 )
 
 
@@ -687,8 +691,11 @@ def _is_no_fit(raw_text: str) -> bool:
     marker = re.sub(r'^[\s"\'`*\-\[\(]+', '', first).upper().replace(" ", "")
     if marker.startswith("NO_FIT") or marker.startswith("NOFIT"):
         return True
-    # 마커 대신 한국어 거부 산문을 낸 경우(첫 줄 한정)
-    return bool(_NO_FIT_PROSE_RE.search(first))
+    # 마커 대신 한국어 거부 산문을 낸 경우(첫 줄 한정). 거부문은 짧고 단정적이므로
+    # 첫 줄이 길면(문학적 도입부) 산문 매칭을 적용하지 않아 오탐을 막는다.
+    if len(first) <= 40 and _NO_FIT_PROSE_RE.search(first):
+        return True
+    return False
 
 
 def _groq_search(query: str, category: str, domains, off: bool) -> tuple:

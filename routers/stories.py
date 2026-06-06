@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -25,6 +26,14 @@ logger = logging.getLogger(__name__)
 
 # 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
 STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
+
+
+def _ensure_uuid(story_id: str) -> None:
+    """uuid 컬럼에 잘못된 형식을 넘기면 PostgREST 가 22P02 로 500 을 내므로 선검증."""
+    try:
+        uuid.UUID(story_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(404, "스토리를 찾을 수 없습니다")
 
 
 def _mask_pending(story: dict) -> None:
@@ -126,13 +135,15 @@ async def create_story(request: Request, category: str | None = None):
 @router.get("/stories")
 async def list_stories(limit: int = 50):
     db = get_db()
+    # 음수/0 limit 이 PostgREST 에서 500 나지 않게 하한도 클램프.
+    limit = max(1, min(limit, 200))
     # 목록은 citations(jsonb) 자체를 전송하지 않는다(무겁다). 카운트는 추적 레코드 수로.
     resp = (
         db.table("stories")
         .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
                 "created_at,gap_score,community_count,news_count")
         .order("created_at", desc=True)
-        .limit(min(limit, 200))
+        .limit(limit)
         .execute()
     )
     stories = resp.data or []
@@ -163,6 +174,7 @@ async def list_stories(limit: int = 50):
 
 @router.get("/stories/{story_id}")
 async def get_story(story_id: str):
+    _ensure_uuid(story_id)
     db = get_db()
     resp = db.table("stories").select("*").eq("id", story_id).limit(1).execute()
     if not resp.data:
@@ -196,6 +208,7 @@ async def get_story(story_id: str):
 @router.post("/recheck/{story_id}")
 async def manual_recheck(story_id: str, request: Request):
     """수동 재검사 트리거. 응답에 새 상태 포함."""
+    _ensure_uuid(story_id)
     allowed, retry_after, reason = check_recheck_ratelimit(request)
     if not allowed:
         raise HTTPException(

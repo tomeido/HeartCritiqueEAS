@@ -194,6 +194,14 @@ async def jsonrpc_handler(request: Request):
             status_code=400,
         )
 
+    # 유효 JSON 이지만 객체가 아닌 경우([], "x", 5, true)에 body.get(...) 가 500 나지 않게.
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None,
+             "error": {"code": -32600, "message": "Invalid Request"}},
+            status_code=400,
+        )
+
     rpc_id = body.get("id")
     method = body.get("method", "")
 

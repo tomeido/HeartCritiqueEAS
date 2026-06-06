@@ -1346,7 +1346,14 @@ async function generateStory(btn, category) {
     const resp = await fetch(url, { method: 'POST' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    showStory({
+    // 생성 응답은 gap_score·deleted_count 등 추적/격차 필드를 빼고 온다. 전체 레코드를
+    // 다시 받아 상세 카드가 목록 행과 동일한 신호를 보이게 한다(실패 시 부분 데이터로 폴백).
+    let full = null;
+    try {
+      const fr = await fetch(`/api/stories/${data.story_id}`);
+      if (fr.ok) full = await fr.json();
+    } catch (_) { /* 폴백 */ }
+    showStory(full || {
       id: data.story_id,
       category: data.category,
       body: data.body,
@@ -1583,6 +1590,13 @@ async function refreshVoteStatus(storyId) {
     }
   } catch (e) {
     console.error('[vote status]', e);
+    // 투표 버튼이 showStory 에서 disabled 로 무력화된 채 남지 않게 복구 경로 제공.
+    const btn = document.getElementById('btn-vote');
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '↻ 투표 상태 다시 불러오기';
+      btn.onclick = () => refreshVoteStatus(storyId);
+    }
   }
 }
 
@@ -1909,7 +1923,10 @@ async function runVerification(txId, arweaveUrl) {
       const sigBytes = hexToBytes(signed.signature);
       const pubBytes = hexToBytes(signed.publicKey);
       const sig = secp256k1.Signature.fromDER(sigBytes);
-      const valid = secp256k1.verify(sig, hash, pubBytes);
+      // lowS:false — 무결성(해시·키 대조)은 그대로 검증하되 malleability 정책으로 인한
+      // high-S 거부만 끈다. 서버가 이제 low-S 로 서명하지만, 이미 Arweave 에 박제된 옛
+      // high-S 번들도 정상 검증되도록 보장(변조된 payload 는 해시 불일치로 여전히 실패).
+      const valid = secp256k1.verify(sig, hash, pubBytes, { lowS: false });
       if (valid) {
         updateStep(s6, '서명 유효 — payload 가 박제 시점과 동일함이 증명됨', 'ok');
       } else {

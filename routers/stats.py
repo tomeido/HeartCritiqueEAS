@@ -148,11 +148,20 @@ async def timeseries(days: int = 30):
     # 일시적 DB 오류(끊긴 keepalive 등)에 차트 전체가 500 나지 않게 — 직전 캐시(만료됐어도)
     # 가 있으면 그걸, 없으면 빈 시계열을 돌려준다.
     try:
-        # 스토리 (created_at + archived_at)
+        # 신규 스토리 (created_at 기준)
         stories_resp = (
             db.table("stories")
-            .select("created_at,archived_at")
-            .gte("created_at", (now - timedelta(days=days + 90)).isoformat())  # archived는 더 옛것도
+            .select("created_at")
+            .gte("created_at", cutoff)
+            .execute()
+        )
+        # 박제 (archived_at 기준) — created_at 으로 거르면 오래전 생성·최근 박제된 글이
+        # 빠져 박제 그래프가 과소집계되므로 archived_at 으로 별도 조회.
+        archives_resp = (
+            db.table("stories")
+            .select("archived_at")
+            .not_.is_("archived_at", "null")
+            .gte("archived_at", cutoff)
             .execute()
         )
         # 삭제 감지 (last_checked 시점 사용)
@@ -184,6 +193,7 @@ async def timeseries(days: int = 30):
         c = (s.get("created_at") or "")[:10]
         if c and c >= cutoff[:10]:
             by_date[c]["stories"] += 1
+    for s in archives_resp.data or []:
         a = (s.get("archived_at") or "")[:10]
         if a and a >= cutoff[:10]:
             by_date[a]["archives"] += 1
