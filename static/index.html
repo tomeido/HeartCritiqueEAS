@@ -1601,6 +1601,11 @@ async function refreshVoteStatus(storyId) {
 }
 
 function renderVoteArea(storyId, data) {
+  // 비동기(투표/상태 조회) 응답이 늦게 도착했을 때, 그 사이 사용자가 다른 글로
+  // 이동했다면 공유 요소(#btn-vote·#vote-num)에 엉뚱한 글의 상태를 덮어쓰지 않는다.
+  // (pollForArchive 의 네비게이션 가드와 동일한 의도)
+  const curId = currentStory?.id || currentStory?.story_id;
+  if (curId && curId !== storyId) return;
   const btn = document.getElementById('btn-vote');
   document.getElementById('vote-num').textContent = data.vote_count;
   document.getElementById('vote-threshold').textContent = data.threshold;
