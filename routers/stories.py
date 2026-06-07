@@ -17,6 +17,7 @@ from services.threshold import (
 )
 from services.tracker import (
     get_status_map,
+    is_untrackable_source,
     recheck_one_story,
     register_citations,
 )
@@ -56,12 +57,15 @@ def _augment_with_status(story: dict, status_by_url: dict) -> dict:
             c["track_last_checked"] = info["last_checked"]
             c["track_http_code"] = info["http_code"]
             c["track_reason"] = info.get("reason")
+            c["track_untrackable"] = is_untrackable_source(
+                c.get("uri"), info["http_code"], info.get("reason"))
             if info["status"] == "deleted":
                 deleted += 1
             elif info["status"] == "blocked":
                 blocked += 1
         else:
             c["track_status"] = "unchecked"
+            c["track_untrackable"] = is_untrackable_source(c.get("uri"))
     story["citations"] = citations
     story["deleted_count"] = deleted
     story["blocked_count"] = blocked

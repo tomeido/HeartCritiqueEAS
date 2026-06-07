@@ -90,8 +90,10 @@ def _host_header(u: "httpx.URL") -> str:
     return h if u.port is None else f"{h}:{u.port}"
 
 # 커뮤니티 게시판에서 글이 삭제되었을 때 자주 보이는 본문 패턴.
-# 주의: FM코리아 등 일부 사이트는 없는 글을 메인 페이지로 리다이렉트 → 본문 패턴으로
-# 잡을 수 없음 (알려진 한계). 명확한 표식이 있는 더쿠/클리앙/네이트판 등은 잘 감지.
+# 주의: 일부 사이트는 없는 글을 메인 페이지로 리다이렉트 → 본문 패턴으론 못 잡고
+# moved_to_root 로 잡는다. FM코리아는 그보다 더 막혀, 봇차단(430)이나 200-'보안 시스템'
+# 챌린지 페이지를 줘서 본문 자체를 못 읽음 → UNTRACKABLE_DOMAINS/BOT_CHALLENGE_PATTERNS
+# 로 '추적 불가' 처리(아래). 명확한 표식이 있는 더쿠/클리앙/네이트판 등은 잘 감지.
 #
 # 오탐 방지(중요): 패턴은 살아있는 페이지의 정상 UI 문구와 충돌하지 않도록 '게시물 단위'
 # 대상 명사에 앵커링한다. 과거 무앵커 패턴이 일으킨 치명적 오탐 사례:
@@ -139,6 +141,29 @@ BLOCKED_PATTERNS = re.compile(
     r"|성인\s*인증",
     re.IGNORECASE,
 )
+
+# 자동 크롤러를 차단/챌린지하는 사이트 — 본문을 못 읽어 삭제 추적이 불가능한 도메인.
+# host 접미사 매칭(www./m./서브도메인 포함). 큐레이션 목록에 있어도 추적은 불가하다
+# (FM코리아: HTTP 200 으로 '보안 시스템' 챌린지 페이지를 주거나 간헐적으로 430).
+UNTRACKABLE_DOMAINS = {"fmkorea.com"}
+
+# 사이트가 자동 접근을 거부/챌린지하는 HTTP 코드 (is_untrackable_source 가 사용).
+BOT_BLOCK_CODES = (403, 429, 430, 503)
+
+# 안티봇 인터스티셜(챌린지) 페이지. HTTP 200 으로 와도 실제 본문이 아니라 '잠시 기다리면
+# 자동 접속됩니다' 류 차단 페이지다. 이걸 live/baseline 으로 잡으면 삭제를 영영 못 본다.
+BOT_CHALLENGE_PATTERNS = re.compile(
+    r"보안\s*시스템"
+    r"|잠시[^<]{0,12}기다리[^<]{0,40}자동"
+    r"|Just\s+a\s+moment"
+    r"|Checking\s+(?:if\s+the\s+site\s+connection\s+is\s+secure|your\s+browser)"
+    r"|Attention\s+Required|cf-browser-verification|DDoS\s+protection\s+by"
+    r"|Enable\s+JavaScript\s+and\s+cookies\s+to\s+continue",
+    re.IGNORECASE,
+)
+
+# 봇 차단/안티봇 챌린지로 판정된 출처의 reason 센티넬(직렬화 시점 재계산에 사용).
+UNTRACKABLE_REASON = "봇 차단 — 삭제 추적 불가"
 
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -233,6 +258,26 @@ def _is_site_root(url: str) -> bool:
     return not meaningful
 
 
+def is_untrackable_source(url, http_code=None, reason=None) -> bool:
+    """이 출처가 '삭제 추적 불가'인지(봇 차단·안티봇 챌린지·지정 도메인).
+    UI 라벨/API 플래그 공용. body 없이 (url, http_code, reason)만으로 판정하므로
+    DB 추적 레코드만으로 직렬화 시점에 재계산할 수 있다.
+
+    단, 404/410 은 명백한 실제 삭제 신호라 도메인과 무관하게 신뢰한다(추적 불가로
+    가리지 않음) — FM코리아가 드물게 진짜 404 를 줄 때 '삭제됨'을 덮어쓰지 않도록."""
+    if http_code in (404, 410):
+        return False
+    host = (urlparse(url or "").hostname or "").lower()
+    for d in UNTRACKABLE_DOMAINS:
+        if host == d or host.endswith("." + d):
+            return True
+    if http_code in BOT_BLOCK_CODES:
+        return True
+    if reason == UNTRACKABLE_REASON:
+        return True
+    return False
+
+
 # 본문이 기준선 대비 이 비율 미만으로 줄면 '본문 급감'(글이 안내문 한 줄로 대체)
 _COLLAPSE_RATIO = float(os.environ.get("CITATION_COLLAPSE_RATIO", "0.35"))
 # 급감 판정을 적용할 최소 기준선 길이 (짧은 페이지의 비율 노이즈 방지)
@@ -310,6 +355,7 @@ async def fetch_observation(url: str, client: httpx.AsyncClient) -> dict:
                     "del_match": bool(dm), "blk_match": bool(bm),
                     "del_snip": (dm.group(0)[:40] if dm else ""),
                     "blk_snip": (bm.group(0)[:40] if bm else ""),
+                    "bot_challenge": bool(BOT_CHALLENGE_PATTERNS.search(text)),
                 }
 
             return {"net": "redirect_loop", "http_code": None, "final_url": cur}
@@ -360,6 +406,11 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
     # --- net == 'ok' : 2xx 본문 확보 ---
     final_url = obs.get("final_url") or original_url
     have_base = bool(baseline and baseline.get("captured"))
+
+    # 안티봇 챌린지 페이지(예: '보안 시스템', 'Just a moment')는 실제 본문이 아니다.
+    # live/baseline 로 잡으면 삭제가 영영 가려지므로 추적 불가(error)로 본다(기준선 미캡처).
+    if obs.get("bot_challenge"):
+        return _verdict("error", code, UNTRACKABLE_REASON)
 
     if not have_base:
         # 콜드스타트(기준선 없음): 비교 불가. 잘 앵커링된 '삭제' 표식만 신뢰하고,

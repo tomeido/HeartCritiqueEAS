@@ -71,3 +71,37 @@ def test_client_ip_blank_xff_falls_through():
     assert rl.client_ip(_Req({"x-forwarded-for": "5.5.5.5, 1.1.1.1"})) == "5.5.5.5"
     # XFF 없으면 client.host
     assert rl.client_ip(_Req({})) == "9.9.9.9"
+
+
+# ── FM코리아류 봇차단/안티봇 챌린지 = '삭제 추적 불가' ───────────────────────
+def test_untrackable_source_domain_and_botblock():
+    U = tracker.is_untrackable_source
+    # 지정 도메인은 코드/서브도메인 무관 추적 불가
+    assert U("https://www.fmkorea.com/123", 200, None) is True
+    assert U("https://m.fmkorea.com/123", 430, "HTTP 430") is True
+    # 단, 404/410 은 실제 삭제 신호라 도메인과 무관하게 신뢰(가리지 않음)
+    assert U("https://www.fmkorea.com/123", 404, "HTTP 404") is False
+    # 봇차단 코드는 도메인 무관 추적 불가
+    assert U("https://theqoo.net/1", 403, "HTTP 403") is True
+    # 정상 도메인/코드는 추적 가능
+    assert U("https://theqoo.net/1", 200, None) is False
+    # 200 챌린지 판정분의 reason 센티넬도 추적 불가
+    assert U("https://x.example/1", 200, tracker.UNTRACKABLE_REASON) is True
+
+
+# ── 안티봇 챌린지 페이지(200)를 live/baseline 으로 오인하지 않는다 ────────────
+def test_challenge_page_not_marked_live():
+    P = tracker.BOT_CHALLENGE_PATTERNS
+    assert P.search("에펨코리아 보안 시스템 IP 잠시 기다리면 자동으로 접속됩니다")
+    assert P.search("Just a moment... Checking your browser")
+    assert not P.search("따뜻한 미담 본문입니다.")
+    # 챌린지로 관측되면 200 이어도 error + 센티넬 reason, 기준선 미캡처
+    obs = {"net": "ok", "http_code": 200, "final_url": "https://www.fmkorea.com/1",
+           "text_len": 3380, "del_match": False, "blk_match": False, "bot_challenge": True}
+    v = tracker.decide_status(obs, "https://www.fmkorea.com/1", None)
+    assert v["status"] == "error" and v["reason"] == tracker.UNTRACKABLE_REASON
+    assert v.get("baseline") is None
+    # 일반 live 판정은 영향 없음
+    ok = {"net": "ok", "http_code": 200, "final_url": "https://theqoo.net/1",
+          "text_len": 3000, "del_match": False, "blk_match": False, "bot_challenge": False}
+    assert tracker.decide_status(ok, "https://theqoo.net/1", None)["status"] == "live"
