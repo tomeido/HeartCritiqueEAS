@@ -1059,12 +1059,12 @@ button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-v
     <div class="list-header">
       <p class="section-title">최근 이야기</p>
       <div class="filters">
-        <button class="chip active" data-filter="all">전체</button>
-        <button class="chip" data-filter="kindness">선행</button>
-        <button class="chip" data-filter="critique">비판</button>
-        <button class="chip" data-filter="gap">🔍 보도 격차</button>
-        <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
-        <button class="chip" data-filter="archived">🗄 박제됨</button>
+        <button class="chip active" data-filter="all" aria-pressed="true">전체</button>
+        <button class="chip" data-filter="kindness" aria-pressed="false">선행</button>
+        <button class="chip" data-filter="critique" aria-pressed="false">비판</button>
+        <button class="chip" data-filter="gap" aria-pressed="false">🔍 보도 격차</button>
+        <button class="chip" data-filter="deleted" aria-pressed="false">🚨 삭제된 출처</button>
+        <button class="chip" data-filter="archived" aria-pressed="false">🗄 박제됨</button>
       </div>
     </div>
     <div id="story-list">
@@ -1480,7 +1480,7 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 재검사 중…';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -1632,7 +1632,7 @@ async function castVote(storyId) {
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 투표 중…';
   setStatus('vote-status', '');
 
   try {
@@ -2089,8 +2089,12 @@ async function loadAndShowStory(storyId) {
 
 document.querySelectorAll('.chip').forEach(chip => {
   chip.onclick = () => {
-    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    document.querySelectorAll('.chip').forEach(c => {
+      c.classList.remove('active');
+      c.setAttribute('aria-pressed', 'false');
+    });
     chip.classList.add('active');
+    chip.setAttribute('aria-pressed', 'true');
     currentFilter = chip.dataset.filter;
     renderStoryList();
   };
