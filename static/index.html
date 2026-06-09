@@ -859,7 +859,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 a { color: inherit; }
 
 /* ── 접근성: 키보드 포커스 링 (포인터 클릭엔 미노출) ── */
-button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible {
+button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible, .list-item:focus-visible {
   outline: 2px solid var(--accent-1);
   outline-offset: 2px;
 }
@@ -2056,6 +2056,8 @@ function renderStoryList() {
     const thresholdLabel = urgent
       ? `<span style="color:var(--err);font-weight:700">${s.vote_count}/${threshold}표 ⚡</span>`
       : `${s.vote_count}/${threshold}표`;
+    div.setAttribute('role', 'button');
+    div.setAttribute('tabindex', '0');
     div.innerHTML = `
       <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
       <div class="list-body">${newMark}${escHtml((s.body || '').slice(0, 140))}</div>
@@ -2071,6 +2073,12 @@ function renderStoryList() {
         ${deletedLine}
       </div>`;
     div.onclick = () => loadAndShowStory(s.id);
+    div.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        loadAndShowStory(s.id);
+      }
+    };
     el.appendChild(div);
   });
 }

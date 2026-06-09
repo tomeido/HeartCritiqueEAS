@@ -1,0 +1,3 @@
+## 2024-11-28 - Dynamic List Items Accessibility
+**Learning:** Dynamic DOM elements (like `div`s rendered by JS and configured to react to clicks) do not inherently receive keyboard focus or semantics. Adding `onclick` is not enough for keyboard/screen reader users.
+**Action:** When making custom non-interactive elements (like `div`) interactive via JS, explicitly add `role="button"` (or appropriate role), `tabindex="0"`, an `onkeydown` handler for Enter/Space keys, and visual `:focus-visible` styles to ensure full accessibility.
