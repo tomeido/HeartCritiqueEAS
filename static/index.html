@@ -859,7 +859,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 a { color: inherit; }
 
 /* ── 접근성: 키보드 포커스 링 (포인터 클릭엔 미노출) ── */
-button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible {
+button:focus-visible, a:focus-visible, .stat-tile:focus-visible, summary:focus-visible, .list-item:focus-visible {
   outline: 2px solid var(--accent-1);
   outline-offset: 2px;
 }
@@ -2070,7 +2070,15 @@ function renderStoryList() {
         ${gapLine}
         ${deletedLine}
       </div>`;
+    div.setAttribute('role', 'button');
+    div.tabIndex = 0;
     div.onclick = () => loadAndShowStory(s.id);
+    div.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        loadAndShowStory(s.id);
+      }
+    };
     el.appendChild(div);
   });
 }
