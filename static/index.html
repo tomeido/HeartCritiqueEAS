@@ -481,6 +481,14 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* 봇 차단 등으로 페이지를 못 읽어 삭제 여부 자체를 추적할 수 없는 출처(정보성, 경고 아님) */
 .cit-status-untrackable { background: var(--border); color: var(--muted); font-style: italic; }
 @media (prefers-color-scheme: dark) { .cit-status-blocked { background: #3a2906; color: #f0cf86; } }
+/* Wayback 위임 스냅샷 — 원본이 사라져도 남는 외부 박제(Internet Archive) 링크 */
+.cit-archive { display: inline-block; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-xs);
+  font-weight: 700; padding: 1px 6px; border-radius: var(--r-sm); margin-left: 4px; letter-spacing: .04em;
+  background: var(--border); color: var(--muted); transition: background var(--t-base), color var(--t-base); }
+.cit-archive:hover { background: var(--accent-1); color: #fff; }
+/* 원본이 삭제된 글은 스냅샷이 유일한 증거 — '구조됨'으로 강조(삭제 취소선에도 흐려지지 않음) */
+.cit-archive.is-rescued { background: #1f7a4d; color: #fff; opacity: 1; }
+.cit-archive.is-rescued:hover { background: #155f3a; color: #fff; }
 
 /* 격차/삭제 경보 — 1면 긴급 단신 */
 .gap-alert, .deletion-alert {
@@ -1410,7 +1418,36 @@ function makeCitation(c) {
       <div class="cit-domain">${escHtml(domain)}${statusBadge}</div>
     </div>
     <span class="cit-arrow">↗</span>`;
+  attachArchiveSnapshot(a, c, status);
   return a;
+}
+
+// 원본이 사라져도 남는 Wayback(Internet Archive) 스냅샷 링크. cit-item 은 통째로 앵커라
+// 중첩 앵커(invalid) 대신 .cit-domain 에 별도 핸들러 칩을 붙여, 부모 앵커의 원본 이동과
+// 충돌하지 않게 클릭/엔터에서 stopPropagation 후 새 탭으로 스냅샷을 연다.
+function attachArchiveSnapshot(a, c, status) {
+  const url = c.archive_url;
+  // 백엔드는 wayback success 일 때만 archive_url 을 내려준다. 형식도 확인(안전).
+  if (!url || !/^https:\/\/web\.archive\.org\//.test(url)) return;
+  const dom = a.querySelector('.cit-domain');
+  if (!dom) return;
+  const rescued = status === 'deleted';
+  const chip = document.createElement('span');
+  chip.className = 'cit-archive' + (rescued ? ' is-rescued' : '');
+  chip.setAttribute('role', 'link');
+  chip.tabIndex = 0;
+  chip.title = rescued
+    ? '원본은 삭제됐지만 Internet Archive 스냅샷은 남아 있습니다 — 삭제 전 원본 보기'
+    : 'Internet Archive 스냅샷 (원본 삭제 대비 보존본)';
+  chip.textContent = rescued ? '📦 삭제 전 스냅샷' : '📦 스냅샷';
+  const open = (e) => {
+    e.preventDefault(); e.stopPropagation();
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+  chip.addEventListener('click', open);
+  chip.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') open(e); });
+  dom.appendChild(document.createTextNode(' '));
+  dom.appendChild(chip);
 }
 
 // 봇 차단/안티봇 챌린지로 페이지를 못 읽어 삭제 추적이 불가능한 출처(서버 track_untrackable 기준).

@@ -8,6 +8,8 @@ from fastapi import APIRouter
 
 from services.db import get_db
 from services.hunter import get_status as get_hunter_status
+from services.collector import get_status as get_collector_status
+from services.wayback import get_status as get_wayback_status
 from services.threshold import (
     DEFAULT_THRESHOLD,
     get_dynamic_base_threshold,
@@ -42,9 +44,11 @@ def _count(table: str, build=None) -> int | None:
 async def get_stats():
     now_t = time.time()
     if _stats_cache["value"] is not None and now_t < _stats_cache["expires_at"]:
-        # 캐시본은 매번 새로 계산되는 hunter 상태만 갱신해 신선도 유지
+        # 캐시본은 매번 새로 계산되는 hunter/collector 상태만 갱신해 신선도 유지
         cached = _stats_cache["value"]
         cached["hunter"] = get_hunter_status()
+        cached["collector"] = get_collector_status()
+        cached["wayback"] = {**cached.get("wayback", {}), **get_wayback_status()}
         return cached
 
     now = datetime.now(timezone.utc)
@@ -72,6 +76,20 @@ async def get_stats():
 
     votes_total = _count("votes")
 
+    # 선제 수집 현황(captured_posts). 선택 기능(migrations/006)이라 테이블이 없으면 None→0.
+    # complete 게이트(아래)에는 넣지 않아 수집기 미설정이 stats 캐싱을 막지 못하게 한다.
+    captured_total = _count("captured_posts")
+    captured_status = {
+        st: _count("captured_posts", lambda q, st=st: q.eq("status", st))
+        for st in ("live", "deleted", "blocked", "error", "unchecked")
+    }
+
+    # Wayback 위임 박제 현황(선택, migrations/007). complete 게이트 밖.
+    wayback_status_counts = {
+        st: _count("wayback_snapshots", lambda q, st=st: q.eq("status", st))
+        for st in ("queued", "pending", "success", "error")
+    }
+
     stories_24h = _count("stories", lambda q: q.gte("created_at", day_ago))
     archives_24h = _count("stories", lambda q: q.gte("archived_at", day_ago))
 
@@ -88,6 +106,8 @@ async def get_stats():
         stale = _stats_cache["value"]
         if stale is not None:
             stale["hunter"] = get_hunter_status()
+            stale["collector"] = get_collector_status()
+            stale["wayback"] = {**stale.get("wayback", {}), **get_wayback_status()}
             return stale
         # 캐시도 없으면(콜드스타트) 0 으로 표시하되 캐시는 남기지 않아 다음 호출이 곧 재시도.
 
@@ -116,6 +136,14 @@ async def get_stats():
             **citation_status,
         },
         "votes": {"total": z(votes_total)},
+        "captured": {
+            "total": z(captured_total),
+            **{k: z(v) for k, v in captured_status.items()},
+        },
+        "wayback": {
+            **{k: z(v) for k, v in wayback_status_counts.items()},
+            **get_wayback_status(),
+        },
         "recent": {
             "stories_24h": z(stories_24h),
             "archives_24h": z(archives_24h),
@@ -127,6 +155,7 @@ async def get_stats():
             "fallback": DEFAULT_THRESHOLD,
         },
         "hunter": get_hunter_status(),
+        "collector": get_collector_status(),
     }
     # 모든 카운트가 성공했을 때만 캐시(실패분을 60초 동안 0 으로 들고 있지 않게).
     if complete:

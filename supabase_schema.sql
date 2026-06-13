@@ -91,13 +91,23 @@ create table if not exists public.citation_checks (
   -- 기준선(첫 'live' 확인 시 1회 캡처): 이후 검사는 이 값 대비 '변화'로 삭제/차단 판정.
   baseline_final_url text,
   baseline_len       int,
+  baseline_hash      text,             -- 첫 live 가시텍스트 sha256 지문(동일성 증명 + live 확정 단축)
   baseline_del_match boolean not null default false,
   baseline_blk_match boolean not null default false,
   baseline_at        timestamptz,
   -- 최초 'deleted' 전환 시각(시계열 그래프가 last_checked 로 드리프트하지 않게 1회 기록)
   deleted_at         timestamptz,
+  -- 적응형 재검사 스케줄: next_check_at(만기) + error_count(지수 백오프). compute_next_check() 가 산출.
+  next_check_at      timestamptz,
+  error_count        int not null default 0,
   unique (story_id, url)
 );
+
+-- 기존 설치본 컬럼 보강 (migrations/006 과 동일, 재실행 안전)
+alter table public.citation_checks
+  add column if not exists baseline_hash text,
+  add column if not exists next_check_at timestamptz,
+  add column if not exists error_count   int not null default 0;
 
 create index if not exists idx_citation_checks_status
   on public.citation_checks (status);
@@ -105,6 +115,8 @@ create index if not exists idx_citation_checks_last_checked
   on public.citation_checks (last_checked nulls first);
 create index if not exists idx_citation_checks_story_id
   on public.citation_checks (story_id);
+create index if not exists idx_citation_checks_next_check
+  on public.citation_checks (next_check_at nulls first);
 
 alter table public.citation_checks enable row level security;
 drop policy if exists "citation_checks_read"  on public.citation_checks;
@@ -113,6 +125,85 @@ create policy "citation_checks_read"  on public.citation_checks
   for select using (true);
 create policy "citation_checks_write" on public.citation_checks
   for all using (auth.role() = 'service_role');
+
+-- ── 선제 수집 글 보관 (captured_posts) ──────────────────────────────────────
+-- 검색은 '이미 삭제된 글'을 못 가져온다 → 살아있을 때 화제글을 미리 잡아 비공개로
+-- 보관(본문+해시)하고 주기적으로 삭제를 감시한다. services/collector.py 가 채운다.
+-- ⚠️ 비공개(service_role 전용). 본문 전체를 담으므로 공개 API/Arweave 박제로 내보내려면
+--    PII 마스킹·사인 배제 등 법적 가드레일이 선행돼야 한다 → 'read_all' 정책을 두지 않는다.
+create table if not exists public.captured_posts (
+  id            uuid        primary key default gen_random_uuid(),
+  source        text        not null,
+  feed          text,
+  url           text        not null,
+  guid          text,
+  title         text,
+  rss_summary   text,
+  body_text     text,
+  content_hash  text,
+  status        text        not null default 'unchecked'
+                check (status in ('unchecked', 'live', 'deleted', 'blocked', 'error')),
+  http_code     int,
+  reason        text,
+  first_seen    timestamptz not null default now(),
+  captured_at   timestamptz,
+  last_checked  timestamptz,
+  check_count   int         not null default 0,
+  error_count   int         not null default 0,
+  next_check_at timestamptz,
+  deleted_at    timestamptz,
+  baseline_final_url text,
+  baseline_len       int,
+  baseline_hash      text,
+  baseline_del_match boolean not null default false,
+  baseline_blk_match boolean not null default false,
+  baseline_at        timestamptz,
+  unique (url)
+);
+
+create index if not exists idx_captured_posts_next_check
+  on public.captured_posts (next_check_at nulls first);
+create index if not exists idx_captured_posts_status
+  on public.captured_posts (status);
+create index if not exists idx_captured_posts_source
+  on public.captured_posts (source);
+create index if not exists idx_captured_posts_first_seen
+  on public.captured_posts (first_seen desc);
+
+alter table public.captured_posts enable row level security;
+drop policy if exists "captured_posts_read_all" on public.captured_posts;
+drop policy if exists "captured_posts_svc"      on public.captured_posts;
+create policy "captured_posts_svc" on public.captured_posts for all
+  using (auth.role() = 'service_role');
+
+-- ── Wayback 위임 박제 큐 (wayback_snapshots) ────────────────────────────────
+-- 원본 삭제 대비 중립 외부 스냅샷. services/wayback.py 가 IA Save Page Now 에 위임.
+-- 스냅샷 링크는 공개 archive.org URL 이라 읽기 허용.
+create table if not exists public.wayback_snapshots (
+  id                 uuid        primary key default gen_random_uuid(),
+  url                text        not null unique,
+  job_id             text,
+  snapshot_url       text,
+  snapshot_timestamp text,
+  status             text        not null default 'queued'
+                     check (status in ('queued', 'pending', 'success', 'error', 'skipped')),
+  reason             text,
+  attempts           int         not null default 0,
+  submitted_at       timestamptz,
+  updated_at         timestamptz,
+  next_poll_at       timestamptz,
+  created_at         timestamptz not null default now()
+);
+
+create index if not exists idx_wayback_status    on public.wayback_snapshots (status);
+create index if not exists idx_wayback_next_poll on public.wayback_snapshots (next_poll_at nulls first);
+
+alter table public.wayback_snapshots enable row level security;
+drop policy if exists "wayback_read_all"  on public.wayback_snapshots;
+drop policy if exists "wayback_write_svc" on public.wayback_snapshots;
+create policy "wayback_read_all"  on public.wayback_snapshots for select using (true);
+create policy "wayback_write_svc" on public.wayback_snapshots for all
+  using (auth.role() = 'service_role');
 
 -- ── 미박제 글 원자적 정리 함수 ──────────────────────────────────────────────
 -- cleanup 이 캐시 vote_count 가 아니라 votes 테이블을 같은 스냅샷에서 직접 확인해

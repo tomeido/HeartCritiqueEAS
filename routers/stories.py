@@ -21,6 +21,7 @@ from services.tracker import (
     recheck_one_story,
     register_citations,
 )
+from services.wayback import get_wayback_map
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -44,10 +45,12 @@ def _mask_pending(story: dict) -> None:
         story["arweave_url"] = None
 
 
-def _augment_with_status(story: dict, status_by_url: dict) -> dict:
+def _augment_with_status(story: dict, status_by_url: dict, wayback_by_url: dict | None = None) -> dict:
     """citations 배열에 track_status / track_last_checked / deleted_count 머지.
-    deleted_count/blocked_count 는 표시용 raw 카운트(soft 포함)다."""
+    deleted_count/blocked_count 는 표시용 raw 카운트(soft 포함)다.
+    wayback_by_url 가 있으면 각 출처에 archive_url(중립 외부 스냅샷)도 머지한다."""
     citations = story.get("citations") or []
+    wayback_by_url = wayback_by_url or {}
     deleted = 0
     blocked = 0
     for c in citations:
@@ -66,6 +69,12 @@ def _augment_with_status(story: dict, status_by_url: dict) -> dict:
         else:
             c["track_status"] = "unchecked"
             c["track_untrackable"] = is_untrackable_source(c.get("uri"))
+        # Wayback 위임 스냅샷: 성공분만 영속 링크를 노출('삭제 전 원본 스냅샷' 증거).
+        wb = wayback_by_url.get(c.get("uri"))
+        if wb:
+            c["archive_status"] = wb.get("status")
+            if wb.get("status") == "success" and wb.get("snapshot_url"):
+                c["archive_url"] = wb["snapshot_url"]
     story["citations"] = citations
     story["deleted_count"] = deleted
     story["blocked_count"] = blocked
@@ -197,7 +206,14 @@ async def get_story(story_id: str):
     if not by_url and story.get("citations"):
         await asyncio.to_thread(register_citations, story_id, story["citations"])
 
-    out = _augment_with_status(story, by_url)
+    # Wayback 스냅샷 상태 머지(조회 실패해도 본문은 내려가게 best-effort)
+    cite_urls = [c.get("uri") for c in (story.get("citations") or [])]
+    try:
+        wayback_by_url = await asyncio.to_thread(get_wayback_map, cite_urls)
+    except Exception:
+        wayback_by_url = {}
+
+    out = _augment_with_status(story, by_url, wayback_by_url)
     # 동적 임계값 머지: 자동 박제 판단과 일치하도록 hard 신호(404/410/403)로만 인하
     sig = count_citation_signals(list(by_url.values()))
     eff = compute_effective_threshold(
