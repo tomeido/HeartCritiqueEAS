@@ -38,6 +38,79 @@ const GATEWAYS = {
 const gatewayUrl = (txId) => (GATEWAYS[NETWORK] || GATEWAYS.devnet)(txId);
 const IS_PERMANENT = NETWORK === "mainnet";
 
+// 멱등 조회용 GraphQL. mainnet(Arweave/Irys)은 태그 인덱싱을 지원해 동일
+// App-Name+Story-Id 의 기존 박제를 찾을 수 있다. devnet 인덱서는 태그 검색을 제대로
+// 지원하지 않으므로(=조회 0건) fail-open 으로 그냥 업로드한다(테스트넷은 실비용 없음).
+// 운영자가 다른 엔드포인트를 쓰려면 IRYS_GRAPHQL_URL 로 덮어쓸 수 있다.
+const GRAPHQL_URLS = {
+  devnet:  "https://devnet.irys.xyz/graphql",
+  mainnet: "https://uploader.irys.xyz/graphql",
+};
+const GRAPHQL_URL = process.env.IRYS_GRAPHQL_URL || GRAPHQL_URLS[NETWORK] || GRAPHQL_URLS.devnet;
+
+// 같은 Story-Id 가 이 프로세스에서 동시에 업로드 중이면 결과를 공유(동시 이중 업로드 방지).
+const _inFlight = new Map();
+
+// 이미 같은 App-Name+Story-Id 로 박제된 tx 가 있으면 그 id 반환(없거나 조회 실패 시 null).
+async function findExistingTx(storyId) {
+  if (!storyId) return null;
+  const query =
+    `query($s:String!){transactions(tags:[` +
+    `{name:"App-Name",values:["Heart-Critique"]},` +
+    `{name:"Story-Id",values:[$s]}],order:ASC,first:1){edges{node{id}}}}`;
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const r = await fetch(GRAPHQL_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, variables: { s: String(storyId) } }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const edges = j?.data?.transactions?.edges;
+    return edges && edges.length ? edges[0].node.id : null;
+  } catch (e) {
+    console.warn("[uploader] 멱등 조회 실패(무시하고 업로드):", e.message);
+    return null; // fail-open
+  }
+}
+
+async function doUpload(body) {
+  const storyId = String(body.payload?.story?.id || "");
+
+  // 1차 멱등: 이미 박제됐으면 재업로드(=ETH 재지불) 없이 기존 tx 재사용.
+  const existing = await findExistingTx(storyId);
+  if (existing) {
+    console.log(`[uploader] 중복 박제 회피 — 기존 tx 재사용(${NETWORK}): ${existing}`);
+    return { txId: existing, arweaveUrl: gatewayUrl(existing),
+             network: NETWORK, permanent: IS_PERMANENT, deduped: true };
+  }
+
+  const irys = await getIrys();
+  const data = JSON.stringify(body);
+  const ev = body.payload?.evidence || {};
+  const tags = [
+    { name: "Content-Type",  value: "application/json" },
+    { name: "App-Name",      value: "Heart-Critique" },
+    { name: "App-Version",   value: "6.0" },
+    { name: "Category",      value: body.payload?.story?.category || "unknown" },
+    { name: "Vote-Count",    value: String(body.payload?.votes?.count || 0) },
+    { name: "Signed-By",     value: body.publicKey?.slice(0, 20) || "" },
+    { name: "Story-Id",      value: storyId },
+    { name: "Gap-Score",     value: String(ev.gap_score || "none") },
+    { name: "Deleted-Count", value: String(ev.deleted_count || 0) },
+  ];
+
+  const receipt = await irys.upload(data, { tags });
+  const txId = receipt.id;
+  const arweaveUrl = gatewayUrl(txId);
+  console.log(`[uploader] 업로드 완료(${NETWORK}): ${arweaveUrl}`);
+  return { txId, arweaveUrl, network: NETWORK, permanent: IS_PERMANENT };
+}
+
 async function getIrys() {
   if (!PRIVATE_KEY) {
     throw new Error("AGENT_PRIVATE_KEY 환경변수가 설정되지 않았습니다");
@@ -58,32 +131,22 @@ app.post("/upload", async (req, res) => {
     if (!body?.payload) {
       return res.status(400).json({ error: "payload 필드가 필요합니다" });
     }
+    const storyId = String(body.payload?.story?.id || "");
 
-    const irys = await getIrys();
-    const data = JSON.stringify(body);
+    // 동일 Story-Id 가 진행 중이면 그 업로드 결과를 공유(동시 이중 업로드/이중 지불 방지).
+    if (storyId && _inFlight.has(storyId)) {
+      const out = await _inFlight.get(storyId);
+      return res.json(out);
+    }
 
-    const ev = body.payload?.evidence || {};
-    const tags = [
-      { name: "Content-Type",    value: "application/json" },
-      { name: "App-Name",        value: "Heart-Critique" },
-      { name: "App-Version",     value: "6.0" },
-      { name: "Category",        value: body.payload?.story?.category || "unknown" },
-      { name: "Vote-Count",      value: String(body.payload?.votes?.count || 0) },
-      { name: "Signed-By",       value: body.publicKey?.slice(0, 20) || "" },
-      // Story-Id: 멱등성/중복 박제 탐지용. 동일 App-Name+Story-Id 를 GraphQL 로 조회하면
-      // 이미 박제됐는지 확인 가능. (앱 계층의 __pending__ 선점이 1차 방어, 이 태그는 2차)
-      { name: "Story-Id",        value: String(body.payload?.story?.id || "") },
-      // 검열 증거를 Arweave 인덱싱 태그로도 노출 → GraphQL 로 검색 가능
-      { name: "Gap-Score",       value: String(ev.gap_score || "none") },
-      { name: "Deleted-Count",   value: String(ev.deleted_count || 0) },
-    ];
-
-    const receipt = await irys.upload(data, { tags });
-    const txId = receipt.id;
-    const arweaveUrl = gatewayUrl(txId);
-
-    console.log(`[uploader] 업로드 완료(${NETWORK}): ${arweaveUrl}`);
-    res.json({ txId, arweaveUrl, network: NETWORK, permanent: IS_PERMANENT });
+    const task = doUpload(body);
+    if (storyId) _inFlight.set(storyId, task);
+    try {
+      const out = await task;
+      res.json(out);
+    } finally {
+      if (storyId) _inFlight.delete(storyId);
+    }
   } catch (err) {
     console.error("[uploader] 업로드 실패:", err.message);
     res.status(500).json({ error: err.message });

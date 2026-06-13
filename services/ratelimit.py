@@ -33,6 +33,23 @@ class SlidingWindowLimiter:
         self._events: dict[str, deque] = {}
         self._lock = threading.Lock()
 
+    def peek(self, key: str) -> tuple[bool, int]:
+        """기록하지 않고 현재 허용 여부만 확인. (allowed, retry_after_sec).
+        여러 리미터를 함께 게이트할 때, 뒤 리미터가 거절해도 앞 리미터 슬롯이
+        소비되지 않게 하려고 hit 전에 peek 로 검사한다."""
+        now = time.time()
+        cutoff = now - self.window
+        with self._lock:
+            dq = self._events.get(key)
+            if dq:
+                while dq and dq[0] < cutoff:
+                    dq.popleft()
+            if (len(dq) if dq else 0) >= self.max:
+                # max<=0(엔드포인트 차단) 또는 한도 초과. 빈 deque 인덱싱 IndexError 가드.
+                retry = int(dq[0] + self.window - now) + 1 if dq else self.window
+                return False, max(1, retry)
+            return True, 0
+
     def hit(self, key: str) -> tuple[bool, int]:
         """이벤트 1건 기록 시도. (allowed, retry_after_sec) 반환.
         allowed=False 면 윈도우 한도 초과."""
@@ -46,7 +63,8 @@ class SlidingWindowLimiter:
             while dq and dq[0] < cutoff:
                 dq.popleft()
             if len(dq) >= self.max:
-                retry = int(dq[0] + self.window - now) + 1
+                # max<=0 면 dq 가 비어 dq[0] 가 IndexError → 빈 경우 window 로 폴백.
+                retry = int(dq[0] + self.window - now) + 1 if dq else self.window
                 return False, max(1, retry)
             dq.append(now)
             # 메모리 누수 방지: 가끔 빈 버킷 정리
@@ -81,7 +99,9 @@ def client_ip(request: Request) -> str:
     """리버스 프록시 뒤 실제 클라이언트 IP 추정."""
     fwd = request.headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        first = fwd.split(",")[0].strip()
+        if first:  # 공백/빈 XFF 가 모든 클라이언트를 'story:' 한 키로 묶지 않게
+            return first
     real = request.headers.get("x-real-ip")
     if real:
         return real.strip()
@@ -93,12 +113,16 @@ def check_story_ratelimit(request: Request) -> tuple[bool, int, str]:
     if not RATELIMIT_ENABLED:
         return True, 0, ""
     ip = client_ip(request)
-    ok_ip, retry_ip = _ip_limiter.hit(f"story:{ip}")
+    # 두 리미터를 먼저 peek 로 검사 — 전역이 거절할 때 IP 슬롯이 헛소비되지 않게
+    # 둘 다 통과할 때만 실제 기록(hit)한다.
+    ok_ip, retry_ip = _ip_limiter.peek(f"story:{ip}")
     if not ok_ip:
         return False, retry_ip, f"IP당 생성 한도 초과 ({_PER_IP}회 / {_WINDOW // 60}분)"
-    ok_g, retry_g = _global_limiter.hit("story:__global__")
+    ok_g, retry_g = _global_limiter.peek("story:__global__")
     if not ok_g:
         return False, retry_g, f"전역 생성 한도 초과 ({_GLOBAL}회 / {_WINDOW // 60}분)"
+    _ip_limiter.hit(f"story:{ip}")
+    _global_limiter.hit("story:__global__")
     return True, 0, ""
 
 

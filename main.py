@@ -14,18 +14,15 @@ Heart & Critique - FastAPI 메인 앱 (Docker 홈서버용)
 """
 
 import asyncio
-import json
 import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from pathlib import Path
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, JSONResponse
 
 load_dotenv()
 
@@ -35,6 +32,7 @@ from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
 from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
 from services.cleanup import CLEANUP_ENABLED, background_loop as cleanup_loop  # noqa: E402
+from services.collector import COLLECTOR_ENABLED, background_loop as collector_loop  # noqa: E402
 
 import logging  # noqa: E402
 
@@ -64,6 +62,8 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(hunter_loop(), name="hunter"))
     if has_supabase and CLEANUP_ENABLED:
         tasks.append(asyncio.create_task(cleanup_loop(), name="cleanup"))
+    if has_supabase and COLLECTOR_ENABLED:
+        tasks.append(asyncio.create_task(collector_loop(), name="collector"))
     for t in tasks:
         t.add_done_callback(_on_task_done)
     app.state.bg_tasks = tasks
@@ -194,6 +194,14 @@ async def jsonrpc_handler(request: Request):
             status_code=400,
         )
 
+    # 유효 JSON 이지만 객체가 아닌 경우([], "x", 5, true)에 body.get(...) 가 500 나지 않게.
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None,
+             "error": {"code": -32600, "message": "Invalid Request"}},
+            status_code=400,
+        )
+
     rpc_id = body.get("id")
     method = body.get("method", "")
 
@@ -215,6 +223,8 @@ async def jsonrpc_handler(request: Request):
         try:
             result = await asyncio.to_thread(generate)
         except Exception as e:
+            # 원시 예외 텍스트(내부 URL·provider 응답)를 클라이언트에 노출하지 않음.
+            logger.warning(f"[jsonrpc] generate 실패: {e!r}")
             task_id = str(uuid.uuid4())
             return {
                 "jsonrpc": "2.0", "id": rpc_id,
@@ -222,7 +232,8 @@ async def jsonrpc_handler(request: Request):
                     "kind": "task", "id": task_id,
                     "status": {"state": "failed", "timestamp": _now_iso(),
                                "message": {"kind": "message", "role": "agent",
-                                           "parts": [{"kind": "text", "text": str(e)}]}},
+                                           "parts": [{"kind": "text",
+                                                      "text": "이야기 생성에 일시적으로 실패했습니다. 잠시 후 다시 시도해 주세요."}]}},
                     "history": [], "artifacts": [],
                 },
             }

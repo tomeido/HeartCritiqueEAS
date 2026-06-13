@@ -1,5 +1,7 @@
 import asyncio
+import logging
 import os
+import uuid
 
 from fastapi import APIRouter, HTTPException, Request
 
@@ -15,14 +17,25 @@ from services.threshold import (
 )
 from services.tracker import (
     get_status_map,
+    is_untrackable_source,
     recheck_one_story,
     register_citations,
 )
+from services.wayback import get_wayback_map
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
 
 # 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
 STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
+
+
+def _ensure_uuid(story_id: str) -> None:
+    """uuid 컬럼에 잘못된 형식을 넘기면 PostgREST 가 22P02 로 500 을 내므로 선검증."""
+    try:
+        uuid.UUID(story_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(404, "스토리를 찾을 수 없습니다")
 
 
 def _mask_pending(story: dict) -> None:
@@ -32,10 +45,12 @@ def _mask_pending(story: dict) -> None:
         story["arweave_url"] = None
 
 
-def _augment_with_status(story: dict, status_by_url: dict) -> dict:
+def _augment_with_status(story: dict, status_by_url: dict, wayback_by_url: dict | None = None) -> dict:
     """citations 배열에 track_status / track_last_checked / deleted_count 머지.
-    deleted_count/blocked_count 는 표시용 raw 카운트(soft 포함)다."""
+    deleted_count/blocked_count 는 표시용 raw 카운트(soft 포함)다.
+    wayback_by_url 가 있으면 각 출처에 archive_url(중립 외부 스냅샷)도 머지한다."""
     citations = story.get("citations") or []
+    wayback_by_url = wayback_by_url or {}
     deleted = 0
     blocked = 0
     for c in citations:
@@ -44,12 +59,22 @@ def _augment_with_status(story: dict, status_by_url: dict) -> dict:
             c["track_status"] = info["status"]
             c["track_last_checked"] = info["last_checked"]
             c["track_http_code"] = info["http_code"]
+            c["track_reason"] = info.get("reason")
+            c["track_untrackable"] = is_untrackable_source(
+                c.get("uri"), info["http_code"], info.get("reason"))
             if info["status"] == "deleted":
                 deleted += 1
             elif info["status"] == "blocked":
                 blocked += 1
         else:
             c["track_status"] = "unchecked"
+            c["track_untrackable"] = is_untrackable_source(c.get("uri"))
+        # Wayback 위임 스냅샷: 성공분만 영속 링크를 노출('삭제 전 원본 스냅샷' 증거).
+        wb = wayback_by_url.get(c.get("uri"))
+        if wb:
+            c["archive_status"] = wb.get("status")
+            if wb.get("status") == "success" and wb.get("snapshot_url"):
+                c["archive_url"] = wb["snapshot_url"]
     story["citations"] = citations
     story["deleted_count"] = deleted
     story["blocked_count"] = blocked
@@ -80,7 +105,10 @@ async def create_story(request: Request, category: str | None = None):
     try:
         result = await asyncio.to_thread(generate, category)
     except Exception as e:
-        raise HTTPException(500, f"LLM 생성 실패: {e}")
+        # 원시 예외 텍스트(내부 upstream URL·provider 응답본문)를 클라이언트에 그대로
+        # 노출하지 않는다 — 서버에만 로깅하고 일반 메시지로 응답.
+        logger.warning(f"[story] 생성 실패: {e!r}")
+        raise HTTPException(503, "이야기 생성에 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.")
 
     # 적합성 게이트: 검색 결과에 진짜 해당 카테고리 글이 없으면 빈 본문을 박제하지 않고
     # 503 으로 알린다(잠시 후 재시도 유도). no_fit 응답을 INSERT 하면 안 된다.
@@ -123,18 +151,26 @@ async def create_story(request: Request, category: str | None = None):
 @router.get("/stories")
 async def list_stories(limit: int = 50):
     db = get_db()
+    # 음수/0 limit 이 PostgREST 에서 500 나지 않게 하한도 클램프.
+    limit = max(1, min(limit, 200))
     # 목록은 citations(jsonb) 자체를 전송하지 않는다(무겁다). 카운트는 추적 레코드 수로.
     resp = (
         db.table("stories")
         .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
                 "created_at,gap_score,community_count,news_count")
         .order("created_at", desc=True)
-        .limit(min(limit, 200))
+        .limit(limit)
         .execute()
     )
     stories = resp.data or []
     ids = [s["id"] for s in stories]
-    status_map = await asyncio.to_thread(get_status_map, ids)
+    # 출처 추적 상태는 배지/임계값 보조 정보일 뿐 — 조회가 실패해도 목록 자체는
+    # 내려준다(추적 조회 한 번의 일시 오류로 전체 목록이 500 나지 않게).
+    try:
+        status_map = await asyncio.to_thread(get_status_map, ids)
+    except Exception as e:
+        logger.warning(f"[stories] get_status_map 실패 — 추적 정보 없이 목록 반환: {e}")
+        status_map = {}
     for s in stories:
         _mask_pending(s)
         urls_status = status_map.get(s["id"], {})
@@ -154,6 +190,7 @@ async def list_stories(limit: int = 50):
 
 @router.get("/stories/{story_id}")
 async def get_story(story_id: str):
+    _ensure_uuid(story_id)
     db = get_db()
     resp = db.table("stories").select("*").eq("id", story_id).limit(1).execute()
     if not resp.data:
@@ -169,7 +206,14 @@ async def get_story(story_id: str):
     if not by_url and story.get("citations"):
         await asyncio.to_thread(register_citations, story_id, story["citations"])
 
-    out = _augment_with_status(story, by_url)
+    # Wayback 스냅샷 상태 머지(조회 실패해도 본문은 내려가게 best-effort)
+    cite_urls = [c.get("uri") for c in (story.get("citations") or [])]
+    try:
+        wayback_by_url = await asyncio.to_thread(get_wayback_map, cite_urls)
+    except Exception:
+        wayback_by_url = {}
+
+    out = _augment_with_status(story, by_url, wayback_by_url)
     # 동적 임계값 머지: 자동 박제 판단과 일치하도록 hard 신호(404/410/403)로만 인하
     sig = count_citation_signals(list(by_url.values()))
     eff = compute_effective_threshold(
@@ -187,6 +231,7 @@ async def get_story(story_id: str):
 @router.post("/recheck/{story_id}")
 async def manual_recheck(story_id: str, request: Request):
     """수동 재검사 트리거. 응답에 새 상태 포함."""
+    _ensure_uuid(story_id)
     allowed, retry_after, reason = check_recheck_ratelimit(request)
     if not allowed:
         raise HTTPException(

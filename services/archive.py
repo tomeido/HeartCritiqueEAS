@@ -63,12 +63,14 @@ def _record_archive_failure(db, story_id: str, err: Exception) -> None:
             .execute()
         )
         attempts = (cur.data[0].get("archive_attempts") or 0) if cur.data else 0
+        # 아직 내 선점(__pending__)을 들고 있을 때만 해제 — 그 사이 다른 코루틴이
+        # 실제 박제를 끝냈다면(real tx_id) 덮어쓰지 않게 조건부.
         db.table("stories").update({
             "arweave_tx_id": None,  # 선점 해제 → reconcile 가 재시도 가능
             "archive_attempts": attempts + 1,
             "last_archive_attempt": _now_iso(),
             "last_archive_error": str(err)[:500],
-        }).eq("id", story_id).execute()
+        }).eq("id", story_id).eq("arweave_tx_id", PENDING_MARKER).execute()
     except Exception as e2:
         logger.warning(f"[archive] failure record failed for {story_id}: {e2}")
 
@@ -159,7 +161,11 @@ async def archive_story(story_id: str) -> str | None:
     signed = sign_dataset(dataset)
 
     try:
-        async with httpx.AsyncClient(timeout=90) as client:
+        # Irys 정산이 90s 를 넘기면 Python 이 먼저 타임아웃→선점 해제하는데 업로더의
+        # irys.upload() 는 계속 돌며 (mainnet) ETH 를 지불한다. 이후 reconcile 가 재시도해
+        # 이중 박제·이중 지불이 발생. 타임아웃을 정산 여유까지 넓혀 거짓 타임아웃을 줄인다
+        # (잔여 케이스는 업로더의 Story-Id 멱등 조회가 방어).
+        async with httpx.AsyncClient(timeout=300) as client:
             resp = await client.post(f"{UPLOADER_URL}/upload", json=signed)
             resp.raise_for_status()
             up = resp.json()
@@ -182,12 +188,14 @@ async def archive_story(story_id: str) -> str | None:
         _record_archive_failure(db, story_id, e)  # 선점 해제 + 재시도 대상으로 표시
         return None
 
+    # 내 선점(__pending__)을 아직 들고 있을 때만 확정 기록 — 그 사이 재선점/완료된
+    # 경우 승자의 tx_id 를 덮어쓰지 않는다(이중 박제·ETH 이중 지출 방지).
     db.table("stories").update({
         "archived_at": _now_iso(),
         "arweave_tx_id": tx_id,
         "arweave_url": arweave_url,
         "last_archive_error": None,
-    }).eq("id", story_id).execute()
+    }).eq("id", story_id).eq("arweave_tx_id", PENDING_MARKER).execute()
 
     logger.info(f"[archive] Story {story_id} archived → {arweave_url}")
     return tx_id

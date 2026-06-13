@@ -34,6 +34,9 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
 TAVILY_ENDPOINT = os.environ.get("TAVILY_ENDPOINT", "https://api.tavily.com/search").strip()
 TAVILY_TIMEOUT = 20
 TAVILY_MAX_RESULTS = int(os.environ.get("TAVILY_MAX_RESULTS", "5"))
+# 언론 커버리지 측정은 gap 임계(0/1/2/3+건)를 분간해야 하므로 후보 검색용
+# TAVILY_MAX_RESULTS 와 분리해 최소 3 이상 보장(낮춰 설정해도 gap 오판 방지).
+NEWS_COVERAGE_MAX_RESULTS = max(3, int(os.environ.get("NEWS_COVERAGE_MAX_RESULTS", "5")))
 # 본문 스니펫이 이보다 짧은 검색 결과는 '실제 사연 없는 글'로 보고 선택 후보에서 제외.
 # 50자는 빈약하지만 서사가 모호한 글(예: 감상 위주 글)이 통과해 모델이 공허하게 늘어졌다.
 # 80자로 올려 '실제 사건/행위가 적힌 글'만 후보로 남긴다(전부 미달이면 폴백).
@@ -438,18 +441,20 @@ def parse_groq_chat_text(data: dict) -> str:
     choices = data.get("choices") or []
     if not choices:
         raise RuntimeError(f"Groq returned no choices: {data}")
-    text = (choices[0].get("message") or {}).get("content", "").strip()
+    # content 가 JSON null(콘텐츠 필터/length 종료 등)이면 None → None.strip() AttributeError.
+    # null 을 빈 문자열로 합쳐 의도대로 'empty content' RuntimeError 로 떨어지게.
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
     if not text:
         raise RuntimeError("Groq returned empty content")
     return text
 
 
-def tavily_search(query: str, include_domains=None) -> dict:
+def tavily_search(query: str, include_domains=None, max_results: int | None = None) -> dict:
     if not TAVILY_API_KEY:
         raise RuntimeError("TAVILY_API_KEY not set")
     payload = {
         "query": query,
-        "max_results": TAVILY_MAX_RESULTS,
+        "max_results": max_results or TAVILY_MAX_RESULTS,
         "search_depth": "advanced",
         "topic": "general",  # 커뮤니티 게시판은 뉴스가 아님
         "include_answer": False,
@@ -633,7 +638,10 @@ def measure_news_coverage(chosen_items: list) -> dict | None:
         return None  # 측정할 정보 부족
 
     try:
-        news_data = tavily_search(query[:300], include_domains=NEWS_DOMAINS)
+        news_data = tavily_search(
+            query[:300], include_domains=NEWS_DOMAINS,
+            max_results=NEWS_COVERAGE_MAX_RESULTS,
+        )
         news_results = news_data.get("results") or []
         news_count = sum(
             1 for r in news_results
@@ -670,10 +678,14 @@ _GATE_CRITERIA = {
 
 
 # 모델이 NO_FIT 마커 대신 한국어 거부 산문을 낼 때를 첫 줄에서만 보수적으로 포착.
-# '적합한 글이 없습니다'·'해당하는 사연을 찾을 수 없' 등. (글/사연/미담/내용/제보/이야기에
-# 한정해 '도와줄 사람이 없던' 같은 정상 본문은 매칭하지 않음.)
+# '적합한 글이 없습니다'·'해당하는 사연을 찾을 수 없' 등 '거부 종결'이 줄 끝에 와야 매칭.
+# '마땅한 사연 없을 줄 알았던 골목에서…' 같은 정상 서사 도입부(부정이 줄 끝이 아니고
+# 종결형도 아님)는 매칭하지 않아 멀쩡한 글을 버리지 않는다.
 _NO_FIT_PROSE_RE = re.compile(
-    r'(적합한|해당하는|관련된|마땅한)\s*(글|사연|미담|내용|제보|이야기)\S{0,4}\s*(없|찾을 수 없|찾지 못)'
+    r'(적합한|해당하는|관련된|마땅한)\s*(글|사연|미담|내용|제보|이야기)'
+    r'[^\n]{0,10}?'
+    r'(없습니다|없음|없어요|없네요|찾을\s*수\s*없\S*|찾지\s*못\S*)'
+    r'\s*[.。!]?\s*$'
 )
 
 
@@ -687,8 +699,11 @@ def _is_no_fit(raw_text: str) -> bool:
     marker = re.sub(r'^[\s"\'`*\-\[\(]+', '', first).upper().replace(" ", "")
     if marker.startswith("NO_FIT") or marker.startswith("NOFIT"):
         return True
-    # 마커 대신 한국어 거부 산문을 낸 경우(첫 줄 한정)
-    return bool(_NO_FIT_PROSE_RE.search(first))
+    # 마커 대신 한국어 거부 산문을 낸 경우(첫 줄 한정). 거부문은 짧고 단정적이므로
+    # 첫 줄이 길면(문학적 도입부) 산문 매칭을 적용하지 않아 오탐을 막는다.
+    if len(first) <= 40 and _NO_FIT_PROSE_RE.search(first):
+        return True
+    return False
 
 
 def _groq_search(query: str, category: str, domains, off: bool) -> tuple:

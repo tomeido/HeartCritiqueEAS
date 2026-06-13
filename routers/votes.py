@@ -1,6 +1,9 @@
 import asyncio
+import logging
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from postgrest.exceptions import APIError
 
 from services.archive import archive_story
 from services.db import get_anon_db, get_db
@@ -11,6 +14,15 @@ from services.threshold import (
 )
 
 router = APIRouter(prefix="/api")
+logger = logging.getLogger(__name__)
+
+
+def _ensure_uuid(story_id: str) -> None:
+    """uuid 컬럼에 잘못된 형식을 넘기면 PostgREST 가 22P02 로 500 을 내므로 선검증."""
+    try:
+        uuid.UUID(story_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(404, "스토리를 찾을 수 없습니다")
 
 
 def _verify_token(authorization: str | None) -> str:
@@ -34,22 +46,37 @@ async def vote(
     background_tasks: BackgroundTasks,
     authorization: str | None = Header(default=None),
 ):
+    _ensure_uuid(story_id)
     user_id = _verify_token(authorization)
     db = get_db()
 
-    # 중복 투표 방지 (unique constraint)
+    # 삽입 실패를 한 묶음으로 409 처리하던 것을 원인별로 구분: 중복(23505)만 '이미 투표',
+    # 없는 스토리(FK 23503)는 404, 그 외(일시 DB 오류 등)는 삼키지 말고 5xx 로 노출.
     try:
         db.table("votes").insert({"story_id": story_id, "user_id": user_id}).execute()
-    except Exception:
-        raise HTTPException(409, "이미 투표하셨습니다")
+    except APIError as e:
+        code = getattr(e, "code", None)
+        if code == "23505":
+            raise HTTPException(409, "이미 투표하셨습니다")
+        if code == "23503":
+            raise HTTPException(404, "스토리를 찾을 수 없습니다")
+        logger.warning(f"[vote] insert 실패 story={story_id} code={code}: {e}")
+        raise HTTPException(503, "투표 처리에 실패했습니다. 잠시 후 다시 시도하세요.")
+    except Exception as e:
+        logger.warning(f"[vote] insert 비APIError story={story_id}: {e}")
+        raise HTTPException(503, "투표 처리에 실패했습니다. 잠시 후 다시 시도하세요.")
 
-    # 신호 + 투표수 + effective threshold 한 번에
+    # 신호 + 투표수 + effective threshold 한 번에. 삽입과 이 조회 사이에 스토리가
+    # 사라졌으면(예: cleanup cascade) 빈 dict 일 수 있어 .get 으로 방어(KeyError 500 방지).
     sig = await asyncio.to_thread(gather_story_signals, story_id)
-    vote_count = sig["vote_count"]
-    threshold = sig["threshold"]
+    vote_count = sig.get("vote_count", 0)
+    threshold = sig.get("threshold", DEFAULT_THRESHOLD)
 
-    # stories.vote_count 캐시 갱신
-    db.table("stories").update({"vote_count": vote_count}).eq("id", story_id).execute()
+    # stories.vote_count 캐시 갱신 — 동시 투표 시 느린 코루틴이 낮은 카운트로 덮어쓰지
+    # 않게 단조 증가(.lt)로 가드. (투표는 삽입 전용이라 카운트는 증가만 함)
+    db.table("stories").update({"vote_count": vote_count}).eq("id", story_id).lt(
+        "vote_count", vote_count
+    ).execute()
 
     if vote_count >= threshold and not sig.get("archived"):
         background_tasks.add_task(archive_story, story_id)
@@ -69,6 +96,7 @@ async def vote_status(
     story_id: str,
     authorization: str | None = Header(default=None),
 ):
+    _ensure_uuid(story_id)
     db = get_db()
     sig = await asyncio.to_thread(gather_story_signals, story_id)
 

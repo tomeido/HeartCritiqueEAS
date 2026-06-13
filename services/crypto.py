@@ -6,8 +6,25 @@ import os
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.asymmetric.utils import (
+    decode_dss_signature,
+    encode_dss_signature,
+)
 
 _cached_key: ec.EllipticCurvePrivateKey | None = None
+
+# secp256k1 군위수 n. OpenSSL 은 ECDSA 서명을 high-S 로도 내는데(~50%), 프론트 검증기
+# (@noble/curves)는 기본 lowS:true 라 high-S 를 '변조됨'으로 거부한다. 서명 시 s 를 low-S
+# (s ≤ n/2)로 정규화해 양쪽 스택의 검증을 일치시킨다(서명 유효성은 불변).
+_SECP256K1_N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+
+
+def _to_low_s(der_sig: bytes) -> bytes:
+    """DER 서명을 canonical low-S 형태로 정규화."""
+    r, s = decode_dss_signature(der_sig)
+    if s > _SECP256K1_N // 2:
+        s = _SECP256K1_N - s
+    return encode_dss_signature(r, s)
 
 
 def has_configured_key() -> bool:
@@ -36,7 +53,7 @@ def sign_dataset(data: dict) -> dict:
     """데이터셋에 ECDSA 서명을 붙여 반환."""
     private_key = _load_private_key()
     canonical = json.dumps(data, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    signature = private_key.sign(canonical, ec.ECDSA(hashes.SHA256()))
+    signature = _to_low_s(private_key.sign(canonical, ec.ECDSA(hashes.SHA256())))
     pub_bytes = private_key.public_key().public_bytes(
         serialization.Encoding.X962,
         serialization.PublicFormat.UncompressedPoint,
