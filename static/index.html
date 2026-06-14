@@ -1201,6 +1201,9 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <div class="empty-text">아직 이야기가 없습니다.</div>
       </div>
     </div>
+    <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
+      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;">더 보기</button>
+    </div>
   </div>
 
   <!-- 발행소 기록 (통계) — 접이식, 최하단 -->
@@ -1278,6 +1281,7 @@ let sb, cfg, session;
 let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드 포함 가능)
 let allStories = [];
 let currentFilter = 'all';
+let displayLimit = 10;
 let archivePollTimer = null;
 
 // ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
@@ -1393,6 +1397,15 @@ async function init() {
       });
       scrollTopBtn.onclick = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+    }
+    
+    // 더 보기 버튼 리스너
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    if (loadMoreBtn) {
+      loadMoreBtn.onclick = () => {
+        displayLimit += 15;
+        renderStoryList();
       };
     }
     
@@ -2375,6 +2388,7 @@ async function loadStoryList() {
     const resp = await fetch('/api/stories?limit=100');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     allStories = await resp.json();
+    displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
   } catch (e) {
@@ -2457,7 +2471,13 @@ function renderStoryList() {
   else if (currentFilter === 'deleted')  stories = stories.filter(s => (s.deleted_count || 0) > 0);
   else if (currentFilter === 'gap')      stories = stories.filter(s => ['medium','high','extreme'].includes(s.gap_score));
 
-  if (!stories.length) {
+  const totalFiltered = stories.length;
+  const loadMoreContainer = document.getElementById('load-more-container');
+  if (loadMoreContainer) {
+    loadMoreContainer.style.display = totalFiltered > displayLimit ? 'block' : 'none';
+  }
+
+  if (!totalFiltered) {
     el.innerHTML = `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
@@ -2466,12 +2486,13 @@ function renderStoryList() {
     return;
   }
 
+  const visibleStories = stories.slice(0, displayLimit);
   const defaultTh = cfg?.vote_threshold || 3;
   const lastSeen = getLastSeen();
   el.innerHTML = '';
   const useFeature = (currentFilter === 'all');   // 전체 탭에서만 첫 글을 1면 피처로
 
-  stories.forEach((s, idx) => {
+  visibleStories.forEach((s, idx) => {
     const catCls   = s.category === 'kindness' ? 'is-kindness' : 'is-critique';
     const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
     const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
@@ -2564,6 +2585,7 @@ document.querySelectorAll('.chip').forEach(chip => {
     chip.classList.add('active');
     chip.setAttribute('aria-pressed', 'true');
     currentFilter = chip.dataset.filter;
+    displayLimit = 10; // 탭 변경 시 노출 개수 초기화
     renderStoryList();
   };
 });
