@@ -125,6 +125,40 @@ def test_parse_feed_bad_xml_returns_empty():
     assert collector._parse_feed(b"") == []
 
 
+def test_parse_clien_html_success():
+    raw = (
+        '<div>'
+        '<div class="list_title">'
+        '  <a class="list_subject" href="/service/board/park/12345?category=0">'
+        '    <span class="subject_fixed" title="클리앙 제목">클리앙 제목</span>'
+        '  </a>'
+        '</div>'
+        '</div>'
+    ).encode("utf-8")
+    items = collector._parse_clien_html(raw)
+    assert len(items) == 1
+    assert items[0]["url"] == "https://www.clien.net/service/board/park/12345"
+    assert items[0]["title"] == "클리앙 제목"
+    assert items[0]["guid"] == "https://www.clien.net/service/board/park/12345"
+
+
+def test_parse_bobaedream_html_success():
+    raw = (
+        '<table>'
+        '<tr>'
+        '  <td>'
+        '    <a class="bsubject" href="/view?code=freeb&No=67890&rtn=blah" title="보배 제목">보배 제목</a>'
+        '  </td>'
+        '</tr>'
+        '</table>'
+    ).encode("utf-8")
+    items = collector._parse_bobaedream_html(raw)
+    assert len(items) == 1
+    assert items[0]["url"] == "https://www.bobaedream.co.kr/view?code=freeb&No=67890"
+    assert items[0]["title"] == "보배 제목"
+    assert items[0]["guid"] == "https://www.bobaedream.co.kr/view?code=freeb&No=67890"
+
+
 # ── poll_feeds 공정 분배: 한 피드가 주기 예산을 독식하지 못하고 라운드로빈으로 분산 ──
 def _setup_poll(monkeypatch, feeds, items_per_feed, budget):
     """poll_feeds 의 IO(피드 fetch·파싱·중복조회·캡처·지터)를 메모리 stub 으로 격리."""
