@@ -248,12 +248,13 @@ body {
 /* 테마 토글 */
 .theme-btn {
   background: transparent; color: var(--text);
-  padding: 7px 12px; font-size: var(--fs-md);
+  width: 31px; height: 31px; font-size: var(--fs-md);
   border-radius: var(--r-full); border: 1px solid var(--border-strong);
   cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
   transition: background var(--t-base), border-color var(--t-base);
   user-select: none;
+  flex-shrink: 0;
 }
 .theme-btn:hover { background: var(--bg-card-2); }
 /* 알림 벨 */
