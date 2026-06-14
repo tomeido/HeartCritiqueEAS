@@ -248,13 +248,13 @@ SEARCH_QUERIES_KINDNESS = [
 SEARCH_QUERIES_CRITIQUE = [
     "디시인사이드 실시간 베스트 폭로 의혹",
     "에펨코리아 정치 시사 게시판 폭로",
-    "블라인드 회사 비위 내부고발",
+    "블라인드 회사 비리 내부고발",
     "트위터 실시간 트렌드 사건 폭로",
     "디시 개념글 대기업 갑질 폭로",
     "에펨코리아 대기업 비리 폭로",
     "블라인드 직장 갑질 폭언 의혹",
     "네이트판 억울한 사건 제보 폭로",
-    "익명 커뮤니티 묻힌 대기업 비위",
+    "익명 커뮤니티 묻힌 대기업 비리 폭로",
     "자본의 힘으로 삭제 위협받는 폭로 글",
 ]
 
@@ -454,22 +454,41 @@ def parse_gemini_response(data: dict):
 
 
 def call_groq(prompt: str, system: str = None) -> dict:
+    import time
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY not set")
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    return _http_post(
-        GROQ_ENDPOINT,
-        {"model": GROQ_MODEL, "messages": messages, "temperature": 0.8, "top_p": 0.9, "max_tokens": 1024},
-        {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {GROQ_API_KEY}",
-            "User-Agent": "heart-critique/6.0",
-        },
-        GROQ_TIMEOUT,
-    )
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return _http_post(
+                GROQ_ENDPOINT,
+                {"model": GROQ_MODEL, "messages": messages, "temperature": 0.8, "top_p": 0.9, "max_tokens": 1024},
+                {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "User-Agent": "heart-critique/6.0",
+                },
+                GROQ_TIMEOUT,
+            )
+        except Exception as e:
+            err_msg = str(e)
+            if "HTTP 429" in err_msg and attempt < max_retries - 1:
+                wait_sec = 5.0
+                match = re.search(r"try again in (\d+\.?\d*)s", err_msg)
+                if match:
+                    try:
+                        wait_sec = float(match.group(1)) + 0.5
+                    except ValueError:
+                        pass
+                logger.warning(f"[llm] Groq 429 Rate Limit 감지. {wait_sec:.2f}초 후 재시도합니다. (시도 {attempt+1}/{max_retries})")
+                time.sleep(wait_sec)
+                continue
+            raise e
 
 
 def parse_groq_chat_text(data: dict) -> str:
@@ -870,9 +889,24 @@ def generate(category: str | None = None) -> dict:
     gap_data = None
     volatility = 0
     reason = ""
-    if LLM_PROVIDER == "groq":
-        text, citations, queries, model_name, gap_data, volatility, reason = generate_via_groq(category)
-    elif LLM_PROVIDER == "gemini":
+    
+    actual_provider = LLM_PROVIDER
+    text = None
+    citations = []
+    queries = []
+    model_name = ""
+
+    if actual_provider == "groq":
+        try:
+            text, citations, queries, model_name, gap_data, volatility, reason = generate_via_groq(category)
+        except Exception as e:
+            if GEMINI_API_KEY:
+                logger.warning(f"[llm] Groq 생성 실패({e!r}). Gemini로 폴백하여 생성을 시도합니다.")
+                actual_provider = "gemini"
+            else:
+                raise e
+
+    if actual_provider == "gemini":
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
@@ -898,7 +932,7 @@ def generate(category: str | None = None) -> dict:
                     "gap_score": calculate_gap_score(community_count, news_count),
                     "gap_query": coverage["query_used"],
                 }
-    else:
+    elif actual_provider != "groq":
         raise RuntimeError(f"Unknown LLM_PROVIDER={LLM_PROVIDER!r}")
 
     # 적합성 게이트가 모든 시도를 거부했거나 본문이 비면 no_fit. 박제하지 않고 상위
@@ -911,7 +945,7 @@ def generate(category: str | None = None) -> dict:
             "body": "",
             "citations": [],
             "search_queries": queries,
-            "provider": LLM_PROVIDER,
+            "provider": actual_provider,
             "model": model_name,
             "gap_data": None,
             "poetic_reason": "",
@@ -933,7 +967,7 @@ def generate(category: str | None = None) -> dict:
         "body": text,
         "citations": citations,
         "search_queries": queries,
-        "provider": LLM_PROVIDER,
+        "provider": actual_provider,
         "model": model_name,
         "gap_data": gap_data,
         "poetic_reason": reason,
