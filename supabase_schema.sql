@@ -25,7 +25,10 @@ create table if not exists public.stories (
   -- 박제 재시도 추적 (sweeper 가 실패한 박제를 지수 백오프로 자동 재시도)
   archive_attempts     int not null default 0,
   last_archive_attempt timestamptz,
-  last_archive_error   text
+  last_archive_error   text,
+  -- 시적 사유 및 휘발성 점수
+  poetic_reason        text,
+  volatility_score     int
 );
 
 -- 기존 설치본을 위한 컬럼 보강 (이미 있으면 무시)
@@ -35,7 +38,9 @@ alter table public.stories
   add column if not exists news_count           int,
   add column if not exists archive_attempts     int not null default 0,
   add column if not exists last_archive_attempt timestamptz,
-  add column if not exists last_archive_error   text;
+  add column if not exists last_archive_error   text,
+  add column if not exists poetic_reason        text,
+  add column if not exists volatility_score     int;
 
 -- 투표 테이블 (유저당 스토리 1표)
 create table if not exists public.votes (
