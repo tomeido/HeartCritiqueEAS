@@ -2738,6 +2738,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
+        <br><button class="btn-sm btn-outline" style="margin-top:16px" onclick="document.querySelector('.chip[data-filter=\\'all\\']').click()">전체 이야기 보기</button>
       </div>`;
     return;
   }
