@@ -1064,6 +1064,164 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
   text-align: right;
   color: var(--text);
 }
+
+/* ── 문학적 시각화 추가 스타일 ── */
+.story-ghost {
+  opacity: 0.35 !important;
+  transition: opacity var(--t-slow) var(--ease), transform var(--t-base) var(--ease) !important;
+}
+.story-ghost:hover {
+  opacity: 0.85 !important;
+  transform: translateY(-2px);
+}
+
+.story-flash-deleted {
+  animation: flashRed 1.8s ease-out 1;
+  border: 1.5px solid var(--critique-rule) !important;
+  box-shadow: 0 0 25px rgba(179, 38, 30, 0.25) !important;
+}
+
+@keyframes flashRed {
+  0% {
+    background-color: rgba(179, 38, 30, 0.45);
+    box-shadow: 0 0 40px rgba(179, 38, 30, 0.7);
+    transform: scale(1.02);
+  }
+  50% {
+    background-color: rgba(179, 38, 30, 0.15);
+    box-shadow: 0 0 20px rgba(179, 38, 30, 0.3);
+    transform: scale(0.99);
+  }
+  100% {
+    background-color: var(--bg-card-2);
+    transform: scale(1);
+  }
+}
+
+/* 텍스트 타이핑 커서 효과 */
+.story-body {
+  position: relative;
+}
+.story-body::after {
+  content: '▋';
+  display: inline-block;
+  color: var(--accent-1);
+  animation: blink 0.8s infinite;
+  font-size: 0.85em;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+.story-body.typing-done::after {
+  display: none;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* AI의 재해석: 이중 레이어 시적 각색 스타일 */
+.poetic-overlay {
+  position: relative;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--sp-5) var(--sp-6);
+  margin-bottom: var(--sp-5);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+@media (prefers-color-scheme: dark) {
+  .poetic-overlay {
+    background: rgba(0, 0, 0, 0.15);
+  }
+}
+.poetic-reason-text {
+  font-family: var(--font-serif);
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  line-height: 1.6;
+  color: var(--accent-1);
+  font-style: italic;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+  word-break: keep-all;
+}
+.poetic-reason-text::before {
+  content: '“';
+  font-size: 2em;
+  line-height: 0;
+  vertical-align: -0.4em;
+  margin-right: 4px;
+  opacity: 0.5;
+}
+.poetic-reason-text::after {
+  content: '”';
+  font-size: 2em;
+  line-height: 0;
+  vertical-align: -0.4em;
+  margin-left: 4px;
+  opacity: 0.5;
+}
+
+.volatility-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  z-index: 2;
+  position: relative;
+}
+.volatility-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: var(--r-full);
+  overflow: hidden;
+}
+.volatility-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--accent-1));
+}
+
+/* 뒷 레이어: 흘러가는 날것의 텍스트 노이즈 */
+.story-bg-noise {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0.04;
+  pointer-events: none;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+@media (prefers-color-scheme: dark) {
+  .story-bg-noise {
+    opacity: 0.025;
+  }
+}
+.noise-row {
+  display: block;
+  white-space: nowrap;
+  animation: tickerScroll 25s linear infinite;
+}
+.noise-row:nth-child(even) {
+  animation-direction: reverse;
+  animation-duration: 35s;
+}
+
+@keyframes tickerScroll {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
 </style>
 </head>
 <body>
@@ -1120,6 +1278,20 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
           <strong id="gap-alert-title">언론 보도 격차</strong>
           <span id="gap-alert-detail"></span>
           <div class="gap-alert-stats" id="gap-alert-stats"></div>
+        </div>
+      </div>
+
+      <!-- 시적 각색 레이어 -->
+      <div class="poetic-overlay hidden" id="poetic-overlay">
+        <!-- 배경의 날것의 텍스트 노이즈 -->
+        <div class="story-bg-noise" id="story-bg-noise"></div>
+        <div class="poetic-reason-text" id="poetic-reason-text"></div>
+        <div class="volatility-container">
+          <span>휘발성 지수</span>
+          <div class="volatility-bar">
+            <div class="volatility-bar-fill" id="volatility-bar-fill" style="width: 0%"></div>
+          </div>
+          <span id="volatility-val">0/10</span>
         </div>
       </div>
 
@@ -1201,6 +1373,9 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <div class="empty-text">아직 이야기가 없습니다.</div>
       </div>
     </div>
+    <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
+      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;">더 보기</button>
+    </div>
   </div>
 
   <!-- 발행소 기록 (통계) — 접이식, 최하단 -->
@@ -1278,6 +1453,7 @@ let sb, cfg, session;
 let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드 포함 가능)
 let allStories = [];
 let currentFilter = 'all';
+let displayLimit = 10;
 let archivePollTimer = null;
 
 // ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
@@ -1393,6 +1569,15 @@ async function init() {
       });
       scrollTopBtn.onclick = () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+    }
+    
+    // 더 보기 버튼 리스너
+    const loadMoreBtn = document.getElementById('load-more-btn');
+    if (loadMoreBtn) {
+      loadMoreBtn.onclick = () => {
+        displayLimit += 15;
+        renderStoryList();
       };
     }
     
@@ -1718,17 +1903,62 @@ document.querySelectorAll('.btn-gen').forEach(btn => {
 });
 document.getElementById('btn-recheck').onclick = recheckCurrent;
 
+let typingTimer = null;
+
+function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
+  if (typingTimer) {
+    clearTimeout(typingTimer);
+    typingTimer = null;
+  }
+  element.innerHTML = '';
+  element.classList.remove('typing-done');
+
+  let i = 0;
+  const hasDropcap = leadsWithLetter(text);
+  let dropcapChar = '';
+  let restText = text;
+
+  if (hasDropcap) {
+    const trimmed = text.replace(/^\s+/, '');
+    dropcapChar = String.fromCodePoint(trimmed.codePointAt(0));
+    restText = trimmed.slice(dropcapChar.length);
+    element.innerHTML = `<span class="dropcap">${escHtml(dropcapChar)}</span>`;
+  }
+
+  const textNode = document.createTextNode('');
+  element.appendChild(textNode);
+
+  function type() {
+    if (i < restText.length) {
+      textNode.nodeValue += restText[i];
+      i++;
+      const randomSpeed = Math.floor(Math.random() * (speedMax - speedMin + 1)) + speedMin;
+      typingTimer = setTimeout(type, randomSpeed);
+    } else {
+      element.classList.add('typing-done');
+      typingTimer = null;
+      if (callback) callback();
+    }
+  }
+  type();
+}
+
 function showStory(s) {
   currentStory = s;
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
 
   const card = document.getElementById('story-card');
   card.classList.remove('hidden');
-  // 카드 재생성 애니메이션을 위해 잠시 재마운트
+  
   const inner = card.querySelector('.card');
-  // 듀얼톤: 카테고리 색을 상세 카드에 부여(직전 글 클래스 제거 후 누적 방지)
-  inner.classList.remove('is-kindness','is-critique');
+  inner.classList.remove('is-kindness','is-critique','story-flash-deleted');
   inner.classList.add(s.category === 'kindness' ? 'is-kindness' : 'is-critique');
+
+  // 출처 삭제 감지 시 붉은색 강렬한 플래시 효과 적용
+  if (s.deleted_count && s.deleted_count > 0) {
+    inner.classList.add('story-flash-deleted');
+  }
+
   inner.style.animation = 'none';
   void inner.offsetWidth;
   inner.style.animation = '';
@@ -1740,9 +1970,50 @@ function showStory(s) {
   document.getElementById('story-time').textContent = s.created_at ? formatRelative(s.created_at) : '';
   document.getElementById('story-model').textContent =
     (s.provider && s.model) ? ` · ${s.provider} ${s.model}` : '';
+  
   const sbEl = document.getElementById('story-body');
-  sbEl.textContent = s.body;
   sbEl.classList.toggle('no-dropcap', !leadsWithLetter(s.body));
+  
+  // 실시간 타이핑 효과 렌더링
+  typeWriter(sbEl, s.body);
+
+  // 시적 오버레이 및 휘발성 연출
+  const poeticOverlay = document.getElementById('poetic-overlay');
+  const poeticText = document.getElementById('poetic-reason-text');
+  const voltFill = document.getElementById('volatility-bar-fill');
+  const voltVal = document.getElementById('volatility-val');
+  const bgNoise = document.getElementById('story-bg-noise');
+
+  if (s.poetic_reason) {
+    poeticText.textContent = s.poetic_reason;
+    const voltScore = s.volatility_score || 0;
+    voltFill.style.width = (voltScore * 10) + '%';
+    voltVal.textContent = `${voltScore}/10`;
+    
+    // 배경에 흘러가는 날것의 텍스트 노이즈 배치
+    let noiseContent = '';
+    if (s.citations && s.citations.length) {
+      const citeStr = s.citations.map(c => c.title || c.uri).join('   |   ');
+      const repeatedStr = (citeStr + '   |   ').repeat(8);
+      noiseContent = `
+        <div class="noise-row">${escHtml(repeatedStr)}</div>
+        <div class="noise-row">${escHtml(repeatedStr)}</div>
+      `;
+    } else {
+      const bodyStr = (s.body || '').split('.').join('   |   ');
+      const repeatedStr = (bodyStr + '   |   ').repeat(4);
+      noiseContent = `
+        <div class="noise-row">${escHtml(repeatedStr)}</div>
+        <div class="noise-row">${escHtml(repeatedStr)}</div>
+      `;
+    }
+    bgNoise.innerHTML = noiseContent;
+    poeticOverlay.classList.remove('hidden');
+  } else {
+    poeticOverlay.classList.add('hidden');
+    bgNoise.innerHTML = '';
+  }
+
   renderGapSignal(s.gap_score, s.community_count, s.news_count);
 
   // 출처
@@ -1764,8 +2035,6 @@ function showStory(s) {
     document.getElementById('vote-section').classList.remove('hidden');
   }
 
-  // 투표 버튼은 전역 단일 요소라 직전 스토리 상태가 잠깐 보이거나(깜빡임) 직전 글 id로
-  // 오클릭될 수 있다. 비동기 갱신 전에 동기적으로 중립화(비활성+핸들러 제거)한다.
   const vbtn = document.getElementById('btn-vote');
   vbtn.disabled = true;
   vbtn.onclick = null;
@@ -2375,6 +2644,7 @@ async function loadStoryList() {
     const resp = await fetch('/api/stories?limit=100');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     allStories = await resp.json();
+    displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
   } catch (e) {
@@ -2457,7 +2727,13 @@ function renderStoryList() {
   else if (currentFilter === 'deleted')  stories = stories.filter(s => (s.deleted_count || 0) > 0);
   else if (currentFilter === 'gap')      stories = stories.filter(s => ['medium','high','extreme'].includes(s.gap_score));
 
-  if (!stories.length) {
+  const totalFiltered = stories.length;
+  const loadMoreContainer = document.getElementById('load-more-container');
+  if (loadMoreContainer) {
+    loadMoreContainer.style.display = totalFiltered > displayLimit ? 'block' : 'none';
+  }
+
+  if (!totalFiltered) {
     el.innerHTML = `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
@@ -2466,12 +2742,13 @@ function renderStoryList() {
     return;
   }
 
+  const visibleStories = stories.slice(0, displayLimit);
   const defaultTh = cfg?.vote_threshold || 3;
   const lastSeen = getLastSeen();
   el.innerHTML = '';
   const useFeature = (currentFilter === 'all');   // 전체 탭에서만 첫 글을 1면 피처로
 
-  stories.forEach((s, idx) => {
+  visibleStories.forEach((s, idx) => {
     const catCls   = s.category === 'kindness' ? 'is-kindness' : 'is-critique';
     const badgeCls = s.category === 'kindness' ? 'badge-kindness' : 'badge-critique';
     const badgeTxt = s.category === 'kindness' ? '선행' : '비판';
@@ -2498,10 +2775,12 @@ function renderStoryList() {
       : `${s.vote_count}/${threshold}표`;
 
     const div = document.createElement('div');
+    const isGhost = !isArchived && dC === 0;
+    const isDeletedWarning = dC > 0 && !isArchived;
 
     if (useFeature && idx === 0) {
       // 1면 단독 — 큰 피처 카드
-      div.className = `list-item feature ${catCls}${isArchived ? ' is-sealed' : ''}`;
+      div.className = `list-item feature ${catCls}${isArchived ? ' is-sealed' : ''}${isGhost ? ' story-ghost' : ''}${isDeletedWarning ? ' story-flash-deleted' : ''}`;
       const label = s.category === 'kindness' ? '🌸 따뜻한 미담' : '🔥 대기업 비위 · 폭로';
       const gapTag = s.gap_score === 'extreme' ? ' · 🚨 언론 보도 없음'
                    : s.gap_score === 'high'    ? ' · 🔍 보도 격차 큼' : '';
@@ -2521,7 +2800,7 @@ function renderStoryList() {
         </div>`;
     } else {
       // 정제된 색인 행
-      div.className = `list-item ${catCls}`;
+      div.className = `list-item ${catCls}${isGhost ? ' story-ghost' : ''}${isDeletedWarning ? ' story-flash-deleted' : ''}`;
       div.innerHTML = `
         <span class="badge ${badgeCls}" style="flex-shrink:0;margin-top:2px">${badgeTxt}</span>
         <div class="list-body">${newMark}${escHtml((s.body || '').slice(0, 140))}</div>
@@ -2564,6 +2843,7 @@ document.querySelectorAll('.chip').forEach(chip => {
     chip.classList.add('active');
     chip.setAttribute('aria-pressed', 'true');
     currentFilter = chip.dataset.filter;
+    displayLimit = 10; // 탭 변경 시 노출 개수 초기화
     renderStoryList();
   };
 });

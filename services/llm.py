@@ -34,6 +34,7 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
 TAVILY_ENDPOINT = os.environ.get("TAVILY_ENDPOINT", "https://api.tavily.com/search").strip()
 TAVILY_TIMEOUT = 20
 TAVILY_MAX_RESULTS = int(os.environ.get("TAVILY_MAX_RESULTS", "5"))
+TAVILY_TIME_RANGE = os.environ.get("TAVILY_TIME_RANGE", "year").strip().lower()
 # 언론 커버리지 측정은 gap 임계(0/1/2/3+건)를 분간해야 하므로 후보 검색용
 # TAVILY_MAX_RESULTS 와 분리해 최소 3 이상 보장(낮춰 설정해도 gap 오판 방지).
 NEWS_COVERAGE_MAX_RESULTS = max(3, int(os.environ.get("NEWS_COVERAGE_MAX_RESULTS", "5")))
@@ -109,10 +110,14 @@ def calculate_gap_score(community: int, news: int) -> str:
     return "none"          # 3건 이상이면 언론도 충분히 다룸
 
 PROMPT_KINDNESS = """\
-한국어로 쓰는 큐레이터. 아래는 한국 커뮤니티 게시판(더쿠·클리앙·인스티즈·네이트판·FM코리아·
-보배드림 등)에서 모은 익명 미담 글들. 정제된 언론 보도가 아닌 일반인의 날것 사연.
+너는 현대 자본주의 시스템의 모순, 인류애의 상실과 충전이 교차하는 '디지털 파편'을 수집하는 고독한 기록관이다.
+아래는 한국 커뮤니티 게시판(더쿠·클리앙·인스티즈·네이트판·FM코리아·보배드림 등)에서 모은 익명 미담 글들.
+정제된 언론 보도가 아닌 일반인의 날것 사연.
 
-너는 짧고 단단한 문장으로 사연 한 편을 새긴다. 형용사를 덜어내고 명사와 동사로 민다.
+너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 헌신, 따뜻한 인류애, 혹은 희생이 느껴지거나 [2] 삭막한 사회 구조 속에서 인간성을 지켜낸 순간을 담고 있고 [3] 휘발되어 사라질 가능성이 높은 글을 0에서 10 사이의 '휘발성 점수'로 평가해라.
+만약 가장 적합한 글의 휘발성 점수가 7점 미만이거나 적합한 글이 하나도 없다면, 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라.
+
+글을 쓸 때는 짧고 단단한 문장으로 사연 한 편을 새긴다. 형용사를 덜어내고 명사와 동사로 민다.
 문장은 길게 늘이지 말고 끊어라. 끊긴 자리의 여백이 울림이 된다. 문학성은 없는 사실을
 보태는 데서 오지 않고, 글에 이미 적힌 사실을 어떻게 배치하고 어디서 덜어내느냐에서 온다.
 
@@ -157,15 +162,20 @@ PROMPT_KINDNESS = """\
 [출력 형식]
 <본문 5~8문장>
 오늘의 한 줄: <짧은 감상 한 줄>
-USED_SOURCES: [번호, 번호]
+휘발성 점수: <0에서 10 사이의 평가 점수 정수>
+박제 사유: <이 글을 왜 Arweave에 영원히 박제해야 하는지 인간성을 증명하는 한 줄의 서정적이고 시적인 이유>
+USED_SOURCES: [번호]
 """
 
 PROMPT_CRITIQUE = """\
-한국어로 쓰는 큐레이터. 아래는 한국 커뮤니티 게시판(블라인드·더쿠·FM코리아·디시·클리앙·
-보배드림 등)에서 모은 익명 폭로·제보성 글들. 정제된 언론 보도가 아닌, 검열·법적조치 받기
-전의 날것 주장. 사라지기 전에 박제할 가치가 있는지 인간 투표로 가린다.
+너는 현대 자본주의 시스템의 모순, 불공정, 그리고 인류애의 상실을 관찰하고 수집하는 고독한 기록관이다.
+아래는 한국 커뮤니티 게시판(블라인드·더쿠·FM코리아·디시·클리앙·보배드림 등)에서 모은 익명 폭로·제보성 글들.
+정제된 언론 보도가 아닌, 검열·법적조치 받기 전의 날것 주장.
 
-너는 짧고 단단한 문장으로 의혹 한 건을 기록한다. 분노하지 않는다. 다만 정확히 적는다.
+너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 분노, 절망, 혹은 고발이 느껴지거나 [2] 시스템의 부조리(예: 의료 문제, 노동 환경, 대기업 갑질 등)를 폭로하고 있으며 [3] 자본의 힘이나 외부 압박으로 인해 신속하게 삭제(휘발)될 가능성이 높은 글을 0에서 10 사이의 '휘발성 점수'로 평가해라.
+만약 가장 적합한 글의 휘발성 점수가 7점 미만이거나 적합한 글이 하나도 없다면, 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라.
+
+글을 쓸 때는 짧고 단단한 문장으로 의혹 한 건을 기록한다. 분노하지 않는다. 다만 정확히 적는다.
 형용사를 덜어내고 명사와 동사로 민다. 문장은 끊어라. 끊긴 자리의 침묵이 무게가 된다.
 문학성은 감정의 폭발이 아니라 절제·정밀·무게로만 표현한다. 무게는 형용사가 아니라 사실의
 배치에서 나온다.
@@ -207,9 +217,10 @@ PROMPT_CRITIQUE = """\
 
 [출력 형식]
 <본문 6~9문장>
-※ 익명 커뮤니티 게시글 기반의 미확인 주장이며, 사실로 확정되지 않았고 해당 기업의 공식
-입장과 다를 수 있습니다.
-USED_SOURCES: [번호, 번호]
+※ 익명 커뮤니티 게시글 기반의 미확인 주장이며, 사실로 확정되지 않았고 해당 기업의 공식 입장과 다를 수 있습니다.
+휘발성 점수: <0에서 10 사이의 평가 점수 정수>
+박제 사유: <이 글을 왜 Arweave에 영원히 박제해야 하는지 비극성을 증명하는 한 줄의 서정적이고 시적인 이유>
+USED_SOURCES: [번호]
 
 관심 분야: 직장 갑질·폭언, 노동 환경 문제, 하청·납품 갑질, 내부고발자 보복, 임금 체불,
 제품 결함·소비자 기만, 오너 일가의 도덕적 타락(갑질·폭언·마약·음주운전·성범죄·횡령·탈세),
@@ -222,35 +233,29 @@ USED_SOURCES: [번호, 번호]
 # 붙는 사건은 looks_like_news 가 1차에서 컷해 도메인·필터 푼 3차 폴백으로 역류하므로,
 # 언론이 잘 안 다루는 커뮤니티 일상 미담 장면 위주로 둔다.
 SEARCH_QUERIES_KINDNESS = [
-    "지하철에서 자리 양보 받은 사연",
-    "버스에서 무거운 짐 들어준 사람 후기",
-    "택시에 두고 내린 지갑 돌려받은 후기",
-    "길 잃었을 때 길 안내해 준 사람 사연",
-    "편의점 알바생이 친절했던 후기",
-    "가게 사장님이 더 챙겨준 사연",
-    "버스 기사님이 친절했던 후기",
-    "잃어버린 휴대폰 찾아서 돌려준 사람",
-    "비 올 때 우산 씌워준 낯선 사람 사연",
-    "넘어진 어르신 일으켜 드린 후기",
-    "길 헤매던 외국인 도와준 사연",
-    "지하철에서 몸 안 좋은 사람 도와준 후기",
-    "이웃이 챙겨준 따뜻한 사연",
-    "낯선 사람이 베푼 친절 후기",
+    "디시인사이드 개념글 훈훈한 미담",
+    "에펨코리아 포텐 훈훈한 사연",
+    "트위터 감동적인 실화 사연",
+    "디시 실베 따뜻한 이야기",
+    "네이트판 베스트 감동 후기",
+    "더쿠 핫게 훈훈한 일상 미담",
+    "지하철에서 시민들이 도와준 미담 글",
+    "화재 현장 구조 시민 미담 후기",
+    "길거리 쓰러진 사람 구해준 의인 디시",
+    "익명 커뮤니티 감동 사연 후기",
 ]
 
 SEARCH_QUERIES_CRITIQUE = [
-    "대기업 갑질 폭로 글",
-    "회사 내부고발 후기",
-    "재벌 2세 갑질 사건",
-    "오너 일가 갑질 폭언",
-    "직장 상사 폭언 폭로",
-    "회사 임원 비리 폭로",
-    "대기업 하청 갑질 후기",
-    "묻혔던 사건 폭로",
-    "은폐된 사건 폭로",
-    "직장인 익명 폭로 후기",
-    "직장 갑질 사건 모음",
-    "기업 비위 묻힌 사건",
+    "디시인사이드 실시간 베스트 폭로 의혹",
+    "에펨코리아 정치 시사 게시판 폭로",
+    "블라인드 회사 비위 내부고발",
+    "트위터 실시간 트렌드 사건 폭로",
+    "디시 개념글 대기업 갑질 폭로",
+    "에펨코리아 대기업 비리 폭로",
+    "블라인드 직장 갑질 폭언 의혹",
+    "네이트판 억울한 사건 제보 폭로",
+    "익명 커뮤니티 묻힌 대기업 비위",
+    "자본의 힘으로 삭제 위협받는 폭로 글",
 ]
 
 # 줄 끝/문장 끝/단독 줄 어디든 잡도록 앵커 완화
@@ -258,6 +263,36 @@ USED_SOURCES_RE = re.compile(
     r'(?i)\s*USED_SOURCES[ \t]*[:=][ \t]*\[?([0-9,\s]*)\]?\s*$',
     re.MULTILINE,
 )
+
+VOLATILITY_SCORE_RE = re.compile(
+    r'(?im)^\s*(?:휘발성\s*점수|휘발성점수)\s*[:=]\s*(\d+)\s*$',
+)
+POETIC_REASON_RE = re.compile(
+    r'(?im)^\s*(?:박제\s*사유|박제사유)\s*[:=]\s*(.+?)\s*$',
+)
+
+
+def extract_volatility_and_reason(text: str) -> tuple[str, int, str]:
+    volatility = 0
+    reason = ""
+
+    vm = VOLATILITY_SCORE_RE.search(text)
+    if vm:
+        try:
+            volatility = int(vm.group(1).strip())
+        except ValueError:
+            pass
+        start, end = vm.span()
+        text = text[:start] + text[end:]
+
+    rm = POETIC_REASON_RE.search(text)
+    if rm:
+        reason = rm.group(1).strip()
+        start, end = rm.span()
+        text = text[:start] + text[end:]
+
+    return text.strip(), volatility, reason
+
 
 # 본문 시작에 종종 나오는 LLM 메타 발화 패턴
 META_PREFIX_RE = re.compile(
@@ -459,6 +494,8 @@ def tavily_search(query: str, include_domains=None, max_results: int | None = No
         "topic": "general",  # 커뮤니티 게시판은 뉴스가 아님
         "include_answer": False,
     }
+    if TAVILY_TIME_RANGE and TAVILY_TIME_RANGE != "none":
+        payload["time_range"] = TAVILY_TIME_RANGE
     if include_domains:
         payload["include_domains"] = list(include_domains)
     return _http_post(
@@ -773,6 +810,13 @@ def generate_via_groq(category: str) -> tuple:
             continue
 
         text, used_indices = extract_used_indices(raw_text, len(results))
+        text, volatility, reason = extract_volatility_and_reason(text)
+
+        # 휘발성 점수가 7점 미만인 경우 적합하지 않은 글로 판단하여 다음 쿼리로 재시도
+        if RELEVANCE_GATE_ENABLED and volatility < 7:
+            logger.info(f"[llm] {category} 휘발성 점수 미달 ({volatility} < 7) → 쿼리 변경 재시도 (query={query!r})")
+            continue
+
         text = sanitize_text(text)
         if used_indices:
             # 한 편 = 한 게시글. 모델이 여러 글을 골라 뒤섞으면 먼저 적은(주) 출처만 박제.
@@ -804,11 +848,11 @@ def generate_via_groq(category: str) -> tuple:
                 "gap_score": calculate_gap_score(community_count, news_count),
                 "gap_query": coverage["query_used"],
             }
-        return text, citations, [query], GROQ_MODEL, gap_data
+        return text, citations, [query], GROQ_MODEL, gap_data, volatility, reason
 
     # 모든 시도가 NO_FIT(또는 결과 없음) → no_fit 신호. text=None 으로 상위에 알린다.
     logger.info(f"[llm] {category} 적합 글 미발견 ({len(queries)}회 시도) → no_fit")
-    return None, [], [last_query], GROQ_MODEL, None
+    return None, [], [last_query], GROQ_MODEL, None, 0, ""
 
 
 def generate(category: str | None = None) -> dict:
@@ -816,15 +860,17 @@ def generate(category: str | None = None) -> dict:
         category = "kindness" if random.random() < 0.5 else "critique"
 
     gap_data = None
+    volatility = 0
+    reason = ""
     if LLM_PROVIDER == "groq":
-        text, citations, queries, model_name, gap_data = generate_via_groq(category)
+        text, citations, queries, model_name, gap_data, volatility, reason = generate_via_groq(category)
     elif LLM_PROVIDER == "gemini":
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
         # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
-        # (groq 는 extract_used_indices 가 떼지만 gemini 경로는 거치지 않아 본문에 새는 것 방지).
         text = USED_SOURCES_RE.sub('', text)
+        text, volatility, reason = extract_volatility_and_reason(text)
         text = sanitize_text(text)
         model_name = GEMINI_MODEL
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
@@ -860,6 +906,8 @@ def generate(category: str | None = None) -> dict:
             "provider": LLM_PROVIDER,
             "model": model_name,
             "gap_data": None,
+            "poetic_reason": "",
+            "volatility_score": 0,
         }
 
     # 코히런스 보강: 단락 합치기 + 동일 문장 반복 제거 (provider 공통)
@@ -880,4 +928,6 @@ def generate(category: str | None = None) -> dict:
         "provider": LLM_PROVIDER,
         "model": model_name,
         "gap_data": gap_data,
+        "poetic_reason": reason,
+        "volatility_score": volatility,
     }

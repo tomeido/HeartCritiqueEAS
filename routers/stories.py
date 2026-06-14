@@ -132,6 +132,8 @@ async def create_story(request: Request, category: str | None = None):
         "gap_score": gap.get("gap_score"),
         "community_count": gap.get("community_count"),
         "news_count": gap.get("news_count"),
+        "poetic_reason": result.get("poetic_reason"),
+        "volatility_score": result.get("volatility_score"),
     }).execute()
     story_id = resp.data[0]["id"]
 
@@ -149,6 +151,8 @@ async def create_story(request: Request, category: str | None = None):
         "gap_score": gap.get("gap_score"),
         "community_count": gap.get("community_count"),
         "news_count": gap.get("news_count"),
+        "poetic_reason": result.get("poetic_reason"),
+        "volatility_score": result.get("volatility_score"),
     }
 
 
@@ -161,7 +165,7 @@ async def list_stories(limit: int = 50):
     resp = (
         db.table("stories")
         .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
-                "created_at,gap_score,community_count,news_count")
+                "created_at,gap_score,community_count,news_count,poetic_reason,volatility_score")
         .order("created_at", desc=True)
         .limit(limit)
         .execute()
