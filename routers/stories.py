@@ -60,6 +60,10 @@ def _augment_with_status(story: dict, status_by_url: dict, wayback_by_url: dict 
             c["track_last_checked"] = info["last_checked"]
             c["track_http_code"] = info["http_code"]
             c["track_reason"] = info.get("reason")
+            c["track_first_seen"] = info.get("first_seen")
+            c["track_check_count"] = info.get("check_count", 0)
+            c["track_next_check_at"] = info.get("next_check_at")
+            c["track_error_count"] = info.get("error_count", 0)
             c["track_untrackable"] = is_untrackable_source(
                 c.get("uri"), info["http_code"], info.get("reason"))
             if info["status"] == "deleted":
