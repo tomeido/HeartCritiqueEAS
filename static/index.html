@@ -101,7 +101,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.light-theme) {
     /* 다크 = 야간 봉랍판/잉크 보관고 */
     --bg: #14110d;
     --bg-2: #1b1712;
@@ -145,6 +145,51 @@
     --shadow-feature: 0 2px 0 var(--bg-2), 0 14px 40px rgba(0,0,0,.5);
     --shadow-seal: 0 10px 40px rgba(0,0,0,.7);
   }
+}
+
+:root.dark-theme {
+  /* 다크 = 야간 봉랍판/잉크 보관고 */
+  --bg: #14110d;
+  --bg-2: #1b1712;
+  --bg-card: rgba(30,26,21,.80);
+  --bg-card-2: rgba(38,33,27,.97);
+  --bg-sunken: #1f1812;
+  --border: rgba(240,234,222,.10);
+  --border-strong: rgba(240,234,222,.18);
+  --rule: rgba(240,234,222,.22);
+  --text: #ece6d8;
+  --ink: #f4efe2;
+  --text-soft: #d8cdba;
+  --muted: rgba(236,230,216,.58);
+
+  --accent-1: #d9745c;
+  --accent-2: #e3a857;
+
+  --kindness-bg: #3d2a08; --kindness-fg: #f0cf86;
+  --kindness-accent: #e3a857; --kindness-rule: #a87a2e;
+  --kindness-soft: #6e4f1f; --kindness-wash: rgba(227,168,87,.10);
+
+  --critique-bg: #441715; --critique-fg: #f0b3ab;
+  --critique-accent: #e0635c; --critique-rule: #b5453a;
+  --critique-border: #6e2620; --critique-wash: rgba(224,99,92,.10);
+
+  --seal-wax: #b8362e; --seal-wax-hi: #d65a48; --seal-wax-2: #8c241f;
+  --seal-gold: #d8b865;
+  --seal-bg: #1d150f; --seal-bg-2: #2a1f16;
+  --seal-fg: #f3e7d3; --seal-fg-muted: rgba(243,231,211,.60);
+  --seal-border: rgba(216,184,101,.50);
+  --archive-bg: #2c2517; --archive-fg: #d8c08a; --archive-border: #5a4a28;
+
+  --err: #e0635c;
+  --ok:  #5fb07f;
+  --info-bg: rgba(217,116,92,.12); --info-border: rgba(217,116,92,.25);
+  --warn-fg: #f0b884; --gap-fg: #f0a868;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-md: 0 6px 22px rgba(0,0,0,.5);
+  --shadow-lg: 0 18px 50px rgba(0,0,0,.6);
+  --shadow-feature: 0 2px 0 var(--bg-2), 0 14px 40px rgba(0,0,0,.5);
+  --shadow-seal: 0 10px 40px rgba(0,0,0,.7);
 }
 
 /* ── 기본 ─────────────────────────────────────────────────────────────────── */
@@ -200,6 +245,17 @@ body {
 }
 .header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; flex-wrap: wrap; }
 .auth-area { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* 테마 토글 */
+.theme-btn {
+  background: transparent; color: var(--text);
+  padding: 7px 12px; font-size: var(--fs-md);
+  border-radius: var(--r-full); border: 1px solid var(--border-strong);
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background var(--t-base), border-color var(--t-base);
+  user-select: none;
+}
+.theme-btn:hover { background: var(--bg-card-2); }
 /* 알림 벨 */
 .bell-btn {
   background: transparent; color: var(--text);
@@ -828,6 +884,9 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <p class="tagline">AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제</p>
     </div>
     <div class="header-right">
+      <button class="theme-btn" id="theme-btn" title="테마 변경 (시스템/밝게/어둡게)" aria-label="테마 변경">
+        🌗
+      </button>
       <button class="bell-btn" id="bell-btn" title="이전 방문 이후 새 이야기 보기" aria-label="새 이야기 알림">
         🔔<span class="bell-count" id="bell-count"></span>
       </button>
@@ -1025,6 +1084,55 @@ let allStories = [];
 let currentFilter = 'all';
 let archivePollTimer = null;
 
+// ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
+const THEME_KEY = 'hc_theme_mode';
+function initTheme() {
+  const t = localStorage.getItem(THEME_KEY) || 'auto';
+  applyTheme(t);
+  
+  const btn = document.getElementById('theme-btn');
+  if (btn) {
+    btn.onclick = toggleTheme;
+  }
+  
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    const current = localStorage.getItem(THEME_KEY) || 'auto';
+    if (current === 'auto') {
+      applyTheme('auto');
+    }
+  });
+}
+function applyTheme(t) {
+  const root = document.documentElement;
+  const btn = document.getElementById('theme-btn');
+  
+  root.classList.remove('dark-theme', 'light-theme');
+  if (t === 'dark') {
+    root.classList.add('dark-theme');
+    if (btn) btn.textContent = '🌙';
+  } else if (t === 'light') {
+    root.classList.add('light-theme');
+    if (btn) btn.textContent = '☀️';
+  } else {
+    // auto
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (btn) btn.textContent = '🌗';
+  }
+}
+function toggleTheme() {
+  const current = localStorage.getItem(THEME_KEY) || 'auto';
+  let next = 'auto';
+  if (current === 'auto') next = 'light';
+  else if (current === 'light') next = 'dark';
+  else next = 'auto';
+  
+  localStorage.setItem(THEME_KEY, next);
+  applyTheme(next);
+  
+  const label = next === 'auto' ? '시스템 설정' : next === 'dark' ? '어두운 테마' : '밝은 테마';
+  toast(`테마를 ${label}로 설정했습니다.`);
+}
+
 // ── 마지막 방문 추적 (localStorage) ────────────────────────────────────────
 const LAST_SEEN_KEY = 'hc_last_seen_v1';
 function getLastSeen() {
@@ -1044,6 +1152,7 @@ function newerThan(iso, ref) {
 
 // ── 초기화 ─────────────────────────────────────────────────────────────────
 async function init() {
+  initTheme();
   // 공개 데이터(목록·통계)는 인증/Supabase CDN 초기화와 무관하다. 먼저 즉시 로드해
   // 첫 화면 공백을 없앤다 — 아래 auth 초기화가 느리거나 실패해도 데이터는 보인다.
   loadStoryList();
