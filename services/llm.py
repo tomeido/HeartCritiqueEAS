@@ -34,6 +34,7 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "").strip()
 TAVILY_ENDPOINT = os.environ.get("TAVILY_ENDPOINT", "https://api.tavily.com/search").strip()
 TAVILY_TIMEOUT = 20
 TAVILY_MAX_RESULTS = int(os.environ.get("TAVILY_MAX_RESULTS", "5"))
+TAVILY_TIME_RANGE = os.environ.get("TAVILY_TIME_RANGE", "year").strip().lower()
 # 언론 커버리지 측정은 gap 임계(0/1/2/3+건)를 분간해야 하므로 후보 검색용
 # TAVILY_MAX_RESULTS 와 분리해 최소 3 이상 보장(낮춰 설정해도 gap 오판 방지).
 NEWS_COVERAGE_MAX_RESULTS = max(3, int(os.environ.get("NEWS_COVERAGE_MAX_RESULTS", "5")))
@@ -459,6 +460,8 @@ def tavily_search(query: str, include_domains=None, max_results: int | None = No
         "topic": "general",  # 커뮤니티 게시판은 뉴스가 아님
         "include_answer": False,
     }
+    if TAVILY_TIME_RANGE and TAVILY_TIME_RANGE != "none":
+        payload["time_range"] = TAVILY_TIME_RANGE
     if include_domains:
         payload["include_domains"] = list(include_domains)
     return _http_post(
