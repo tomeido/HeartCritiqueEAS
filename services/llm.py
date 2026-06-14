@@ -515,8 +515,12 @@ def tavily_search(query: str, include_domains=None, max_results: int | None = No
 NEWS_INDICATORS_RE = re.compile(
     # 뉴스 헤드라인 머리표
     r'\[(?:속보|단독|종합|특보|특집|기획|르포|분석|사설|칼럼|인터뷰|이슈|화제|영상|사진|뉴스|기자수첩)\]'
-    # "○○○ 기자 = " 형식
-    r'|기자\s*[\]=]'
+    # "○○○ 기자 = ", "○○○ 에디터 =" 형식 및 한글 바이라인
+    r'|\b\S{2,4}\s*(?:기자|에디터|특파원|논설위원)\b'
+    # "기자: ", "에디터 =" 등 직책 뒤의 어포지션
+    r'|(?:기자|에디터|reporter|editor)\s*[:=\(\[\]]'
+    # 이메일 바이라인
+    r'|[a-zA-Z0-9._%+-]+@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
     # 언론사명 직접 노출
     r'|(?:뉴스1|연합뉴스|뉴시스|YTN|SBS\s?뉴스|KBS\s?뉴스|MBC\s?뉴스|JTBC|TV조선|MBN|채널A'
     r'|조선일보|중앙일보|동아일보|한겨레|경향신문|국민일보|문화일보|세계일보|서울신문'
@@ -529,13 +533,17 @@ NEWS_INDICATORS_RE = re.compile(
 NEWS_URL_PATTERNS = (
     'mid=news', 'mid=hotnews', 'mid=politics_news',
     '/news/', '/article/news', '/article_view',
-    'category=news', 'cate=news',
+    'category=news', 'cate=news', 'issuefeed',
 )
 
 
 def looks_like_news(item: dict) -> bool:
     """뉴스 기사 복붙으로 보이는 결과면 True."""
     url = (item.get("url") or "").lower()
+    # issuefeed 도메인은 100% 뉴스/카드뉴스 피드
+    if "issuefeed.dcinside.com" in url:
+        return True
+
     if any(p in url for p in NEWS_URL_PATTERNS):
         return True
 
