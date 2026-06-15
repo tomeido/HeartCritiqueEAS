@@ -1371,6 +1371,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <div class="empty">
         <div class="empty-icon">📜</div>
         <div class="empty-text">아직 이야기가 없습니다.</div>
+        <p class="muted text-sm" style="margin-top: 8px;">상단의 <strong>AI 사냥개 호출</strong> 버튼을 눌러 첫 이야기를 찾아보세요!</p>
       </div>
     </div>
     <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
@@ -1859,7 +1860,7 @@ async function generateStory(btn, category) {
   const allBtns = document.querySelectorAll('.btn-gen');
   const orig = btn.innerHTML;
   allBtns.forEach(b => b.disabled = true);
-  btn.innerHTML = '<span class="spin"></span> 사냥 중…';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 사냥 중…';
   setStatus('gen-status', '');
 
   try {
@@ -2170,7 +2171,7 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 재검사 중…';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2310,7 +2311,7 @@ function renderVoteArea(storyId, data) {
   }
 
   if (data.vote_count >= data.threshold) {
-    btn.innerHTML = '<span class="spin"></span> Arweave 박제 진행 중…';
+    btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Arweave 박제 진행 중…';
     btn.className = 'btn-vote btn-sm';
     btn.disabled = true;
   } else if (data.already_voted) {
@@ -2335,7 +2336,7 @@ async function castVote(storyId) {
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 투표 중…';
   setStatus('vote-status', '');
 
   try {
@@ -2510,7 +2511,7 @@ function bytesToHex(bytes) {
 async function runVerification(txId, arweaveUrl) {
   const btn = document.getElementById('btn-verify');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span> 검증 중...';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 검증 중...';
   document.getElementById('verify-steps').innerHTML = '';
   const finalEl = document.getElementById('verify-final');
   finalEl.className = 'verify-final';
@@ -2738,6 +2739,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
+        ${currentFilter === 'all' ? '<p class="muted text-sm" style="margin-top: 8px;">상단의 <strong>AI 사냥개 호출</strong> 버튼을 눌러 첫 이야기를 찾아보세요!</p>' : ''}
       </div>`;
     return;
   }
