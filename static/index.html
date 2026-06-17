@@ -1258,7 +1258,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <button class="btn-gen btn-gen-critique" data-category="critique">🔥 대기업 비위</button>
       <button class="btn-gen btn-gen-random" data-category="">🎲 무작위</button>
     </div>
-    <div class="status" id="gen-status"></div>
+    <div class="status" id="gen-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- 현재 스토리 -->
@@ -1273,7 +1273,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
 
       <!-- 격차 알림 (medium 이상일 때 표시) -->
       <div class="gap-alert hidden" id="gap-alert">
-        <span class="gap-alert-icon" id="gap-alert-icon">🔍</span>
+        <span class="gap-alert-icon" id="gap-alert-icon" aria-hidden="true">🔍</span>
         <div class="gap-alert-body">
           <strong id="gap-alert-title">언론 보도 격차</strong>
           <span id="gap-alert-detail"></span>
@@ -1305,7 +1305,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         </div>
         <!-- 삭제된 출처 알림 (deleted_count > 0일 때만 표시) -->
         <div class="deletion-alert hidden" id="deletion-alert">
-          <span class="deletion-alert-icon">🚨</span>
+          <span class="deletion-alert-icon" aria-hidden="true">🚨</span>
           <div class="deletion-alert-body">
             <strong id="deletion-alert-title">출처가 삭제되었습니다</strong>
             <span id="deletion-alert-detail">이 사연의 흔적이 지워지고 있습니다. 박제 가치가 큽니다.</span>
@@ -1316,7 +1316,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
 
       <!-- 박제 hero -->
       <a class="archive-hero hidden" id="archive-hero" target="_blank" rel="noopener">
-        <div class="archive-icon">🗄</div>
+        <div class="archive-icon" aria-hidden="true">🗄</div>
         <div class="archive-text">
           <div class="lbl" id="archive-lbl">Arweave 영구 박제됨</div>
           <div class="tx" id="archive-tx"></div>
@@ -1369,7 +1369,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
     </div>
     <div id="story-list">
       <div class="empty">
-        <div class="empty-icon">📜</div>
+        <div class="empty-icon" aria-hidden="true">📜</div>
         <div class="empty-text">아직 이야기가 없습니다.</div>
       </div>
     </div>
@@ -1858,8 +1858,8 @@ function restoreReturnStory() {
 async function generateStory(btn, category) {
   const allBtns = document.querySelectorAll('.btn-gen');
   const orig = btn.innerHTML;
-  allBtns.forEach(b => b.disabled = true);
-  btn.innerHTML = '<span class="spin"></span> 사냥 중…';
+  allBtns.forEach(b => { b.disabled = true; b.setAttribute('aria-busy', 'true'); });
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 사냥 중…';
   setStatus('gen-status', '');
 
   try {
@@ -1894,7 +1894,7 @@ async function generateStory(btn, category) {
     toast('이야기 생성 실패', 'error');
   } finally {
     btn.innerHTML = orig;
-    allBtns.forEach(b => b.disabled = false);
+    allBtns.forEach(b => { b.disabled = false; b.removeAttribute('aria-busy'); });
   }
 }
 
@@ -2036,7 +2036,7 @@ function showStory(s) {
   }
 
   const vbtn = document.getElementById('btn-vote');
-  vbtn.disabled = true;
+  vbtn.disabled = true; vbtn.setAttribute('aria-busy', 'true');
   vbtn.onclick = null;
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
@@ -2169,8 +2169,8 @@ async function recheckCurrent() {
   if (!currentStory?.id) return;
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 재검사 중...';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2186,7 +2186,7 @@ async function recheckCurrent() {
   } catch (e) {
     toast('재검사 실패: ' + e.message, 'error');
   } finally {
-    btn.disabled = false;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
     btn.innerHTML = orig;
   }
 }
@@ -2273,7 +2273,7 @@ async function refreshVoteStatus(storyId) {
     // 투표 버튼이 showStory 에서 disabled 로 무력화된 채 남지 않게 복구 경로 제공.
     const btn = document.getElementById('btn-vote');
     if (btn) {
-      btn.disabled = false;
+      btn.disabled = false; btn.removeAttribute('aria-busy');
       btn.textContent = '↻ 투표 상태 다시 불러오기';
       btn.onclick = () => refreshVoteStatus(storyId);
     }
@@ -2310,22 +2310,22 @@ function renderVoteArea(storyId, data) {
   }
 
   if (data.vote_count >= data.threshold) {
-    btn.innerHTML = '<span class="spin"></span> Arweave 박제 진행 중…';
+    btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Arweave 박제 진행 중…';
     btn.className = 'btn-vote btn-sm';
-    btn.disabled = true;
+    btn.disabled = true; btn.setAttribute('aria-busy', 'true');
   } else if (data.already_voted) {
     btn.textContent = '✓ 투표 완료';
     btn.className = 'btn-voted btn-sm';
-    btn.disabled = true;
+    btn.disabled = true; btn.setAttribute('aria-busy', 'true');
   } else if (!session) {
     btn.textContent = '🔑 로그인하고 투표하기';
     btn.className = 'btn-vote btn-sm';
-    btn.disabled = false;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
     btn.onclick = () => signInWithGoogle();
   } else {
     btn.textContent = '👍 공론화 찬성 투표';
     btn.className = 'btn-vote btn-sm';
-    btn.disabled = false;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
     btn.onclick = () => castVote(storyId);
   }
 }
@@ -2334,8 +2334,8 @@ async function castVote(storyId) {
   if (!session?.access_token) return;
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 투표 중...';
   setStatus('vote-status', '');
 
   try {
@@ -2359,7 +2359,7 @@ async function castVote(storyId) {
   } catch (e) {
     setStatus('vote-status', '실패: ' + e.message, 'err');
     toast('투표 실패: ' + e.message, 'error');
-    btn.disabled = false;
+    btn.disabled = false; btn.removeAttribute('aria-busy');
     btn.innerHTML = orig;
   }
 }
@@ -2468,14 +2468,14 @@ function showVerifyCard(txId, arweaveUrl) {
 function appendStep(text, status = 'busy') {
   const el = document.createElement('div');
   el.className = `verify-step ${status}`;
-  el.innerHTML = `<span class="icon">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
+  el.innerHTML = `<span class="icon" aria-hidden="true">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
   document.getElementById('verify-steps').appendChild(el);
   return el;
 }
 
 function updateStep(el, text, status) {
   el.className = `verify-step ${status}`;
-  el.innerHTML = `<span class="icon">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
+  el.innerHTML = `<span class="icon" aria-hidden="true">${status === 'ok' ? '✅' : status === 'err' ? '❌' : '⏳'}</span><span>${escHtml(text)}</span>`;
 }
 
 // Python json.dumps(obj, sort_keys=True, ensure_ascii=False) 와 정확히 같은 출력
@@ -2509,8 +2509,8 @@ function bytesToHex(bytes) {
 
 async function runVerification(txId, arweaveUrl) {
   const btn = document.getElementById('btn-verify');
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span> 검증 중...';
+  btn.disabled = true; btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 검증 중...';
   document.getElementById('verify-steps').innerHTML = '';
   const finalEl = document.getElementById('verify-final');
   finalEl.className = 'verify-final';
@@ -2634,7 +2634,7 @@ async function runVerification(txId, arweaveUrl) {
     finalEl.textContent = '❌ 검증 실패 — 단계별 메시지를 확인하세요';
   }
 
-  btn.disabled = false;
+  btn.disabled = false; btn.removeAttribute('aria-busy');
   btn.innerHTML = '🔍 다시 검증';
 }
 
@@ -2654,7 +2654,7 @@ async function loadStoryList() {
     if (el && !allStories.length) {
       el.innerHTML = `
         <div class="empty">
-          <div class="empty-icon">⚠️</div>
+          <div class="empty-icon" aria-hidden="true">⚠️</div>
           <div class="empty-text">목록을 불러오지 못했습니다.</div>
           <button class="btn-sm" onclick="loadStoryList()" style="margin-top:10px">다시 시도</button>
         </div>`;
@@ -2736,7 +2736,7 @@ function renderStoryList() {
   if (!totalFiltered) {
     el.innerHTML = `
       <div class="empty">
-        <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
+        <div class="empty-icon" aria-hidden="true">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
       </div>`;
     return;
