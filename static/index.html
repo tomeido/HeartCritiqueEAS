@@ -1928,6 +1928,15 @@ function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
   const textNode = document.createTextNode('');
   element.appendChild(textNode);
 
+  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (prefersReducedMotion) {
+    textNode.nodeValue = restText;
+    element.classList.add('typing-done');
+    if (callback) callback();
+    return;
+  }
+
   function type() {
     if (i < restText.length) {
       textNode.nodeValue += restText[i];
@@ -2170,7 +2179,7 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 재검사 중';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);

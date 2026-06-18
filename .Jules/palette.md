@@ -1,0 +1,3 @@
+## 2024-06-18 - JS Animation and Motion Preferences
+**Learning:** While CSS animations can be disabled globally via media queries, custom JavaScript-driven animations (like the letter-by-letter typing effect using `setTimeout`) completely bypass CSS-level reduced motion settings. This results in unintended and potentially disruptive motion for users who have requested reduced motion at the OS level.
+**Action:** When implementing JS-driven UI animations, always explicitly check `window.matchMedia('(prefers-reduced-motion: reduce)').matches` in the JS function and provide an instant-render fallback to respect user accessibility preferences.
