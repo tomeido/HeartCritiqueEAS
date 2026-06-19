@@ -1258,7 +1258,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <button class="btn-gen btn-gen-critique" data-category="critique">🔥 대기업 비위</button>
       <button class="btn-gen btn-gen-random" data-category="">🎲 무작위</button>
     </div>
-    <div class="status" id="gen-status"></div>
+    <div class="status" id="gen-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- 현재 스토리 -->
@@ -1860,6 +1860,7 @@ async function generateStory(btn, category) {
   const orig = btn.innerHTML;
   allBtns.forEach(b => b.disabled = true);
   btn.innerHTML = '<span class="spin"></span> 사냥 중…';
+  btn.setAttribute('aria-busy', 'true');
   setStatus('gen-status', '');
 
   try {
@@ -1893,6 +1894,7 @@ async function generateStory(btn, category) {
     setStatus('gen-status', '실패: ' + e.message, 'err');
     toast('이야기 생성 실패', 'error');
   } finally {
+    btn.removeAttribute('aria-busy');
     btn.innerHTML = orig;
     allBtns.forEach(b => b.disabled = false);
   }
@@ -2170,7 +2172,8 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 재검사 중...';
+  btn.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2186,6 +2189,7 @@ async function recheckCurrent() {
   } catch (e) {
     toast('재검사 실패: ' + e.message, 'error');
   } finally {
+    btn.removeAttribute('aria-busy');
     btn.disabled = false;
     btn.innerHTML = orig;
   }
@@ -2335,7 +2339,8 @@ async function castVote(storyId) {
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin"></span> 투표 중...';
+  btn.setAttribute('aria-busy', 'true');
   setStatus('vote-status', '');
 
   try {
@@ -2353,12 +2358,14 @@ async function castVote(storyId) {
       pollForArchive(storyId);
     }
 
+    btn.removeAttribute('aria-busy');
     await refreshVoteStatus(storyId);
     loadStoryList();
     loadStats();
   } catch (e) {
     setStatus('vote-status', '실패: ' + e.message, 'err');
     toast('투표 실패: ' + e.message, 'error');
+    btn.removeAttribute('aria-busy');
     btn.disabled = false;
     btn.innerHTML = orig;
   }
@@ -2511,6 +2518,7 @@ async function runVerification(txId, arweaveUrl) {
   const btn = document.getElementById('btn-verify');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> 검증 중...';
+  btn.setAttribute('aria-busy', 'true');
   document.getElementById('verify-steps').innerHTML = '';
   const finalEl = document.getElementById('verify-final');
   finalEl.className = 'verify-final';
@@ -2634,6 +2642,7 @@ async function runVerification(txId, arweaveUrl) {
     finalEl.textContent = '❌ 검증 실패 — 단계별 메시지를 확인하세요';
   }
 
+  btn.removeAttribute('aria-busy');
   btn.disabled = false;
   btn.innerHTML = '🔍 다시 검증';
 }
