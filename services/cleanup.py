@@ -6,8 +6,11 @@
 투표로 선택받지 못한 후보는 일정 기간 뒤 만료시키는 것이 타임캡슐 설계 철학과도 부합한다.
 
 - 대상: arweave_tx_id IS NULL  AND  created_at < now - CLEANUP_AGE_DAYS
-        AND  vote_count <= CLEANUP_MAX_VOTES
-- 박제된 글(arweave_tx_id 있음)·투표받은 후보(기본 0표 초과)는 필터로 제외 → 절대 삭제 안 됨.
+        AND  vote_count <= CLEANUP_MAX_VOTES  AND  from_capture = false
+- 기본 한도(CLEANUP_MAX_VOTES)는 '박제 임계값 바로 아래'(DEFAULT_THRESHOLD-1). 0/1/2표처럼
+  임계값에 못 미친 채 방치된 오래된 후보를 정리한다. (과거엔 0표만 지워 1~2표 후보가 무한 누적됐다.)
+- 박제된 글(arweave_tx_id 있음)·업로드 중(__pending__, IS NULL 아님)·임계값 도달 후보(기본
+  초과)·캡처 승격글(from_capture, '삭제된 원본'의 공개 기록 + 삭제 시 캡처 dangling)은 보존.
 - votes·citation_checks 는 stories(id) on delete cascade 라 함께 정리된다.
 """
 
@@ -20,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from postgrest.exceptions import APIError
 
 from services.db import get_db
+from services.threshold import DEFAULT_THRESHOLD
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +31,11 @@ CLEANUP_ENABLED = os.environ.get("STORY_CLEANUP_ENABLED", "true").lower() != "fa
 # 생성 후 이 일수가 지난 미박제 글만 정리 대상. 0/음수면 갓 생성된 글까지 즉시
 # 삭제되므로 최소 1일로 하한 고정(운영자 오설정 가드).
 CLEANUP_AGE_DAYS = max(1, int(os.environ.get("STORY_CLEANUP_AGE_DAYS", "14")))
-# 이 표 수 이하만 삭제(기본 0 → 한 표도 없는 글만). 투표받은 후보는 보존.
-CLEANUP_MAX_VOTES = int(os.environ.get("STORY_CLEANUP_MAX_VOTES", "0"))
+# 이 표 수 이하면 삭제. 기본 = 박제 임계값-1(임계값 미달=커뮤니티가 영구박제를 안 고른 글).
+# 임계값에 도달했는데도 미박제인 글(박제 실패 등)은 보존돼 수동 점검에 남는다.
+CLEANUP_MAX_VOTES = int(
+    os.environ.get("STORY_CLEANUP_MAX_VOTES", str(max(0, DEFAULT_THRESHOLD - 1)))
+)
 CLEANUP_INTERVAL_SEC = int(os.environ.get("STORY_CLEANUP_INTERVAL_SEC", "21600"))  # 6시간
 # 부팅 안정화 + tracker/hunter 와 시간 분산
 CLEANUP_INITIAL_DELAY_SEC = int(os.environ.get("STORY_CLEANUP_INITIAL_DELAY_SEC", "120"))
@@ -69,17 +76,39 @@ def cleanup_old_pending() -> int:
         return 0
 
 
+# from_capture 컬럼(009) 지원 여부 — 1회 probe 후 캐시. 미설치(009 미적용) 환경에서
+# legacy 폴백 쿼리에 .eq("from_capture", ...)를 넣으면 400 으로 cleanup 이 실패하므로 가드한다.
+# (정상 설치는 from_capture 가 있으면 RPC 도 있어 legacy 가 돌지 않지만, 폴백을 방어적으로.)
+_from_capture_supported: bool | None = None
+
+
+def _has_from_capture(db) -> bool:
+    global _from_capture_supported
+    if _from_capture_supported is None:
+        try:
+            db.table("stories").select("from_capture").limit(1).execute()
+            _from_capture_supported = True
+        except Exception:
+            _from_capture_supported = False
+            logger.info("[cleanup] stories.from_capture 미설치(009 미적용) — legacy 폴백에서 "
+                        "캡처 보존 필터 생략(해당 환경엔 캡처글 자체가 없음)")
+    return _from_capture_supported
+
+
 def _cleanup_legacy_batched(db, cutoff: str) -> int:
     """RPC 미설치 시 폴백. 후보를 배치로 끊어 votes 실표수 재확인 후 삭제.
     select↔delete 사이 들어온 투표에 대한 잔여 TOCTOU 창은 RPC 적용 시 사라진다."""
-    cand = (
+    keep_capture = _has_from_capture(db)
+    cand_q = (
         db.table("stories")
         .select("id")
         .is_("arweave_tx_id", "null")
         .lte("vote_count", CLEANUP_MAX_VOTES)
         .lt("created_at", cutoff)
-        .execute()
     )
+    if keep_capture:
+        cand_q = cand_q.eq("from_capture", False)   # 캡처 승격글(삭제된 원본 기록)은 보존
+    cand = cand_q.execute()
     cand_ids = [r["id"] for r in (cand.data or [])]
     if not cand_ids:
         return 0
@@ -94,14 +123,16 @@ def _cleanup_legacy_batched(db, cutoff: str) -> int:
         to_delete = [sid for sid in batch if actual.get(sid, 0) <= CLEANUP_MAX_VOTES]
         if not to_delete:
             continue
-        resp = (
+        del_q = (
             db.table("stories")
             .delete()
             .in_("id", to_delete)
             .is_("arweave_tx_id", "null")
             .lte("vote_count", CLEANUP_MAX_VOTES)
-            .execute()
         )
+        if keep_capture:
+            del_q = del_q.eq("from_capture", False)   # 캡처 승격글 보존(이중 안전)
+        resp = del_q.execute()
         deleted += len(resp.data or [])
 
     if deleted:
