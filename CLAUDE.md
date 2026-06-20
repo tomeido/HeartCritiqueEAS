@@ -51,6 +51,9 @@ Docker
 │       ├── llm.py            Groq/Gemini 스토리 생성 파이프라인
 │       ├── hunter.py         자동 사냥꾼 — 주기적 스토리 자동 생성 루프
 │       ├── collector.py      선제 수집기 — RSS로 화제글 미리 캡처(본문+해시) → 삭제 감시
+│       ├── promoter.py       캡처→공개 승격 — hard 삭제된 캡처글을 익명 문학 스토리로 공개(PII 게이트)
+│       ├── volatility.py     삭제확률 예측기(결정적) — 캡처 우선순위·UI 배지 랭킹 전용
+│       ├── pii.py            구조적 PII 스캐너 — 승격 공개 전 안전 게이트
 │       ├── wayback.py        Wayback 위임 박제 — IA Save Page Now 큐(원본 삭제 대비 외부 스냅샷)
 │       ├── tracker.py        출처/수집글 삭제 추적 + 적응형 재검사 스케줄(compute_next_check)
 │       ├── db.py             Supabase 클라이언트 싱글톤
@@ -67,7 +70,8 @@ Docker
 2. **투표**: `POST /api/vote/{id}` (Bearer JWT 필요) → Supabase `votes` 테이블 insert → vote_count 갱신 → 임계값 도달 시 `services/archive.archive_story()` 백그라운드 실행
 3. **박제**: `archive_story()` → EC 서명 → `http://uploader:3000/upload` → Irys → Arweave Tx ID → Supabase 저장
 4. **선제 수집(선택)**: `services/collector.py` → 공식 RSS 폴링으로 화제글 발견 → 신규 글만 본문 1회 GET → `captured_posts`(비공개)에 본문+sha256 해시 보관 → `tracker.fetch_observation`/`decide_status` 재사용 + 적응형 주기(`compute_next_check`)로 삭제 감시. 검색이 못 잡는 '삭제된 글'을 살아있을 때 미리 박아두는 경로. `COLLECTOR_ENABLED=false` 기본(외부 폴링이라 `migrations/006` 적용 후 수동 활성화)
-5. **Wayback 위임(선택)**: citation 등록(tracker)·화제글 캡처(collector) 시 url 을 `wayback_snapshots` 큐에 'queued' 적재 → tracker 루프가 `wayback.process_batch()`로 capacity(IA 동시/일일 한도) 안에서 Save Page Now 제출 → pending → success. 직접 스크래핑 대신 IA 에 위임해 탐지 회피 + 법정 인정 타임스탬프 확보. `/stories/{id}` 응답의 citation 에 `archive_url`(영속 스냅샷) 머지. `WAYBACK_ENABLED=false` 기본(`migrations/007`+IA 키 필요)
+5. **캡처→공개 승격(선택, 미션의 핵심)**: `services/promoter.py` → collector 가 살아있을 때 잡아둔 `captured_posts` 가 *실제로 hard 삭제(HTTP 404/410)*되면(`collector.recheck_captured_batch` 가 `hard_deleted_at` 표식) → PII 스캐너(`services/pii.py`)로 본문 검사 → 통과 시 보관해둔 `body_text`를 기존 익명·헤지 프롬프트(`llm.generate_from_text`, 검색 grounding 없이 그 본문만 재작성)로 문학 스토리화 → `stories`에 `from_capture=true`로 INSERT → 죽은 원본 URL을 citation 으로 등록해 tracker 가 'deleted' 표시 + hard 신호로 임계값 인하. **검색은 이미 삭제된 글을 구조적으로 못 주므로, 살아있을 때 잡고(collector)→죽는 걸 감시하고(tracker)→죽은 걸 공개(promoter)하는 경로만이 진짜 사라지는 글을 박제한다.** 안전: 자동 승격은 hard 삭제만(soft 오탐 차단), critique 는 기본 수동 검토(pending_review, 명예훼손 노출 최소화), 원본 raw 본문은 절대 비공개 유지하고 LLM 익명 재작성만 공개. `volatility.py`(결정적 삭제확률)는 캡처 우선순위·UI 배지 랭킹 전용으로만 쓰고 생성 게이트·임계값·박제 결정엔 주입하지 않는다. `PROMOTER_ENABLED=false` 기본(`migrations/009` 적용 + `COLLECTOR_ENABLED=true` 필요). 수동 승격: `POST /api/admin/promote`(`ADMIN_TOKEN` 설정 시).
+6. **Wayback 위임(선택)**: citation 등록(tracker)·화제글 캡처(collector) 시 url 을 `wayback_snapshots` 큐에 'queued' 적재 → tracker 루프가 `wayback.process_batch()`로 capacity(IA 동시/일일 한도) 안에서 Save Page Now 제출 → pending → success. 직접 스크래핑 대신 IA 에 위임해 탐지 회피 + 법정 인정 타임스탬프 확보. `/stories/{id}` 응답의 citation 에 `archive_url`(영속 스냅샷) 머지. `WAYBACK_ENABLED=false` 기본(`migrations/007`+IA 키 필요)
 
 ### A2A JSON-RPC 하위 호환
 
@@ -94,6 +98,9 @@ Docker
 | `VOTE_THRESHOLD` | | 박제 트리거 투표수 (기본: 3, `services/threshold.py`의 `DEFAULT_THRESHOLD`가 단일 출처) |
 | `LLM_PROVIDER` | | `groq`(기본) 또는 `gemini` |
 | `COLLECTOR_ENABLED` | | 선제 수집기(`services/collector.py`) 켜기. **기본 `false`** — `migrations/006` 적용 후 `true`. RSS로 화제글을 살아있을 때 미리 잡아 `captured_posts`(비공개)에 본문+해시 보관, 적응형 주기로 삭제 감시 |
+| `PROMOTER_ENABLED` | | 캡처→공개 승격(`services/promoter.py`) 켜기. **기본 `false`** — `migrations/009` 적용 + `COLLECTOR_ENABLED=true` 필요. hard 삭제된 캡처글을 PII 게이트·익명 재작성 후 공개 스토리로 승격(검색이 못 잡는 '진짜 사라진 글' 박제). critique 는 기본 수동 검토(`PROMOTER_AUTO_CRITIQUE=true`로 자동화) |
+| `PROMOTER_AUTO_CRITIQUE` | | critique(기업 비위) 캡처도 자동 승격할지. **기본 `false`**(명예훼손 노출 최소화 — 수동 검토 큐). |
+| `ADMIN_TOKEN` | | 설정 시 `POST /api/admin/promote`(수동 승격, `X-Admin-Token` 헤더) 활성. 미설정이면 엔드포인트 비활성(404). |
 | `WAYBACK_ENABLED` | | Wayback 위임 박제(`services/wayback.py`) 켜기. **기본 `false`** — `migrations/007` 적용 + `TRACKER_ENABLED=true` 필요. 원본 삭제 대비 중립 외부 스냅샷을 IA Save Page Now 에 위임 |
 | `IA_ACCESS_KEY` / `IA_SECRET_KEY` | Wayback save | IA S3 키(`archive.org/account/s3.php`). 없으면 availability(기존 스냅샷 조회)만 동작, 신규 save 불가 |
 

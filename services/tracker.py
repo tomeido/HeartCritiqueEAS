@@ -189,20 +189,21 @@ BLOCKED_PATTERNS = re.compile(
 # 자동 크롤러를 차단/챌린지하는 사이트 — 본문을 못 읽어 삭제 추적이 불가능한 도메인.
 # host 접미사 매칭(www./m./서브도메인 포함). 큐레이션 목록에 있어도 추적은 불가하다
 # (FM코리아: HTTP 200 으로 '보안 시스템' 챌린지 페이지를 주거나 간헐적으로 430).
-UNTRACKABLE_DOMAINS = {"fmkorea.com"}
+UNTRACKABLE_DOMAINS = {"fmkorea.com", "issuefeed.dcinside.com"}
 
 # 사이트가 자동 접근을 거부/챌린지하는 HTTP 코드 (is_untrackable_source 가 사용).
 BOT_BLOCK_CODES = (403, 429, 430, 503)
 
-# 안티봇 인터스티셜(챌린지) 페이지. HTTP 200 으로 와도 실제 본문이 아니라 '잠시 기다리면
-# 자동 접속됩니다' 류 차단 페이지다. 이걸 live/baseline 으로 잡으면 삭제를 영영 못 본다.
+# 안티봇 인터스티셜(챌린지) 페이지 및 동적 로더/로딩 화면. HTTP 200 으로 와도 실제 본문이 아니라
+# '잠시 기다리면 자동 접속됩니다' 류나 SPA 로딩 스피너 페이지다. 이걸 live/baseline 으로 잡으면 삭제를 영영 못 본다.
 BOT_CHALLENGE_PATTERNS = re.compile(
     r"보안\s*시스템"
     r"|잠시[^<]{0,12}기다리[^<]{0,40}자동"
     r"|Just\s+a\s+moment"
     r"|Checking\s+(?:if\s+the\s+site\s+connection\s+is\s+secure|your\s+browser)"
     r"|Attention\s+Required|cf-browser-verification|DDoS\s+protection\s+by"
-    r"|Enable\s+JavaScript\s+and\s+cookies\s+to\s+continue",
+    r"|Enable\s+JavaScript\s+and\s+cookies\s+to\s+continue"
+    r"|로딩\s*중\b|loading\s*\.\.\.|spinner\b",
     re.IGNORECASE,
 )
 

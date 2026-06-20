@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 # 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
 STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
 
+# 목록(list_stories)용 컬럼. 캡처 승격(009) 컬럼은 미적용 환경에서 400 나므로 한 번 시도 후
+# 실패하면 레거시 컬럼으로 폴백하고 그 결과를 캐시한다(매 요청 이중질의 방지).
+_LIST_BASE_COLS = (
+    "id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
+    "created_at,gap_score,community_count,news_count,poetic_reason,volatility_score"
+)
+_LIST_CAPTURE_COLS = ",from_capture,origin_captured_url,captured_hard_deleted_at"
+_capture_cols_ok: bool | None = None
+
 
 def _ensure_uuid(story_id: str) -> None:
     """uuid 컬럼에 잘못된 형식을 넘기면 PostgREST 가 22P02 로 500 을 내므로 선검증."""
@@ -158,18 +167,28 @@ async def create_story(request: Request, category: str | None = None):
 
 @router.get("/stories")
 async def list_stories(limit: int = 50):
+    global _capture_cols_ok
     db = get_db()
     # 음수/0 limit 이 PostgREST 에서 500 나지 않게 하한도 클램프.
     limit = max(1, min(limit, 200))
+
     # 목록은 citations(jsonb) 자체를 전송하지 않는다(무겁다). 카운트는 추적 레코드 수로.
-    resp = (
-        db.table("stories")
-        .select("id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
-                "created_at,gap_score,community_count,news_count,poetic_reason,volatility_score")
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
+    def _query(cols: str):
+        return (
+            db.table("stories").select(cols)
+            .order("created_at", desc=True).limit(limit).execute()
+        )
+
+    if _capture_cols_ok is False:
+        resp = _query(_LIST_BASE_COLS)
+    else:
+        try:
+            resp = _query(_LIST_BASE_COLS + _LIST_CAPTURE_COLS)
+            _capture_cols_ok = True
+        except Exception:
+            # migrations/009 미적용 — 캡처 컬럼 없이 폴백하고 캐시(이후 재시도 안 함).
+            _capture_cols_ok = False
+            resp = _query(_LIST_BASE_COLS)
     stories = resp.data or []
     ids = [s["id"] for s in stories]
     # 출처 추적 상태는 배지/임계값 보조 정보일 뿐 — 조회가 실패해도 목록 자체는
@@ -261,3 +280,26 @@ async def manual_recheck(story_id: str, request: Request):
 
     status_map = await asyncio.to_thread(get_status_map, [story_id])
     return {"checked": n, "statuses": status_map.get(story_id, {})}
+
+
+# 수동 승격(어드민): captured_posts 의 한 글을 공개 스토리로 올린다. critique 캡처는
+# 기본 자동 승격이 막혀 pending_review 로 쌓이므로, 운영자가 검토 후 이 경로로 공개한다.
+# ADMIN_TOKEN 미설정이면 엔드포인트 자체를 숨긴다(404). PII 게이트는 수동에서도 유지된다.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+
+
+@router.post("/admin/promote")
+async def admin_promote(request: Request, url: str, category: str | None = None):
+    import secrets
+    if not ADMIN_TOKEN:
+        raise HTTPException(404, "Not Found")
+    token = request.headers.get("x-admin-token", "")
+    if not secrets.compare_digest(token, ADMIN_TOKEN):
+        raise HTTPException(403, "권한이 없습니다")
+    if category and category not in ("kindness", "critique"):
+        raise HTTPException(400, "category는 kindness 또는 critique만 허용")
+    from services.promoter import promote_captured_url
+    res = await promote_captured_url(url, category)
+    if not res.get("ok"):
+        raise HTTPException(409, res.get("reason") or "승격 실패")
+    return res

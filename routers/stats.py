@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from services.db import get_db
 from services.hunter import get_status as get_hunter_status
 from services.collector import get_status as get_collector_status
+from services.promoter import get_status as get_promoter_status
 from services.wayback import get_status as get_wayback_status
 from services.threshold import (
     DEFAULT_THRESHOLD,
@@ -48,6 +49,7 @@ async def get_stats():
         cached = _stats_cache["value"]
         cached["hunter"] = get_hunter_status()
         cached["collector"] = get_collector_status()
+        cached["promoter"] = get_promoter_status()
         cached["wayback"] = {**cached.get("wayback", {}), **get_wayback_status()}
         return cached
 
@@ -83,6 +85,10 @@ async def get_stats():
         st: _count("captured_posts", lambda q, st=st: q.eq("status", st))
         for st in ("live", "deleted", "blocked", "error", "unchecked")
     }
+    # hard 삭제 확정(승격 후보) + 실제 승격된 공개 스토리 수(009 미적용이면 None→0).
+    captured_hard_deleted = _count(
+        "captured_posts", lambda q: q.not_.is_("hard_deleted_at", "null"))
+    promoted_total = _count("stories", lambda q: q.eq("from_capture", True))
 
     # Wayback 위임 박제 현황(선택, migrations/007). complete 게이트 밖.
     wayback_status_counts = {
@@ -107,6 +113,7 @@ async def get_stats():
         if stale is not None:
             stale["hunter"] = get_hunter_status()
             stale["collector"] = get_collector_status()
+            stale["promoter"] = get_promoter_status()
             stale["wayback"] = {**stale.get("wayback", {}), **get_wayback_status()}
             return stale
         # 캐시도 없으면(콜드스타트) 0 으로 표시하되 캐시는 남기지 않아 다음 호출이 곧 재시도.
@@ -138,6 +145,8 @@ async def get_stats():
         "votes": {"total": z(votes_total)},
         "captured": {
             "total": z(captured_total),
+            "hard_deleted": z(captured_hard_deleted),
+            "promoted": z(promoted_total),
             **{k: z(v) for k, v in captured_status.items()},
         },
         "wayback": {
@@ -156,6 +165,7 @@ async def get_stats():
         },
         "hunter": get_hunter_status(),
         "collector": get_collector_status(),
+        "promoter": get_promoter_status(),
     }
     # 모든 카운트가 성공했을 때만 캐시(실패분을 60초 동안 0 으로 들고 있지 않게).
     if complete:
