@@ -48,6 +48,12 @@ PROMOTER_BATCH = max(1, int(os.environ.get("PROMOTER_BATCH", "3")))
 PROMOTER_AUTO_CRITIQUE = os.environ.get("PROMOTER_AUTO_CRITIQUE", "false").lower() == "true"
 # 승격 최소 삭제확률(0~10, 결정적 점수). hard 삭제가 이미 강한 게이트라 기본 0(추가 필터 옵션).
 PROMOTER_MIN_VOLATILITY = int(os.environ.get("PROMOTER_MIN_VOLATILITY", "0"))
+# LLM 재작성이 *영구/장시간* 실패(provider 일일 쿼터·정책 차단·네트워크 장애)할 때, 같은 글이
+# promotion_status=NULL 로 남아 매 주기 재선택되며 배치를 독식(head-of-line blocking)하는 것을 막는다.
+# 프로세스-로컬 시도 카운터로 한도 초과 시 pending_review(수동 큐, 복구 가능)로 종결한다.
+# 카운터는 재시작 시 리셋되지만 종결 표식(promotion_status)은 DB에 영속되므로 결과는 안정적이다.
+PROMOTER_MAX_LLM_ATTEMPTS = max(1, int(os.environ.get("PROMOTER_MAX_LLM_ATTEMPTS", "5")))
+_llm_fail_counts: dict = {}
 
 # 모듈 상태(대시보드/stats 용 — hunter.get_status 와 동형).
 _last_run_at: Optional[datetime] = None
@@ -61,6 +67,7 @@ def get_status() -> dict:
         "interval_sec": PROMOTER_INTERVAL_SEC,
         "batch": PROMOTER_BATCH,
         "auto_critique": PROMOTER_AUTO_CRITIQUE,
+        "min_volatility": PROMOTER_MIN_VOLATILITY,
         "next_run_at": _next_run_at.isoformat() if _next_run_at else None,
         "last_run_at": _last_run_at.isoformat() if _last_run_at else None,
         "last_result": _last_result,
@@ -167,8 +174,19 @@ def promote_one(db, row: dict, *, auto: bool = True,
     try:
         gen = generate_from_text(body, title, category)
     except Exception as e:
-        logger.warning(f"[promoter] LLM 재작성 실패 {url}: {e}")
-        return None   # promotion_status 는 비워 둬 다음 주기에 재시도(일시 장애 흡수)
+        # 일시 장애는 status 를 비워 둬 다음 주기 재시도(흡수). 단 영구/장시간 실패가 같은
+        # 글로 배치를 독식하지 않도록 시도 횟수를 세어 한도 초과 시 수동 큐로 종결한다.
+        n = _llm_fail_counts.get(captured_id, 0) + 1
+        _llm_fail_counts[captured_id] = n
+        if n >= PROMOTER_MAX_LLM_ATTEMPTS:
+            _llm_fail_counts.pop(captured_id, None)
+            logger.warning(f"[promoter] LLM 재작성 {n}회 실패 → 수동 검토(pending_review) {url}: {e}")
+            _mark(db, captured_id, {"promotion_status": "pending_review"})
+        else:
+            logger.warning(f"[promoter] LLM 재작성 실패({n}/{PROMOTER_MAX_LLM_ATTEMPTS}, 재시도) {url}: {e}")
+        return None
+    # 재작성 성공 — 누적 실패 카운터 정리.
+    _llm_fail_counts.pop(captured_id, None)
     if gen.get("no_fit") or not (gen.get("body") or "").strip():
         logger.info(f"[promoter] 재작성 결과 no_fit/빈본문 → skip {url}")
         _mark(db, captured_id, {"promotion_status": "skipped"})

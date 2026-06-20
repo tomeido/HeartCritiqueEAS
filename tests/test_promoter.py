@@ -170,6 +170,32 @@ def test_idempotent_links_existing(monkeypatch):
     assert db.captured_updates[-1]["promoted_story_id"] == "story-existing"
 
 
+def test_llm_failure_bounded_then_pending_review(monkeypatch):
+    # LLM 재작성이 영구 실패해도 무한 재시도(배치 독식)하지 않고 한도 초과 시 pending_review 로 종결.
+    _patch_clean(monkeypatch)
+    monkeypatch.setattr(promoter, "PROMOTER_MAX_LLM_ATTEMPTS", 3)
+    monkeypatch.setattr(promoter, "PROMOTER_AUTO_CRITIQUE", True)  # critique-hold 우회 → LLM 경로 도달
+    monkeypatch.setattr(promoter, "_llm_fail_counts", {})
+
+    def boom(*a, **k):
+        raise RuntimeError("Gemini quota exceeded")
+    monkeypatch.setattr(promoter, "generate_from_text", boom)
+
+    db = FakeDB()
+    row = {"id": "cF", "url": "https://theqoo.net/x/fail", "title": "t",
+           "body_text": "회사 갑질 폭로 본문 " * 10, "volatility_score": 9,
+           "hard_deleted_at": "2026-06-20T00:00:00+00:00"}
+
+    # 1~2회: status NULL 유지(재시도), 종결 표식 없음
+    assert promoter.promote_one(db, row, auto=True) is None
+    assert promoter.promote_one(db, row, auto=True) is None
+    assert all(u.get("promotion_status") != "pending_review" for u in db.captured_updates)
+    # 3회째(한도 도달): pending_review 로 종결
+    assert promoter.promote_one(db, row, auto=True) is None
+    assert db.captured_updates[-1]["promotion_status"] == "pending_review"
+    assert not db.stories
+
+
 def test_no_fit_marks_skipped(monkeypatch):
     _patch_clean(monkeypatch, gen_no_fit=True)
     db = FakeDB()

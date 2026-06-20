@@ -263,6 +263,15 @@ USED_SOURCES_RE = re.compile(
     re.MULTILINE,
 )
 
+# 삭제 전용(줄 끝 앵커 $ 없이): 약한 모델이 'USED_SOURCES: [1] 그 외…'처럼 포맷을 어겨
+# 꼬리 밖이나 줄 중간에 남겨도 메타 문구가 공개 본문에 새지 않게 마커부터 줄 끝까지 제거한다.
+# (extract_used_indices 의 번호 파싱은 위 앵커드 USED_SOURCES_RE 를 계속 사용 — 무영향)
+USED_SOURCES_STRIP_RE = re.compile(
+    # 숫자 목록은 같은 줄에 한정([0-9,\t ] — 개행 제외): \s 를 쓰면 'USED_SOURCES: 1\n2번째
+    # 줄...'처럼 다음 줄이 숫자로 시작할 때 개행+다음 줄 본문까지 통째로 먹어버린다.
+    r'(?i)USED_SOURCES[ \t]*[:=][ \t]*\[?[0-9,\t ]*\]?[^\n]*'
+)
+
 VOLATILITY_SCORE_RE = re.compile(
     r'(?im)^\s*(?:휘발성\s*점수|휘발성점수)\s*[:=]\s*(\d+)\s*$',
 )
@@ -940,7 +949,7 @@ def generate_from_text(body_text: str, title: str | None, category: str) -> dict
     if _is_no_fit(text):
         return _skip(provider, model_name)
 
-    text = USED_SOURCES_RE.sub('', text)
+    text = USED_SOURCES_STRIP_RE.sub('', text)
     text, volatility, reason = extract_volatility_and_reason(text)
     text = sanitize_text(text)
     text = tidy_body(text)
@@ -988,7 +997,7 @@ def generate(category: str | None = None) -> dict:
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
         # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
-        text = USED_SOURCES_RE.sub('', text)
+        text = USED_SOURCES_STRIP_RE.sub('', text)
         text, volatility, reason = extract_volatility_and_reason(text)
         text = sanitize_text(text)
         model_name = GEMINI_MODEL

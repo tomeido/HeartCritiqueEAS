@@ -62,17 +62,38 @@ def _mask(s: str) -> str:
     return s[:2] + "*" * (len(s) - 2)
 
 
+# 캡처 본문은 매우 길 수 있다(전체 게시글). EMAIL_RE 등 일부 패턴은 병적 입력
+# ('a.a.a…@' 류)에서 이차 백트래킹(ReDoS)을 일으켜 한 번의 search 가 수 초~수십 초를
+# 잡아먹고 promoter 루프를 정지시킬 수 있다. 고정 크기 청크로 끊어 스캔하면 각 청크가
+# 상수 비용이 되어 전체가 선형(O(n))으로 묶인다. overlap 은 실제 식별자 최대 길이보다
+# 크게 둬, 청크 경계에 걸친 PII 도 한 청크 안에 온전히 들어오게 한다.
+_SCAN_CHUNK = 4000
+_SCAN_OVERLAP = 128
+
+
 def scan(text: str) -> dict:
     """본문에서 구조적 PII 를 탐지. 반환: {hit, kinds, samples}.
-    samples 는 마스킹된 일부(디버깅/감사 로그용, 원문 미노출)."""
+    samples 는 마스킹된 일부(디버깅/감사 로그용, 원문 미노출).
+    병적 입력에 의한 정규식 폭주를 막기 위해 고정 크기 청크로 분할 스캔한다(선형)."""
     text = text or ""
     kinds: list[str] = []
     samples: list[str] = []
-    for kind, rx in _DETECTORS:
-        m = rx.search(text)
-        if m:
-            kinds.append(kind)
-            samples.append(f"{kind}:{_mask(m.group(0))}")
+    seen: set[str] = set()
+    n = len(text)
+    i = 0
+    while i < n:
+        seg = text[i:i + _SCAN_CHUNK + _SCAN_OVERLAP]
+        for kind, rx in _DETECTORS:
+            if kind in seen:
+                continue
+            m = rx.search(seg)
+            if m:
+                seen.add(kind)
+                kinds.append(kind)
+                samples.append(f"{kind}:{_mask(m.group(0))}")
+        if len(seen) == len(_DETECTORS):
+            break  # 모든 종류 검출됨 — 더 볼 필요 없음
+        i += _SCAN_CHUNK
     return {"hit": bool(kinds), "kinds": kinds, "samples": samples}
 
 
