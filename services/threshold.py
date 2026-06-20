@@ -34,9 +34,47 @@ MAX_BASE_THRESHOLD = max(MIN_BASE_THRESHOLD, int(os.environ.get("MAX_VOTE_THRESH
 VOTERS_PER_VOTE = max(1, int(os.environ.get("VOTERS_PER_VOTE", "30")))
 # 활성 기간 (며칠 안에 투표한 유저를 활성으로 카운트)
 ACTIVE_WINDOW_DAYS = int(os.environ.get("ACTIVE_WINDOW_DAYS", "7"))
+
+# ── 발행량 기반 난이도 보정 (비트코인 difficulty retarget 풍) ────────────────────
+# 일정 기간(ISSUANCE_WINDOW_DAYS) 동안 '발제된(생성된)' 스토리 수로 박제 임계값을 보정한다.
+# 비트코인이 채굴 속도에 맞춰 난이도를 재조정하듯, 글 공급이 많으면(목표 초과) 임계값을 올려
+# 영구 박제를 더 귀하게(어렵게), 적으면 내려 덜 까다롭게 만든다 → 박제 발행 속도를 자율 조절.
+ISSUANCE_ADJUST_ENABLED = os.environ.get("ISSUANCE_ADJUST_ENABLED", "true").lower() != "false"
+ISSUANCE_WINDOW_DAYS = max(1, int(os.environ.get("ISSUANCE_WINDOW_DAYS", "7")))   # 재조정 주기(창)
+# 목표 발행량: 이 수준이면 보정 0. 기본 28 ≈ hunter 4글/일 × 7일(자연 생성률).
+ISSUANCE_TARGET = max(1, int(os.environ.get("ISSUANCE_TARGET", "28")))
+# 목표 대비 이 수만큼 초과/미달할 때마다 임계값 ±1.
+ISSUANCE_PER_STEP = max(1, int(os.environ.get("ISSUANCE_PER_STEP", "10")))
+# 보정 상하한(±). 한 신호가 임계값을 과도하게 흔들지 않게 클램프.
+ISSUANCE_MAX_ADJUST = max(0, int(os.environ.get("ISSUANCE_MAX_ADJUST", "4")))
+
 # 캐시 TTL
 _BASE_CACHE_TTL = 300  # 5분
-_base_cache: dict = {"value": None, "expires_at": 0.0, "voters": 0}
+_base_cache: dict = {
+    "value": None, "expires_at": 0.0, "voters": 0,
+    "issuance_count": 0, "issuance_adjust": 0,
+}
+
+
+def _issuance_adjustment(db, now_dt) -> tuple[int, int]:
+    """최근 ISSUANCE_WINDOW_DAYS 동안 생성된 스토리 수 → (count, 임계값 보정치).
+    공급 많으면 +(어렵게), 적으면 -(쉽게). 보정은 ±ISSUANCE_MAX_ADJUST 로 클램프."""
+    if not ISSUANCE_ADJUST_ENABLED:
+        return 0, 0
+    cutoff = (now_dt - timedelta(days=ISSUANCE_WINDOW_DAYS)).isoformat()
+    try:
+        resp = (
+            db.table("stories").select("id", count="exact", head=True)
+            .gte("created_at", cutoff).execute()
+        )
+        count = resp.count or 0
+    except Exception as e:
+        logger.warning(f"[threshold] issuance count 실패: {e}")
+        return 0, 0
+    # 비트코인 retarget 유사: (실제 - 목표)/스텝 을 정수 보정으로, 상하한 클램프.
+    raw = (count - ISSUANCE_TARGET) // ISSUANCE_PER_STEP
+    adj = max(-ISSUANCE_MAX_ADJUST, min(ISSUANCE_MAX_ADJUST, raw))
+    return count, adj
 
 
 def get_dynamic_base_threshold() -> dict:
@@ -46,6 +84,8 @@ def get_dynamic_base_threshold() -> dict:
         return {
             "threshold": DEFAULT_THRESHOLD,
             "active_voters": 0,
+            "issuance_count": 0,
+            "issuance_adjust": 0,
             "dynamic": False,
         }
 
@@ -54,20 +94,24 @@ def get_dynamic_base_threshold() -> dict:
         return {
             "threshold": _base_cache["value"],
             "active_voters": _base_cache["voters"],
+            "issuance_count": _base_cache["issuance_count"],
+            "issuance_adjust": _base_cache["issuance_adjust"],
             "dynamic": True,
         }
 
+    issuance_count = issuance_adjust = 0
     try:
         db = get_db()
-        cutoff = (
-            datetime.now(timezone.utc) - timedelta(days=ACTIVE_WINDOW_DAYS)
-        ).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        cutoff = (now_dt - timedelta(days=ACTIVE_WINDOW_DAYS)).isoformat()
         resp = (
             db.table("votes").select("user_id").gte("created_at", cutoff).execute()
         )
         unique_voters = len({v["user_id"] for v in (resp.data or [])})
         scaled = MIN_BASE_THRESHOLD + (unique_voters // VOTERS_PER_VOTE)
-        threshold = max(1, min(MAX_BASE_THRESHOLD, scaled))
+        # 발행량 기반 난이도 보정(비트코인 retarget 풍): 공급 많으면 +, 적으면 -.
+        issuance_count, issuance_adjust = _issuance_adjustment(db, now_dt)
+        threshold = max(1, min(MAX_BASE_THRESHOLD, scaled + issuance_adjust))
     except Exception as e:
         logger.warning(f"[threshold] dynamic calc failed: {e}")
         threshold = max(1, DEFAULT_THRESHOLD)
@@ -75,10 +119,14 @@ def get_dynamic_base_threshold() -> dict:
 
     _base_cache["value"] = threshold
     _base_cache["voters"] = unique_voters
+    _base_cache["issuance_count"] = issuance_count
+    _base_cache["issuance_adjust"] = issuance_adjust
     _base_cache["expires_at"] = now + _BASE_CACHE_TTL
     return {
         "threshold": threshold,
         "active_voters": unique_voters,
+        "issuance_count": issuance_count,
+        "issuance_adjust": issuance_adjust,
         "dynamic": True,
     }
 

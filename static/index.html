@@ -769,6 +769,29 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .feed-links a { color: var(--accent-1); text-decoration: none; }
 .feed-links a:hover { text-decoration: underline; }
 
+/* 박제 비용 · 지갑 · 후원 */
+.wallet-box { margin-top: var(--sp-4); padding: 13px 15px; background: var(--bg-card-2);
+  border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--fs-sm); }
+.wallet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wallet-grid { margin-top: 10px; display: grid; gap: 6px; }
+.wallet-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.wallet-row .wlabel { color: var(--muted); }
+.wallet-row .wval { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; }
+.wallet-donate { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
+.wallet-donate .wlabel { color: var(--muted); font-size: var(--fs-xs); }
+.donate-addr { margin-top: 7px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.donate-addr code { font-family: var(--font-mono); font-size: var(--fs-xs); word-break: break-all;
+  background: var(--bg-card); padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  color: var(--accent-1); flex: 1 1 240px; }
+.copy-btn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong);
+  background: var(--bg-card); color: var(--fg); border-radius: var(--radius-sm); padding: 5px 11px;
+  font-size: var(--fs-xs); font-weight: 600; }
+.copy-btn:hover { border-color: var(--accent-1); }
+.wallet-explorer { display: inline-block; margin-top: 9px; color: var(--accent-1);
+  text-decoration: none; font-size: var(--fs-xs); }
+.wallet-explorer:hover { text-decoration: underline; }
+.wallet-box.testnet { border-style: dashed; }
+
 /* ── Status / Spinner ─────────────────────────────────────────────────────── */
 .status { font-size: var(--fs-sm); opacity: .8; }
 .status:empty { display: none; }
@@ -1434,6 +1457,27 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <a href="/feed/extreme.xml">언론 격차</a>
         <a href="/feed/deleted.xml">사라진 출처</a>
       </div>
+
+      <!-- 박제 비용 · 지갑 잔액 · 후원 (실시간, network-aware) -->
+      <div class="wallet-box" id="wallet-box">
+        <div class="wallet-head">
+          <span class="section-title">💰 박제 비용 &amp; 지갑</span>
+          <span class="muted text-xs" id="wallet-net"></span>
+        </div>
+        <div class="wallet-grid">
+          <div class="wallet-row"><span class="wlabel">박제 1건 비용 (~10KB)</span><span class="wval" id="wallet-cost">·</span></div>
+          <div class="wallet-row"><span class="wlabel">박제 가용 잔액 (Irys 선불)</span><span class="wval" id="wallet-irys">·</span></div>
+          <div class="wallet-row"><span class="wlabel">지갑 잔액 (온체인)</span><span class="wval" id="wallet-eth">·</span></div>
+        </div>
+        <div class="wallet-donate">
+          <div class="wlabel">🪙 후원 주소 — 이 주소로 보내면 박제 자금이 충전됩니다</div>
+          <div class="donate-addr">
+            <code id="wallet-addr">불러오는 중…</code>
+            <button class="copy-btn" id="wallet-copy" title="주소 복사" type="button">복사</button>
+          </div>
+          <a id="wallet-explorer" class="wallet-explorer" href="#" target="_blank" rel="noopener" hidden>🔗 익스플로러에서 잔액·거래 보기</a>
+        </div>
+      </div>
     </div>
   </details>
 
@@ -1524,6 +1568,7 @@ async function init() {
   // 첫 화면 공백을 없앤다 — 아래 auth 초기화가 느리거나 실패해도 데이터는 보인다.
   loadStoryList();
   loadStats();
+  loadWallet();
   try {
     cfg = await fetch('/api/config').then(r => r.json());
     if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
@@ -1620,7 +1665,13 @@ async function loadStats() {
     const h = d.hunter || {};
     const lines = [];
     if (th.dynamic) {
-      lines.push(`⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) · 박제 임계값 <b>${th.base}</b>표`);
+      let tline = `⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) · 박제 임계값 <b>${th.base}</b>표`;
+      // 발행량 기반 난이도 보정(비트코인 retarget 풍): 최근 창의 생성 수로 임계값 ±조정
+      if (th.issuance_adjust) {
+        const sign = th.issuance_adjust > 0 ? '+' : '';
+        tline += ` <span style="opacity:.7">⛏ 최근 발행 ${th.issuance_count}건 → 난이도 ${sign}${th.issuance_adjust}</span>`;
+      }
+      lines.push(tline);
     }
     if (h.enabled) {
       const next = h.next_hunt_at ? new Date(h.next_hunt_at) : null;
@@ -1653,6 +1704,62 @@ async function loadStats() {
     console.error('[stats] load failed', e);
   }
 }
+
+// ── 박제 비용 · 지갑 잔액 · 후원 주소 (실시간, network-aware) ─────────────────
+async function loadWallet() {
+  const box = document.getElementById('wallet-box');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/wallet');
+    if (!r.ok) throw new Error('http ' + r.status);
+    const w = await r.json();
+    const net = w.network || 'devnet';
+    const isMain = net === 'mainnet';
+    box.classList.toggle('testnet', !isMain);
+    const netEl = document.getElementById('wallet-net');
+    if (netEl) netEl.textContent = isMain ? 'mainnet · 영구' : (net + ' · 테스트넷');
+
+    const fmtEth = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const n = Number(v);
+      if (!isFinite(n)) return '—';
+      const u = isMain ? 'ETH' : 'SepoliaETH';
+      // 아주 작은 값은 유효숫자를 더 보여준다
+      return (n === 0 ? '0' : (n < 1e-6 ? n.toExponential(2) : n.toPrecision(4))) + ' ' + u;
+    };
+    const cost = w.price_per_10kb && w.price_per_10kb.eth ? w.price_per_10kb.eth : null;
+    document.getElementById('wallet-cost').textContent = w.error ? '조회 불가' : fmtEth(cost);
+    document.getElementById('wallet-irys').textContent = w.error ? '조회 불가' : fmtEth(w.irys_balance);
+    document.getElementById('wallet-eth').textContent  = w.error ? '조회 불가' : fmtEth(w.wallet_eth);
+
+    const addrEl = document.getElementById('wallet-addr');
+    const copyBtn = document.getElementById('wallet-copy');
+    const exp = document.getElementById('wallet-explorer');
+    if (w.donation_address) {
+      addrEl.textContent = w.donation_address;
+      if (copyBtn) copyBtn.dataset.addr = w.donation_address;
+      if (exp && w.explorer) { exp.href = w.explorer; exp.hidden = false; }
+    } else {
+      addrEl.textContent = w.error ? '지갑 주소를 조회할 수 없습니다' : '서명키 미설정';
+      if (copyBtn) copyBtn.style.display = 'none';
+    }
+  } catch (e) {
+    console.error('[wallet] load failed', e);
+    const addrEl = document.getElementById('wallet-addr');
+    if (addrEl) addrEl.textContent = '지갑 정보를 불러오지 못했습니다';
+  }
+}
+
+// 후원 주소 복사
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#wallet-copy');
+  if (!btn || !btn.dataset.addr) return;
+  navigator.clipboard?.writeText(btn.dataset.addr).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '복사됨 ✓';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  }).catch(() => toast('복사 실패 — 주소를 직접 선택해 복사하세요', 'error'));
+});
 
 // ── 시계열 차트 ────────────────────────────────────────────────────────────
 async function loadTimeseries() {

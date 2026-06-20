@@ -168,6 +168,9 @@ async def get_stats():
             "base": base_info["threshold"],
             "active_voters": base_info["active_voters"],
             "dynamic": base_info["dynamic"],
+            # 발행량 기반 난이도 보정(비트코인 retarget 풍): 최근 창의 생성 수 + 임계값 보정치
+            "issuance_count": base_info.get("issuance_count", 0),
+            "issuance_adjust": base_info.get("issuance_adjust", 0),
             "fallback": DEFAULT_THRESHOLD,
         },
         "hunter": get_hunter_status(),

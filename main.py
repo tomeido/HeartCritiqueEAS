@@ -138,6 +138,14 @@ async def get_config():
     }
 
 
+@app.get("/api/wallet")
+async def get_wallet():
+    """박제 비용·지갑 잔액·후원 주소(실시간, network-aware). uploader(Irys)에서 캐시 프록시.
+    devnet 이면 Sepolia 기준, IRYS_NETWORK=mainnet 전환 시 자동으로 mainnet 값이 노출된다."""
+    from services.wallet import get_wallet_info
+    return await get_wallet_info()
+
+
 # ── A2A 호환 JSON-RPC 엔드포인트 ───────────────────────────────────────────
 def _now_iso():
     return datetime.now(timezone.utc).isoformat()
