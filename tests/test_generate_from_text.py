@@ -36,6 +36,37 @@ def test_packs_body_and_strips_markers(monkeypatch):
     assert "한 누리꾼이 올린 글에" in r["body"]
 
 
+def test_strips_used_sources_even_midline(monkeypatch):
+    # 약한 모델이 USED_SOURCES 를 꼬리 밖/줄 중간/잔여텍스트와 함께 남겨도 메타 누출 차단.
+    monkeypatch.setattr(llm, "GROQ_API_KEY", "x")
+    out_text = (
+        "한 누리꾼이 올린 글에 따르면 어느 회사에서 일이 있었다고 한다. USED_SOURCES: [1] 그 외 메모\n"
+        "오늘의 한 줄: 작은 목소리\n"
+    )
+    monkeypatch.setattr(llm, "call_groq", _fake_groq_returning(out_text))
+    body_in = ("어느 회사에서 상사가 직원에게 갑질을 했다는 글이 올라왔다. "
+               "작성자는 재직 중이라고 적었다. " * 2)
+    r = llm.generate_from_text(body_in, "회사 갑질", "critique")
+    assert r["no_fit"] is False
+    assert "USED_SOURCES" not in r["body"]
+    assert "그 외 메모" not in r["body"]   # 마커부터 줄 끝까지 제거됨
+    assert "한 누리꾼이 올린 글에" in r["body"]  # 마커 앞 본문은 보존
+
+
+def test_used_sources_strip_does_not_cross_newline():
+    # 회귀: USED_SOURCES 다음 줄이 숫자로 시작해도 그 줄 본문을 먹지 않아야 한다
+    # (이전 버그: [0-9,\\s]* 의 \\s 가 개행+다음 줄 선두 숫자를 삼켜 본문 손실).
+    cases = [
+        ("USED_SOURCES: 1, 2\n3개의 사연이 있었다.", "3개의 사연이 있었다."),
+        ("USED_SOURCES: [1]\n2025년 겨울 이야기.", "2025년 겨울 이야기."),
+        ("본문입니다. USED_SOURCES: [1] 그 외", "본문입니다."),
+    ]
+    for src, expect in cases:
+        out = llm.USED_SOURCES_STRIP_RE.sub("", src).strip()
+        assert "USED_SOURCES" not in out
+        assert expect in out
+
+
 def test_no_fit_returns_skip(monkeypatch):
     monkeypatch.setattr(llm, "GROQ_API_KEY", "x")
     monkeypatch.setattr(llm, "call_groq", _fake_groq_returning("NO_FIT"))

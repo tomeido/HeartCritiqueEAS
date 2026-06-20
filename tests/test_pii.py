@@ -36,6 +36,22 @@ def test_clean_text_passes():
     assert not pii.has_pii("")
 
 
+def test_large_input_scans_linearly_and_detects_across_chunks():
+    # 병적/대용량 입력에서도 청크 스캔으로 빠르게 완료(ReDoS 방지) + 청크 경계 PII 검출.
+    # 이메일 이차 백트래킹 유발 패턴 80KB 도 행(hang) 없이 통과해야 한다.
+    pathological = "a." * 40000 + "@"   # 매칭 미완성 — 백트래킹 유발
+    r = pii.scan(pathological)
+    assert isinstance(r["hit"], bool)   # 완료되면 성공(무한 루프/타임아웃 없음)
+
+    # 청크 경계(4000자) 부근에 PII 를 두어도 검출되는지(overlap 보장)
+    for off in (3990, 4000, 8050):
+        text = "가" * off + " 연락처 010-9876-5432 입니다 " + "나" * 5000
+        assert pii.has_pii(text), f"offset {off} 에서 PII 미검출"
+
+    # 대용량 clean 본문은 통과(과차단 없음)
+    assert not pii.has_pii("훈훈한 미담 이야기. " * 5000)
+
+
 def test_scan_returns_kinds_and_masked_samples():
     r = pii.scan("전화 010-1234-5678, 메일 a@b.com")
     assert r["hit"] is True

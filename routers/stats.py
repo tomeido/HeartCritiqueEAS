@@ -89,6 +89,12 @@ async def get_stats():
     captured_hard_deleted = _count(
         "captured_posts", lambda q: q.not_.is_("hard_deleted_at", "null"))
     promoted_total = _count("stories", lambda q: q.eq("from_capture", True))
+    # 승격 파이프라인 상태 분포(promotion_status): 공개 박제(promoted) /
+    # PII 차단·보류(blocked_pii) / critique 수동검토 대기(pending_review) / 부적합(skipped).
+    promotion_status = {
+        st: _count("captured_posts", lambda q, st=st: q.eq("promotion_status", st))
+        for st in ("promoted", "blocked_pii", "pending_review", "skipped")
+    }
 
     # Wayback 위임 박제 현황(선택, migrations/007). complete 게이트 밖.
     wayback_status_counts = {
@@ -147,6 +153,7 @@ async def get_stats():
             "total": z(captured_total),
             "hard_deleted": z(captured_hard_deleted),
             "promoted": z(promoted_total),
+            "promotion": {k: z(v) for k, v in promotion_status.items()},
             **{k: z(v) for k, v in captured_status.items()},
         },
         "wayback": {

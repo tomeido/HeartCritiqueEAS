@@ -185,9 +185,21 @@ async def list_stories(limit: int = 50):
         try:
             resp = _query(_LIST_BASE_COLS + _LIST_CAPTURE_COLS)
             _capture_cols_ok = True
-        except Exception:
-            # migrations/009 미적용 — 캡처 컬럼 없이 폴백하고 캐시(이후 재시도 안 함).
-            _capture_cols_ok = False
+        except Exception as e:
+            # 컬럼 부재(migrations/009 미적용 — PostgREST 42703/PGRST204, 보통 400)일 때만
+            # 영구 캐시(False)한다. 일시적 연결오류(RemoteProtocolError·타임아웃 등)를 캐시하면
+            # 프로세스 기동 후 첫 호출이 잠깐 실패했다는 이유로 from_capture 배지가 재시작
+            # 전까지 영영 사라진다 → 일시 오류는 캐시하지 말고 이번 요청만 레거시로 폴백한다.
+            msg = str(e).lower()
+            is_missing_col = (
+                "42703" in msg or "pgrst204" in msg
+                or "does not exist" in msg or "could not find" in msg
+                or ("column" in msg and "from_capture" in msg)
+            )
+            if is_missing_col:
+                _capture_cols_ok = False
+            else:
+                logger.warning(f"[stories] 캡처컬럼 일시 조회 실패(캐시 안 함): {e!r}")
             resp = _query(_LIST_BASE_COLS)
     stories = resp.data or []
     ids = [s["id"] for s in stories]
