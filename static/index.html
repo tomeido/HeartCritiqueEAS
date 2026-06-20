@@ -1370,10 +1370,11 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <div class="empty">
         <div class="empty-icon">📜</div>
         <div class="empty-text">아직 이야기가 없습니다.</div>
+        <p class="muted text-sm" style="margin-top: 10px;">위의 버튼을 눌러 AI 사냥개에게 새로운 이야기를 찾아오도록 지시해보세요.</p>
       </div>
     </div>
     <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
-      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;">더 보기</button>
+      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;" aria-controls="story-list" aria-label="더 많은 이야기 불러오기">더 보기</button>
     </div>
   </div>
 
