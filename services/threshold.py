@@ -96,25 +96,15 @@ def compute_effective_threshold(
     extra = {"base_threshold": base, "active_voters": active_voters}
 
     # high urgency: -2 (최소 1)
-    if deleted_count >= 1 or gap_score == "extreme":
+    if deleted_count >= 1:
         threshold = max(1, base - 2)
-        if deleted_count >= 1 and gap_score == "extreme":
-            reason = f"🚨 출처 {deleted_count}개 삭제됨 + 언론 보도 0건"
-        elif deleted_count >= 1:
-            reason = f"🚨 출처 {deleted_count}개가 이미 삭제됨"
-        else:
-            reason = "🚨 메이저 언론 보도 0건"
+        reason = f"🚨 출처 {deleted_count}개가 이미 삭제됨"
         return {"threshold": threshold, "urgency": "high", "reason": reason, **extra}
 
     # medium urgency: -1
-    if gap_score == "high" or blocked_count >= 1:
+    if blocked_count >= 1:
         threshold = max(1, base - 1)
-        if gap_score == "high" and blocked_count >= 1:
-            reason = f"🔍 언론 보도 격차 + 출처 {blocked_count}개 차단"
-        elif gap_score == "high":
-            reason = "🔍 언론 보도 격차 큼"
-        else:
-            reason = f"⛔ 출처 {blocked_count}개 차단됨"
+        reason = f"⛔ 출처 {blocked_count}개 차단됨"
         return {"threshold": threshold, "urgency": "medium", "reason": reason, **extra}
 
     # normal

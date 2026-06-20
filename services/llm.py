@@ -92,22 +92,15 @@ NEWS_DOMAINS = [
     "dispatch.co.kr", "ilyo.co.kr",
 ]
 
-GAP_DETECTION_ENABLED = os.environ.get("GAP_DETECTION_ENABLED", "true").lower() != "false"
+GAP_DETECTION_ENABLED = os.environ.get("GAP_DETECTION_ENABLED", "false").lower() == "true"
 
 
 def calculate_gap_score(community: int, news: int) -> str:
     """선정된 커뮤니티 글 제목을 언론에서 검색한 결과로 격차 산출.
-    community 는 첫 검색 결과 수(맥락 정보), news 는 같은 사건의 언론 보도 수.
-    news == 0 이면 이 구체적 사건이 메이저 언론에 없음 = 강한 검열 신호."""
-    if community == 0:
-        return "none"
-    if news == 0:
-        return "extreme"   # 이 구체적 사건이 언론에 0건
-    if news == 1:
-        return "high"      # 거의 보도 안 됨
-    if news == 2:
-        return "medium"
-    return "none"          # 3건 이상이면 언론도 충분히 다룸
+    커뮤니티 글의 날것 어투로 뉴스 매칭하는 로직은 부정확하므로, 격차 측정을 비활성화하고
+    항상 'none'을 반환하여 투표 임계값 등에 영향을 주지 않도록 합니다."""
+    return "none"
+
 
 PROMPT_KINDNESS = """\
 너는 현대 자본주의 시스템의 모순, 인류애의 상실과 충전이 교차하는 '디지털 파편'을 수집하는 고독한 기록관이다.
@@ -256,6 +249,12 @@ SEARCH_QUERIES_CRITIQUE = [
     "네이트판 억울한 사건 제보 폭로",
     "익명 커뮤니티 묻힌 대기업 비리 폭로",
     "자본의 힘으로 삭제 위협받는 폭로 글",
+    # 신선도·삭제위험 편향(durable 베스트 대신 '지금 터지는' 논란을 더 잡으려는 시드).
+    # time_range/재시도수는 토큰 안전 위해 건드리지 않고, '실시간/오늘' 어휘로만 신선도 유도.
+    "디시 실시간 베스트 기업 갑질 논란",
+    "에펨코리아 실시간 인기글 직장 갑질 폭로",
+    "블라인드 실시간 핫 직장 내부고발",
+    "네이트판 오늘 핫이슈 갑질 폭로 제보",
 ]
 
 # 줄 끝/문장 끝/단독 줄 어디든 잡도록 앵커 완화
@@ -399,12 +398,11 @@ def _http_post(url: str, payload: dict, headers: dict, timeout: int) -> dict:
         raise RuntimeError(f"Network error calling {url}: {e.reason}") from e
 
 
-def call_gemini(prompt: str) -> dict:
+def call_gemini(prompt: str, use_search: bool = True) -> dict:
     if not GEMINI_API_KEY:
         raise RuntimeError("GEMINI_API_KEY not set")
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "tools": [{"google_search": {}}],
         "generationConfig": {
             "temperature": 1.0,
             "topP": 0.95,
@@ -412,6 +410,11 @@ def call_gemini(prompt: str) -> dict:
             "thinkingConfig": {"thinkingBudget": 0},
         },
     }
+    # 검색 모드(use_search=True)에서만 google_search grounding 을 켠다. 승격(promoter)은
+    # *주어진 캡처 본문*을 재작성해야 하므로 검색을 끈다 — 켜면 모델이 본문을 무시하고
+    # 새 웹 검색으로 다른 글을 써버린다.
+    if use_search:
+        payload["tools"] = [{"google_search": {}}]
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{GEMINI_ENDPOINT}?key={GEMINI_API_KEY}",
@@ -880,6 +883,80 @@ def generate_via_groq(category: str) -> tuple:
     # 모든 시도가 NO_FIT(또는 결과 없음) → no_fit 신호. text=None 으로 상위에 알린다.
     logger.info(f"[llm] {category} 적합 글 미발견 ({len(queries)}회 시도) → no_fit")
     return None, [], [last_query], GROQ_MODEL, None, 0, ""
+
+
+# ── 승격(promoter) 전용 단일 본문 경로 ───────────────────────────────────────
+# collector 가 비공개로 보관한 captured_posts.body_text 한 글을 받아, 검색·선택·게이트
+# 로직을 거치지 않고 *그 본문만* 익명·헤지된 문학 스토리로 재작성한다(적대적 리뷰 권고:
+# 검색 경로의 USED_SOURCES/NO_FIT 다중선택 게이트를 재사용하지 말 것). 검색 grounding 은
+# 끈다 — 켜면 모델이 주어진 본문을 무시하고 새 웹 검색으로 다른 글을 써버린다.
+# 토큰 상한·저작권(인용·논평 범위)을 위해 본문은 truncate 한다.
+PROMOTE_BODY_MAX_CHARS = int(os.environ.get("PROMOTE_BODY_MAX_CHARS", "2500"))
+
+
+def generate_from_text(body_text: str, title: str | None, category: str) -> dict:
+    """단일 캡처 본문 → 익명 문학 스토리. 반환 형식은 generate() 와 동형(citations 제외).
+    no_fit=True 면 (본문이 빈약하거나 모델이 NO_FIT) 승격하지 않고 상위가 스킵한다."""
+    if category not in ("kindness", "critique"):
+        category = "critique"
+    system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
+    snippet = (body_text or "").strip()[:PROMOTE_BODY_MAX_CHARS]
+
+    def _skip(provider="", model_name=""):
+        return {
+            "no_fit": True, "category": category, "body": "", "text": "",
+            "volatility_score": 0, "poetic_reason": "",
+            "provider": provider, "model": model_name,
+        }
+
+    if len(snippet) < MIN_SOURCE_CONTENT:
+        return _skip()
+
+    src = f"제목: {title}\n본문: {snippet}" if title else snippet
+    user_prompt = (
+        "아래는 한국 커뮤니티 게시글 한 편의 본문이다(이미 삭제됐을 수 있다). 이 한 글에 "
+        "적힌 내용만으로 위 규칙대로 한 편을 써라. 다른 글과 섞지 말고, 본문에 없는 사실"
+        "(실명·회사명·날짜·금액 등)은 절대 만들지 마라. 본문에 적힌 개인정보(전화·주소·"
+        "주민번호·계좌 등)는 본문 그대로 옮기지 말고 익명화하거나 생략하라.\n\n글:\n" + src
+    )
+
+    text = None
+    provider = model_name = ""
+    if GROQ_API_KEY:
+        try:
+            text = parse_groq_chat_text(call_groq(user_prompt, system=system_prompt))
+            provider, model_name = "groq", GROQ_MODEL
+        except Exception as e:
+            logger.warning(f"[promote] Groq 생성 실패({e!r}). Gemini 폴백 시도.")
+    if text is None and GEMINI_API_KEY:
+        # 검색 끄고 system+user 를 한 프롬프트로 합쳐 본문만 재서술.
+        raw = call_gemini(system_prompt + "\n\n" + user_prompt, use_search=False)
+        text, _cites, _q = parse_gemini_response(raw)
+        provider, model_name = "gemini", GEMINI_MODEL
+    if text is None or not text.strip():
+        return _skip(provider, model_name)
+
+    # 모델이 '적합 글 아님'을 알리면 승격 스킵(오분류 흡수).
+    if _is_no_fit(text):
+        return _skip(provider, model_name)
+
+    text = USED_SOURCES_RE.sub('', text)
+    text, volatility, reason = extract_volatility_and_reason(text)
+    text = sanitize_text(text)
+    text = tidy_body(text)
+    if not text.strip():
+        return _skip(provider, model_name)
+
+    header = (
+        "[ 따뜻한 선행 이야기 ]" if category == "kindness"
+        else "[ 인류애가 흔들리는 대기업 사건 ]"
+    )
+    return {
+        "no_fit": False, "category": category,
+        "body": text, "text": header + "\n\n" + text.strip(),
+        "volatility_score": volatility, "poetic_reason": reason,
+        "provider": provider, "model": model_name,
+    }
 
 
 def generate(category: str | None = None) -> dict:

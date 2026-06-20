@@ -13,16 +13,12 @@ def _fixed_base(value):
 
 def test_high_urgency_minus_two(monkeypatch):
     monkeypatch.setattr(th, "get_dynamic_base_threshold", _fixed_base(5))
-    r = th.compute_effective_threshold(gap_score="extreme")
-    assert r["urgency"] == "high" and r["threshold"] == 3
     r2 = th.compute_effective_threshold(deleted_count=1)
     assert r2["urgency"] == "high" and r2["threshold"] == 3
 
 
 def test_medium_urgency_minus_one(monkeypatch):
     monkeypatch.setattr(th, "get_dynamic_base_threshold", _fixed_base(5))
-    r = th.compute_effective_threshold(gap_score="high")
-    assert r["urgency"] == "medium" and r["threshold"] == 4
     r2 = th.compute_effective_threshold(blocked_count=1)
     assert r2["urgency"] == "medium" and r2["threshold"] == 4
 
@@ -35,5 +31,5 @@ def test_normal_keeps_base(monkeypatch):
 
 def test_floor_at_one(monkeypatch):
     monkeypatch.setattr(th, "get_dynamic_base_threshold", _fixed_base(1))
-    r = th.compute_effective_threshold(gap_score="extreme", deleted_count=2)
+    r = th.compute_effective_threshold(deleted_count=2)
     assert r["threshold"] == 1  # max(1, 1-2)

@@ -33,6 +33,7 @@ from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  #
 from services.hunter import HUNTER_ENABLED, background_loop as hunter_loop  # noqa: E402
 from services.cleanup import CLEANUP_ENABLED, background_loop as cleanup_loop  # noqa: E402
 from services.collector import COLLECTOR_ENABLED, background_loop as collector_loop  # noqa: E402
+from services.promoter import PROMOTER_ENABLED, background_promotion_loop as promoter_loop  # noqa: E402
 
 import logging  # noqa: E402
 
@@ -64,6 +65,8 @@ async def lifespan(app: FastAPI):
         tasks.append(asyncio.create_task(cleanup_loop(), name="cleanup"))
     if has_supabase and COLLECTOR_ENABLED:
         tasks.append(asyncio.create_task(collector_loop(), name="collector"))
+    if has_supabase and PROMOTER_ENABLED:
+        tasks.append(asyncio.create_task(promoter_loop(), name="promoter"))
     for t in tasks:
         t.add_done_callback(_on_task_done)
     app.state.bg_tasks = tasks

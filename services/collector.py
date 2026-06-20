@@ -42,10 +42,30 @@ from services.tracker import (
     decide_status,
     fetch_observation,
 )
+from services.volatility import predict_volatility
 from services.wayback import enqueue as wayback_enqueue
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+# migrations/009(승격 다리) 컬럼 지원 여부 — volatility_score·hard_deleted_at·
+# promotion_status. 미설치(009 미적용) 환경에서는 이 컬럼들을 payload 에서 빼 400 을 피한다.
+_promo_cols_supported: Optional[bool] = None
+
+
+def _promotion_cols(db) -> bool:
+    global _promo_cols_supported
+    if _promo_cols_supported is None:
+        try:
+            (db.table("captured_posts")
+             .select("volatility_score,hard_deleted_at,promotion_status").limit(1).execute())
+            _promo_cols_supported = True
+        except Exception:
+            _promo_cols_supported = False
+            logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
+                        "기록 생략. migrations/009 적용 후 promoter 가능.")
+    return _promo_cols_supported
 
 # 기본 비활성: migrations/006 적용 후 COLLECTOR_ENABLED=true 로 명시적으로 켠다(외부 폴링 시작).
 COLLECTOR_ENABLED = os.environ.get("COLLECTOR_ENABLED", "false").lower() == "true"
@@ -275,6 +295,14 @@ async def _capture(db, source: str, feed_url: str, item: dict,
         })
     if res["status"] == "deleted":
         row["deleted_at"] = now_iso
+    if _promotion_cols(db):
+        # 결정적 삭제확률(0~10): 본문 있으면 본문, 없으면 제목+RSS요약으로 산출.
+        # 캡처/모니터링 우선순위·UI 배지 전용(생성 게이트·임계값·박제 결정엔 미주입).
+        vsrc = text or item.get("summary") or ""
+        row["volatility_score"] = predict_volatility(item.get("title"), vsrc, url)["score"]
+        # 드물게 캡처 시점에 이미 hard 삭제(404/410)면 기록. 단 본문이 없으면 승격 불가.
+        if res["status"] == "deleted" and res.get("http_code") in (404, 410):
+            row["hard_deleted_at"] = now_iso
     nxt, ec = compute_next_check(res["status"], 1, 0, now_dt)
     row["next_check_at"] = nxt
     row["error_count"] = ec
@@ -322,6 +350,14 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
             urls = [it["url"] for it in items]
             existing = _existing_urls(db, urls) if urls else set()
             new_items = [it for it in items if it["url"] not in existing]
+            # 예산이 빠듯할 때 '삭제위험 높은' 글을 먼저 캡처하도록 피드 내 정렬(제목+RSS요약
+            # 기반 예비 점수, stable). 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
+            new_items.sort(
+                key=lambda it: predict_volatility(
+                    it.get("title"), it.get("summary") or "", it.get("url") or ""
+                )["score"],
+                reverse=True,
+            )
             discovered += len(new_items)
         per_feed.append((source, feed_url, new_items))
 
@@ -352,15 +388,19 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
     """만기 도래한 captured_posts 를 재검사해 삭제/변화를 감지(적응형 due 순). 검사 수 반환.
     tracker 와 동일하게 hard(404/410) deleted 만 큐에서 영구 제외하고, soft 는 정정 위해 유지."""
     db = get_db()
+    promo = _promotion_cols(db)
     now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
+    cols = (
+        "id,url,check_count,status,http_code,error_count,"
+        "baseline_final_url,baseline_len,baseline_hash,"
+        "baseline_del_match,baseline_blk_match,baseline_at"
+    )
+    if promo:
+        cols += ",hard_deleted_at"
     try:
         resp = (
             db.table("captured_posts")
-            .select(
-                "id,url,check_count,status,http_code,error_count,"
-                "baseline_final_url,baseline_len,baseline_hash,"
-                "baseline_del_match,baseline_blk_match,baseline_at"
-            )
+            .select(cols)
             .or_(RECHECK_QUEUE_FILTER)
             .lte("next_check_at", now_iso)
             .order("next_check_at", desc=False, nullsfirst=True)
@@ -376,6 +416,7 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
         return 0
 
     newly_deleted = 0
+    newly_hard = 0
     async with httpx.AsyncClient(max_redirects=MAX_REDIRECTS) as client:
         for row in rows:
             obs = await fetch_observation(row["url"], client)
@@ -390,14 +431,23 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
             if res["status"] == "deleted" and prev != "deleted":
                 upd["deleted_at"] = ni
                 newly_deleted += 1
+            # hard 삭제(404/410)는 *확정 삭제* — promoter 자동 승격의 유일한 게이트 신호.
+            # soft(본문패턴/리다이렉트/급감)는 오탐 자가정정 가능성이 있어 절대 승격 신호로
+            # 쓰지 않는다(tracker/threshold 의 hard-only 원칙과 일관). 최초 1회만 기록.
+            if (promo and res["status"] == "deleted"
+                    and res.get("http_code") in (404, 410)
+                    and not row.get("hard_deleted_at")):
+                upd["hard_deleted_at"] = ni
+                newly_hard += 1
             try:
                 db.table("captured_posts").update(upd).eq("id", row["id"]).execute()
             except Exception as e:
                 logger.warning(f"[collector] recheck 갱신 실패 {row['id']}: {e}")
             await _sleep_jitter()
 
-    if newly_deleted:
-        logger.info(f"[collector] captured {newly_deleted}건 새로 삭제 감지")
+    if newly_deleted or newly_hard:
+        logger.info(f"[collector] captured {newly_deleted}건 새로 삭제 감지"
+                    f"(hard 확정 {newly_hard}건 → 승격 후보)")
     return len(rows)
 
 

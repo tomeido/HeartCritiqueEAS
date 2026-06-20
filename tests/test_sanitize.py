@@ -32,8 +32,8 @@ def test_japanese_kana_removed():
 
 
 def test_gap_score_thresholds():
-    assert llm.calculate_gap_score(5, 0) == "extreme"
-    assert llm.calculate_gap_score(5, 1) == "high"
-    assert llm.calculate_gap_score(5, 2) == "medium"
+    assert llm.calculate_gap_score(5, 0) == "none"
+    assert llm.calculate_gap_score(5, 1) == "none"
+    assert llm.calculate_gap_score(5, 2) == "none"
     assert llm.calculate_gap_score(5, 3) == "none"
     assert llm.calculate_gap_score(0, 0) == "none"

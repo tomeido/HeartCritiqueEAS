@@ -71,10 +71,9 @@ def _make_atom(
 
         # 신호 라벨
         signal_parts = []
-        if s.get("gap_score") == "extreme":
-            signal_parts.append("🚨 언론 보도 0건")
-        elif s.get("gap_score") == "high":
-            signal_parts.append("🔍 보도 격차 큼")
+        # 캡처 승격글: 살아있을 때 잡아둔 원본이 실제로 삭제된 뒤 박제된 글(미션의 핵심)
+        if s.get("from_capture"):
+            signal_parts.append("🪦 삭제된 원본을 살아있을 때 박제")
         # 업로드 진행 중('__pending__') 선점 마커는 '박제됨'으로 새어나가지 않게 제외
         tx = s.get("arweave_tx_id")
         if tx and tx != PENDING_MARKER:

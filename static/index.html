@@ -729,7 +729,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .dash-collapse .dash-card { border: 0; border-top: 1px solid var(--border); border-radius: 0;
   margin: 0; box-shadow: none; background: transparent; padding: var(--sp-5) var(--sp-6); animation: none; }
 .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: var(--sp-4); }
-.stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-3); }
+.stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
 .stat-tile { appearance: none; padding: var(--sp-4) var(--sp-3); background: var(--bg-card-2);
   border: 1px solid var(--border); border-radius: var(--r-md); text-align: center; cursor: pointer;
   font-family: inherit; color: inherit; transition: transform var(--t-fast), box-shadow var(--t-fast), border-color var(--t-fast); }
@@ -1362,7 +1362,6 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <button class="chip active" data-filter="all">전체</button>
         <button class="chip" data-filter="kindness">선행</button>
         <button class="chip" data-filter="critique">비판</button>
-        <button class="chip" data-filter="gap">🔍 보도 격차</button>
         <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
         <button class="chip" data-filter="archived">🗄 박제됨</button>
       </div>
@@ -1398,10 +1397,6 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <button class="stat-tile stat-deleted" data-jump="deleted" title="삭제된 출처 있는 글">
           <div class="stat-num" id="stat-deleted">·</div>
           <div class="stat-label">🚨 삭제 출처</div>
-        </button>
-        <button class="stat-tile stat-gap" data-jump="gap" title="언론 보도 격차 큰 글">
-          <div class="stat-num" id="stat-gap">·</div>
-          <div class="stat-label">🔍 보도 격차</div>
         </button>
       </div>
       <div class="dash-detail" id="dash-detail"></div>
@@ -1603,7 +1598,6 @@ async function loadStats() {
     document.getElementById('stat-total').textContent    = d.stories.total;
     document.getElementById('stat-archived').textContent = d.stories.archived;
     document.getElementById('stat-deleted').textContent  = d.citations.deleted || 0;
-    document.getElementById('stat-gap').textContent      = d.gap.high_or_extreme || 0;
 
     const recent = d.recent || {};
     const parts = [];
@@ -1617,7 +1611,6 @@ async function loadStats() {
       `<span><b>${bc.kindness || 0}</b> 선행 · <b>${bc.critique || 0}</b> 비판</span>`,
       `<span>총 <b>${d.votes.total}</b>표</span>`,
       `<span>출처 추적 <b>${ct.total || 0}</b>개 (살아있음 ${ct.live || 0} · 삭제 ${ct.deleted || 0} · 차단 ${ct.blocked || 0})</span>`,
-      `<span>격차 분포: extreme <b>${d.gap.extreme}</b> / high <b>${d.gap.high}</b> / medium <b>${d.gap.medium}</b></span>`,
     ];
     document.getElementById('dash-detail').innerHTML = detail.join('');
 
@@ -2207,52 +2200,13 @@ function extractDomain(url) {
 function renderGapSignal(score, communityCount, newsCount) {
   const badge = document.getElementById('story-gap-badge');
   const alert = document.getElementById('gap-alert');
-  const icon = document.getElementById('gap-alert-icon');
-  const title = document.getElementById('gap-alert-title');
-  const detail = document.getElementById('gap-alert-detail');
-  const stats = document.getElementById('gap-alert-stats');
 
-  // 배지/알림 둘 다 일단 숨김
-  badge.classList.add('hidden');
-  alert.classList.add('hidden', 'gap-extreme');
-  alert.classList.remove('gap-extreme');
-
-  if (!score || score === 'none' || score === 'low') return;
-
-  // 배지 표시 (medium 이상)
-  const labelMap = {
-    medium:  '🔍 보도 격차 보통',
-    high:    '🔍 보도 격차 큼',
-    extreme: '🚨 언론 보도 없음',
-  };
-  const clsMap = {
-    medium:  'badge-gap-medium',
-    high:    'badge-gap-high',
-    extreme: 'badge-gap-extreme',
-  };
-  badge.textContent = labelMap[score];
-  badge.className = 'badge ' + clsMap[score];
-  badge.classList.remove('hidden');
-
-  // 알림 hero (medium 이상)
-  alert.classList.remove('hidden');
-  if (score === 'extreme') alert.classList.add('gap-extreme');
-
-  if (score === 'extreme') {
-    icon.textContent = '🚨';
-    title.textContent = '언론 보도가 없습니다';
-    detail.textContent = '커뮤니티에서는 회자되는 사건이 메이저 언론에는 보이지 않습니다. 검열·압박 신호일 수 있습니다.';
-  } else if (score === 'high') {
-    icon.textContent = '🔍';
-    title.textContent = '보도 격차가 큽니다';
-    detail.textContent = '언론 보도가 커뮤니티 논의량보다 현저히 적습니다.';
-  } else {
-    icon.textContent = '🔍';
-    title.textContent = '보도 격차가 있습니다';
-    detail.textContent = '언론보다 커뮤니티에서 더 많이 논의되고 있습니다.';
+  // 배지/알림 둘 다 항상 숨김
+  if (badge) badge.classList.add('hidden');
+  if (alert) {
+    alert.classList.add('hidden', 'gap-extreme');
+    alert.classList.remove('gap-extreme');
   }
-
-  stats.textContent = `📰 언론 ${newsCount ?? '?'}건 · 💬 커뮤니티 ${communityCount ?? '?'}건`;
 }
 
 // ── 투표 ───────────────────────────────────────────────────────────────────
@@ -2725,7 +2679,6 @@ function renderStoryList() {
   else if (currentFilter === 'critique') stories = stories.filter(s => s.category === 'critique');
   else if (currentFilter === 'archived') stories = stories.filter(s => s.arweave_tx_id);
   else if (currentFilter === 'deleted')  stories = stories.filter(s => (s.deleted_count || 0) > 0);
-  else if (currentFilter === 'gap')      stories = stories.filter(s => ['medium','high','extreme'].includes(s.gap_score));
 
   const totalFiltered = stories.length;
   const loadMoreContainer = document.getElementById('load-more-container');
@@ -2768,9 +2721,7 @@ function renderStoryList() {
         : bC > 0
           ? `<div style="color:var(--warn-fg);font-weight:600;font-size:11px">⛔ ${bC}개 차단됨</div>`
           : '';
-    const gapLine = ['high', 'extreme'].includes(s.gap_score)
-      ? `<div style="color:${s.gap_score === 'extreme' ? 'var(--err)' : 'var(--gap-fg)'};font-weight:600;font-size:11px">${s.gap_score === 'extreme' ? '🚨 언론 보도 없음' : '🔍 보도 격차'}</div>`
-      : '';
+    const gapLine = '';
     const thresholdLabel = urgent
       ? `<span style="color:var(--err);font-weight:700">${s.vote_count}/${threshold}표 ⚡</span>`
       : `${s.vote_count}/${threshold}표`;
@@ -2783,8 +2734,7 @@ function renderStoryList() {
       // 1면 단독 — 큰 피처 카드
       div.className = `list-item feature ${catCls}${isArchived ? ' is-sealed' : ''}${isGhost ? ' story-ghost' : ''}${isDeletedWarning ? ' story-flash-deleted' : ''}`;
       const label = s.category === 'kindness' ? '🌸 따뜻한 미담' : '🔥 대기업 비위 · 폭로';
-      const gapTag = s.gap_score === 'extreme' ? ' · 🚨 언론 보도 없음'
-                   : s.gap_score === 'high'    ? ' · 🔍 보도 격차 큼' : '';
+      const gapTag = '';
       const delTag = dC > 0 ? ` · 🚨 출처 ${dC}개 삭제` : (bC > 0 ? ` · ⛔ ${bC}개 차단` : '');
       const sealEl = isArchived ? `<span class="feat-seal">SEALED</span>` : '';
       const foot = isArchived
