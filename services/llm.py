@@ -218,6 +218,8 @@ USED_SOURCES: [번호]
 관심 분야: 직장 갑질·폭언, 노동 환경 문제, 하청·납품 갑질, 내부고발자 보복, 임금 체불,
 제품 결함·소비자 기만, 오너 일가의 도덕적 타락(갑질·폭언·마약·음주운전·성범죄·횡령·탈세),
 회계 부정. 사소한 광고 트집·개인 분쟁은 피하고 다수에게 영향 가는 사건 우선.
+대상이 아닌 글: 스포츠 경기 결과·승부 예측, 게임·카드·수집품 잡담, 연예인 가십,
+진영 정치 논쟁, 단순 일상·후기. 이런 글뿐이면 NO_FIT.
 """
 
 # 검색어에서 '미담/훈훈/감동' 같은 추상 프레이밍 명사를 뺀다 — 그런 단어는 '미담 모음'·
@@ -238,23 +240,29 @@ SEARCH_QUERIES_KINDNESS = [
     "익명 커뮤니티 감동 사연 후기",
 ]
 
+# 모든 시드는 '기업 비위·시스템 부조리' 앵커(직장/대기업/하청/소비자/제도)를 반드시 포함한다.
+# 앵커 없는 범용 시드('실시간 베스트·정치 시사·트렌드·억울한 사건')는 스포츠·게임·연예·진영
+# 정치 같은 trivial 글을 끌어와 구조필터(looks_off_topic_critique)에서 통째로 컷되며 recall 만
+# 깎으므로 제거했다. 신선도는 토큰 안전을 위해 time_range/재시도수 대신 '실시간/오늘' 어휘로만 유도.
 SEARCH_QUERIES_CRITIQUE = [
-    "디시인사이드 실시간 베스트 폭로 의혹",
-    "에펨코리아 정치 시사 게시판 폭로",
-    "블라인드 회사 비리 내부고발",
-    "트위터 실시간 트렌드 사건 폭로",
+    # 직장·노동
+    "블라인드 직장 갑질 폭언 내부고발",
+    "블라인드 실시간 핫 직장 내부고발 제보",
+    "에펨코리아 직장 갑질 임금체불 폭로",
+    "디시 직장인 회사 비리 내부고발",
+    # 대기업·오너·하청
     "디시 개념글 대기업 갑질 폭로",
-    "에펨코리아 대기업 비리 폭로",
-    "블라인드 직장 갑질 폭언 의혹",
-    "네이트판 억울한 사건 제보 폭로",
+    "에펨코리아 대기업 오너 갑질 비리 폭로",
     "익명 커뮤니티 묻힌 대기업 비리 폭로",
-    "자본의 힘으로 삭제 위협받는 폭로 글",
-    # 신선도·삭제위험 편향(durable 베스트 대신 '지금 터지는' 논란을 더 잡으려는 시드).
-    # time_range/재시도수는 토큰 안전 위해 건드리지 않고, '실시간/오늘' 어휘로만 신선도 유도.
-    "디시 실시간 베스트 기업 갑질 논란",
-    "에펨코리아 실시간 인기글 직장 갑질 폭로",
-    "블라인드 실시간 핫 직장 내부고발",
-    "네이트판 오늘 핫이슈 갑질 폭로 제보",
+    "하청 납품업체 단가 후려치기 갑질 제보",
+    "재벌 오너 일가 횡령 탈세 갑질 의혹",
+    # 소비자·제품
+    "제품 결함 리콜 거부 소비자 기만 폭로",
+    "보배드림 자동차 결함 제조사 대응 논란",
+    "프랜차이즈 본사 가맹점주 갑질 정산 논란",
+    # 제도·구조 부조리 / 테마(검열·삭제)
+    "병원 산재 과로 노동환경 고발",
+    "자본의 힘으로 삭제 위협받는 기업 비리 폭로",
 ]
 
 # 줄 끝/문장 끝/단독 줄 어디든 잡도록 앵커 완화
@@ -623,7 +631,49 @@ def looks_off_topic_kindness(item: dict) -> bool:
     return True
 
 
-def normalize_search_results(data: dict, drop_news: bool = True, drop_off_topic: bool = False) -> list:
+# critique 적합성: '기업 비위·시스템 부조리' 신호가 하나도 없는 글(스포츠 경기 결과·
+# 게임/카드/수집품 잡담·연예 가십·진영 정치 논쟁·개인 일상)이 critique 로 새는 것을
+# 구조적으로 컷한다. kindness 는 looks_off_topic_kindness(부정 신호 차단)였지만, critique 는
+# 사기·갑질·횡령이 '정상 주제'라 그 부정필터를 못 쓴다 → 반대로 '기업/노동/소비자/제도의
+# 부조리 신호를 하나라도 보유'할 것을 요구하는 positive gate 로 둔다.
+CRITIQUE_ONTOPIC_RE = re.compile(
+    r'대기업|기업|회사|직장|사장|본사|지사|점주|가맹|프랜차이즈|오너|재벌|총수|임원|상사|사주|업체|'
+    r'갑질|갑을|폭언|폭행|괴롭힘|따돌림|부당|불공정|차별|성희롱|성추행|성범죄|'
+    r'임금|월급|급여|연봉|체불|수당|야근|초과근무|과로|산재|산업재해|해고|권고사직|계약직|비정규직|노조|파업|'
+    r'하청|재하청|납품|단가|대금|미지급|위탁|용역|일용직|'
+    r'내부고발|제보|폭로|비리|부정|횡령|배임|탈세|회계|분식|뇌물|로비|담합|독점|불법|위법|'
+    r'결함|불량|하자|리콜|단종|환불|보상|소비자|기만|허위|과장\s*광고|먹튀|사기|'
+    r'본부|대리점|편의점|배달|라이더|플랫폼|수수료|정산|블랙컨슈머|'
+    r'의료|병원|간호|요양|어린이집|보육|복지|연금|보험금|보험사|약값|산하기관|공공기관|관공서|'
+    r'은행|대출|이자|보증금|전세|월세|임대|분양|입주|하자보수'
+)
+# 명백한 비-critique 영역(스포츠·게임/수집품·연예·잡담)의 강한 신호. 단독 토큰의 오탐을
+# 피하려 구체 어구로만 둔다.
+CRITIQUE_OFFTOPIC_RE = re.compile(
+    r'월드컵|올림픽|아시안게임|챔피언스리그|프리미어리그|K리그|프로야구|프로축구|메이저리그|'
+    r'경기\s*결과|승부\s*예측|선발\s*(?:명단|라인업)|득점왕|해트트릭|대표팀\s*명단|'
+    r'포켓몬|트레이딩\s*카드|카드\s*뽑기|가챠|컬렉션|피규어|굿즈|'
+    r'아이돌|컴백|데뷔조|음원\s*차트|뮤직비디오|예능|드라마\s*결말|웹툰\s*결말|'
+    r'맛집|레시피|여행\s*후기|오늘의\s*운세|짤방',
+    re.IGNORECASE,
+)
+
+
+def looks_off_topic_critique(item: dict) -> bool:
+    """critique(기업 비위·시스템 부조리)와 무관한 글이면 True.
+    제목+본문 앞부분에 기업/노동/소비자/제도 부조리 신호(ON-TOPIC)가 하나라도 있으면
+    살린다(과필터 방지). 그 신호가 전혀 없으면 off-topic 으로 본다(positive gate).
+    스포츠·게임·연예 같은 강한 비주제 신호는 로그·가독성용으로만 본다 — 판정은 ON-TOPIC
+    보유 여부가 단독 기준이다(없으면 어차피 컷)."""
+    title = item.get("title") or ""
+    content = item.get("content") or ""
+    blob = title + " " + content[:400]
+    return not CRITIQUE_ONTOPIC_RE.search(blob)
+
+
+def normalize_search_results(data: dict, drop_news: bool = True, off_topic_fn=None) -> list:
+    """off_topic_fn: item→bool 콜백(True 면 제외). 카테고리별 적합성 필터를 주입한다
+    (kindness=looks_off_topic_kindness, critique=looks_off_topic_critique). None 이면 미적용."""
     out = []
     for r in data.get("results") or []:
         if not isinstance(r, dict):
@@ -638,7 +688,7 @@ def normalize_search_results(data: dict, drop_news: bool = True, drop_off_topic:
         }
         if drop_news and looks_like_news(item):
             continue
-        if drop_off_topic and looks_off_topic_kindness(item):
+        if off_topic_fn and off_topic_fn(item):
             continue
         out.append(item)
     return out
@@ -746,9 +796,11 @@ _GATE_CRITERIA = {
         "단순 잡담이나 광고는 미담이 아니다."
     ),
     "critique": (
-        "대기업이나 기업의 실제 비위·갑질·부정 제보(직장 갑질·하청 갑질·오너 비위·제품 결함·"
-        "임금 체불·회계 부정 등)가 하나라도 있는가? 개인 간 분쟁·사소한 불만·일반 잡담은 "
-        "기업 비위가 아니다."
+        "대기업·기업·기관의 실제 비위·시스템 부조리 제보(직장 갑질·폭언, 하청/납품 갑질, 오너 "
+        "비위, 제품 결함·소비자 기만, 임금 체불·산업재해, 내부고발, 회계 부정, 의료·복지·금융의 "
+        "구조적 부조리 등)가 하나라도 있는가? 스포츠 경기 결과·승부 예측, 게임/카드/수집품 잡담, "
+        "연예인 가십, 진영 정치 논쟁, 개인 간 사소한 다툼, 단순 잡담·후기는 '기업 비위·시스템 "
+        "부조리'가 아니다 — 그런 글뿐이면 반드시 NO_FIT 을 출력하라."
     ),
 }
 
@@ -782,19 +834,25 @@ def _is_no_fit(raw_text: str) -> bool:
     return False
 
 
-def _groq_search(query: str, category: str, domains, off: bool) -> tuple:
+def _groq_search(query: str, category: str, domains) -> tuple:
     """한 쿼리에 대해 3단 폴백 검색 → (results, community_count).
-    community_count 는 빈약(rich)필터 이전의 전체 결과 수(검열 격차 신호 왜곡 방지)."""
-    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + (kindness) 비미담 필터
+    community_count 는 빈약(rich)필터 이전의 전체 결과 수(검열 격차 신호 왜곡 방지).
+    카테고리별 적합성 필터(kindness=비미담 차단, critique=기업 비위 신호 요구)를 주입한다."""
+    off_fn = looks_off_topic_kindness if category == "kindness" else looks_off_topic_critique
+    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + 카테고리 적합성 필터
     search_data = tavily_search(query, include_domains=domains)
-    results = normalize_search_results(search_data, drop_news=True, drop_off_topic=off)
-    # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 비미담 필터는 유지
+    results = normalize_search_results(search_data, drop_news=True, off_topic_fn=off_fn)
+    # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 적합성 필터는 유지
     if not results:
-        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=off)
-    # 3차: 도메인·필터 모두 풀고 재검색 (부정필터로 과필터돼 비는 것까지 폴백으로 흡수)
+        results = normalize_search_results(search_data, drop_news=False, off_topic_fn=off_fn)
+    # 3차: 도메인 풀고 재검색. kindness 는 모든 필터 해제(뭐라도 생성 우선)지만, critique 는
+    # 적합성 필터를 유지한다 — 스포츠·게임·연예 잡담을 '기업 비위'로 둔갑시키느니 생성을 건너뛴다.
     if not results:
         search_data = tavily_search(query)
-        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=False)
+        results = normalize_search_results(
+            search_data, drop_news=False,
+            off_topic_fn=(off_fn if category == "critique" else None),
+        )
 
     community_count = len(results) if results else 0
     # 본문 스니펫이 빈약한 출처는 모델이 일반론으로 공허해지므로 선택 후보에서 제외(전부 빈약하면 폴백)
@@ -809,9 +867,8 @@ def generate_via_groq(category: str) -> tuple:
     domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
         DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
     )
-    # 비-미담(사기·괴담·돈분쟁·상담) 부정필터는 kindness 에만. critique 엔 그것이 정상
-    # 주제(사기·갑질·횡령)이므로 절대 켜지 않는다.
-    off = (category == "kindness")
+    # 카테고리 적합성 필터는 _groq_search 안에서 category 로 분기한다(kindness=비미담 차단,
+    # critique=기업 비위·시스템 부조리 신호 요구). 여기선 system 프롬프트만 고른다.
     system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
 
     # 적합성 게이트: 결과에 진짜 해당 글이 없으면 NO_FIT → 서로 다른 쿼리로 제한 재시도
@@ -822,7 +879,7 @@ def generate_via_groq(category: str) -> tuple:
     last_query = queries[0]
     for query in queries:
         last_query = query
-        results, community_count = _groq_search(query, category, domains, off)
+        results, community_count = _groq_search(query, category, domains)
         if not results:
             continue
 
