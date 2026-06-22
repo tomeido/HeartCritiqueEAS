@@ -1,0 +1,3 @@
+## 2025-01-08 - Keyboard accessibility for custom interactive elements
+**Learning:** Generic CSS reset styles for interactive elements (like `button:focus-visible` and `a:focus-visible`) do not apply to custom interactive elements made from generic tags (like `<span role="link" tabIndex="0">`). This leads to a severe accessibility issue where keyboard users cannot see when they've navigated to these elements.
+**Action:** When creating custom interactive elements (e.g. using `<span>` or `<div>` with `tabIndex="0"` and a `role`), always explicitly add them to the global `:focus-visible` styles to ensure they receive a focus ring.
