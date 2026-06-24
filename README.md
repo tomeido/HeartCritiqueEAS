@@ -140,6 +140,11 @@ Docker
   - **저장 방식**: 데스크톱은 `<a download>`로 바로 다운로드, 터치 기기(특히 iOS)는 파일 공유 시트(`navigator.share({files})`)로 사진·파일에 저장합니다.
   - **안전장치**: 동시 호출 차단, 본문 줄 수 클램프(브라우저 캔버스 32767px 한계 회피), QR 입력 길이 가드, `toBlob→toDataURL` 폴백.
 
+### 8) 이야기 검색 (Search)
+- 목록 헤더의 🔍 검색창에 키워드를 입력하면 (로드된 목록이 아니라) **전체 아카이브를 서버에서 검색**합니다(`GET /api/stories?q=`). 본문(`body`)과 시적 사유(`poetic_reason`)를 대소문자 무시 **부분일치**로 매칭합니다.
+- 입력 문자열은 PostgREST 필터 구조 문자(`* % _ , ( ) \ "`)를 제거(`_sanitize_search`)해 **필터 인젝션·와일드카드 누수를 차단**한 뒤 `or_(body.ilike.*kw*,poetic_reason.ilike.*kw*)`로 질의합니다.
+- 프론트엔드는 300ms 디바운스(+Enter 즉시 실행)로 호출하며, 결과 수·빈 결과 안내·지우기(✕)를 표시합니다. 기존 카테고리 필터 칩은 검색 결과 위에 그대로 적용됩니다.
+
 ---
 
 ## 4. 환경 변수 설정 (Environment Variables)
@@ -241,9 +246,10 @@ pytest
   ```bash
   curl -X POST http://localhost:8000/api/story
   ```
-- **스토리 목록 조회**
+- **스토리 목록 조회** (`q`로 본문·시적 사유 부분일치 검색, `limit`으로 개수 조절)
   ```bash
   curl http://localhost:8000/api/stories
+  curl "http://localhost:8000/api/stories?q=택시&limit=200"   # 키워드 검색(전체 아카이브 대상)
   ```
 - **대시보드 통계 집계**
   ```bash
