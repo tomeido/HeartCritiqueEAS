@@ -71,6 +71,9 @@ Docker
 ### 1) 스토리 생성
 - 사용자가 `/api/story`를 직접 호출하거나 백그라운드의 `hunter.py`가 돌면서 스토리를 탐색합니다.
 - LLM 엔진(`services/llm.py`)이 뉴스 및 커뮤니티 글을 모니터링하여 미담 혹은 비위 사건을 수집하고 한국어로 스토리를 생성 및 Supabase DB(`stories`)에 기록합니다.
+- **적합성 게이트(no_fit)**: 검색 결과에 진짜 해당 카테고리 글이 없으면 모델이 `NO_FIT`을 내고, 서로 다른 쿼리로 제한 재시도(`RELEVANCE_MAX_ATTEMPTS`)합니다. 모든 시도가 실패하면 빈 본문을 박제하지 않고 `503`으로 알려 재시도를 유도합니다.
+  - **휘발성(삭제확률) 점수는 `critique`에서만 채택 게이트로 씁니다.** `critique`는 '자본 압박으로 곧 삭제될 폭로'가 핵심이라 저휘발 글을 거르지만, `kindness`(미담)는 삭제 위험과 무관하므로 저휘발이라고 버리지 않습니다(휘발성은 표시·랭킹 전용이라는 원칙과 일관). → 미담 생성이 저휘발 글을 과도하게 거부해 `no_fit → 503`이 잦던 문제를 해소.
+- **공급자 폴백(Groq → Gemini)**: 기본 `groq`(Tavily 검색 grounding)가 한도(분당 `TPM`·일일 `TPD`) 소진이나 일시 오류로 실패하면 `gemini`(Google Search grounding)로 자동 폴백합니다. Gemini 호출은 일시적 5xx(고수요·`UNAVAILABLE`)·429·네트워크 오류에 지수 백오프로 재시도(`GEMINI_MAX_ATTEMPTS`)하여, 한 번의 일시 장애가 사용자 `503`으로 번지지 않게 합니다. Gemini 응답의 `NO_FIT`도 동일하게 감지해 본문 누수를 막습니다.
 
 ### 2) 투표 & 동적 임계값 (Threshold)
 - 사용자가 구글 소셜 로그인 후 찬성(Approve) 투표를 누릅니다.
@@ -152,7 +155,10 @@ Docker
 | `LLM_PROVIDER` | 선택 | `groq` | LLM API 제공자 (`groq` 또는 `gemini`) |
 | `GROQ_API_KEY` | Groq 사용 시 | - | Groq Cloud API Key |
 | `TAVILY_API_KEY` | Groq 사용 시 | - | Tavily Search API Key |
-| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용) |
+| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용). 설정 시 Groq 실패의 폴백 경로로도 쓰임 |
+| `GEMINI_MAX_ATTEMPTS` | 선택 | `5` | Gemini 호출의 일시 오류(5xx·429·네트워크) 재시도 횟수(지수 백오프). Groq 한도 소진 시 Gemini가 단독 경로가 되므로 고수요 스파이크를 견디게 함 |
+| `GEMINI_RETRY_BASE` | 선택 | `1.5` | Gemini 재시도 백오프 기준 초 (1.5→3→6→12… ≈ 최대 ~22초) |
+| `RELEVANCE_MAX_ATTEMPTS` | 선택 | `2` | 적합성 게이트가 `NO_FIT`일 때 다른 쿼리로 재시도하는 최대 횟수 (Groq TPM 안전을 위해 기본 2) |
 | `IRYS_NETWORK` | 선택 | `devnet` | `devnet`(약 60일 임시 저장) 또는 `mainnet`(영구 저장, 가스비 소모). `devnet` 모드 시 UI에 임시 배지가 표시됩니다. |
 | `VOTE_THRESHOLD` | 선택 | `3` | 박제 트리거에 필요한 기본 투표수 |
 | `DYNAMIC_THRESHOLD` | 선택 | `true` | 활성 투표자 수 및 검열 신호에 따라 임계값 동적 변동 여부 |
