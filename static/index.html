@@ -714,6 +714,20 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .chip-badge { display: inline-block; background: var(--seal-wax); color: #fff;
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 700; padding: 1px 5px;
   border-radius: var(--r-full); margin-left: 4px; min-width: 14px; text-align: center; vertical-align: middle; }
+/* 이야기 검색 박스 — 헤더에서 한 줄을 통째로 차지(전체 폭) */
+.list-search { flex: 1 1 100%; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-card-2); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  padding: 7px 14px; transition: border-color var(--t-base); }
+.list-search:focus-within { border-color: var(--text); }
+.list-search-icon { font-size: var(--fs-sm); opacity: .7; flex-shrink: 0; }
+.list-search-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  font-family: var(--font-sans); font-size: var(--fs-base); color: var(--text); }
+.list-search-input::placeholder { color: var(--muted); }
+.list-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.list-search-clear { flex-shrink: 0; border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: var(--fs-base); line-height: 1; padding: 2px 6px; border-radius: var(--r-full); }
+.list-search-clear:hover { color: var(--text); background: var(--bg-2); }
+.search-status { flex: 1 1 100%; margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 
 /* ── 발행소 기록(접이식 통계 대시보드) ───────────────────────────────────── */
 .dash-collapse {
@@ -1406,6 +1420,13 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
         <button class="chip" data-filter="archived">🗄 박제됨</button>
       </div>
+      <div class="list-search">
+        <span class="list-search-icon" aria-hidden="true">🔍</span>
+        <input type="search" id="story-search" class="list-search-input" autocomplete="off"
+               enterkeyhint="search" placeholder="이야기 검색 — 본문 키워드" aria-label="이야기 검색">
+        <button class="list-search-clear" id="story-search-clear" type="button" hidden aria-label="검색어 지우기">✕</button>
+      </div>
+      <p class="search-status" id="search-status" role="status" aria-live="polite" hidden></p>
     </div>
     <div id="story-list">
       <div class="empty">
@@ -1515,6 +1536,7 @@ let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드
 let allStories = [];
 let currentFilter = 'all';
 let displayLimit = 10;
+let searchQuery = '';          // 서버 검색어(본문·시적 사유 부분일치). 비면 일반 목록.
 let archivePollTimer = null;
 
 // ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
@@ -3150,12 +3172,17 @@ async function runVerification(txId, arweaveUrl) {
 // ── 목록 ───────────────────────────────────────────────────────────────────
 async function loadStoryList() {
   try {
-    const resp = await fetch('/api/stories?limit=100');
+    // 검색 중이면 q 를 붙여 전체 아카이브를 서버에서 검색(부분일치). 더 넓은 limit 으로 매칭 확보.
+    const url = searchQuery
+      ? `/api/stories?limit=200&q=${encodeURIComponent(searchQuery)}`
+      : '/api/stories?limit=100';
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     allStories = await resp.json();
     displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
+    updateSearchStatus();
   } catch (e) {
     console.error('[stories] load failed', e);
     // 빈 상태(=없음)와 실패(=에러)를 구분해서 사용자에게 알린다.
@@ -3227,6 +3254,24 @@ document.getElementById('bell-btn').onclick = () => {
   document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
+// 검색 상태 라인 + 지우기(✕) 버튼 토글. searchQuery 는 textContent 로만 출력(XSS 안전).
+function updateSearchStatus() {
+  const statusEl = document.getElementById('search-status');
+  const clearBtn = document.getElementById('story-search-clear');
+  if (clearBtn) clearBtn.hidden = !searchQuery;
+  if (!statusEl) return;
+  if (searchQuery) {
+    const n = allStories.length;
+    statusEl.textContent = n
+      ? `‘${searchQuery}’ 검색 결과 ${n}건${n >= 200 ? ' (최근 200건)' : ''}`
+      : `‘${searchQuery}’ 검색 결과 없음`;
+    statusEl.hidden = false;
+  } else {
+    statusEl.hidden = true;
+    statusEl.textContent = '';
+  }
+}
+
 function renderStoryList() {
   const el = document.getElementById('story-list');
   let stories = allStories;
@@ -3242,7 +3287,14 @@ function renderStoryList() {
   }
 
   if (!totalFiltered) {
-    el.innerHTML = `
+    el.innerHTML = searchQuery
+      ? `
+      <div class="empty">
+        <div class="empty-icon">🔍</div>
+        <div class="empty-text">‘${escHtml(searchQuery)}’에 대한 검색 결과가 없습니다.</div>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.getElementById('story-search-clear').click()">검색 지우기</button></div>
+      </div>`
+      : `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
@@ -3255,7 +3307,7 @@ function renderStoryList() {
   const defaultTh = cfg?.vote_threshold || 3;
   const lastSeen = getLastSeen();
   el.innerHTML = '';
-  const useFeature = (currentFilter === 'all');   // 전체 탭에서만 첫 글을 1면 피처로
+  const useFeature = (currentFilter === 'all' && !searchQuery);   // 전체 탭·비검색일 때만 첫 글을 1면 피처로
 
   visibleStories.forEach((s, idx) => {
     const catCls   = s.category === 'kindness' ? 'is-kindness' : 'is-critique';
@@ -3353,6 +3405,32 @@ document.querySelectorAll('.chip').forEach(chip => {
     renderStoryList();
   };
 });
+
+// ── 이야기 검색 (디바운스 → 서버 검색) ───────────────────────────────────────
+(() => {
+  const input = document.getElementById('story-search');
+  const clearBtn = document.getElementById('story-search-clear');
+  if (!input) return;
+  let debounce = null;
+  const run = () => {
+    const v = input.value.trim();
+    if (v === searchQuery) return;   // 변화 없으면 재요청 생략
+    searchQuery = v;
+    displayLimit = 10;
+    loadStoryList();
+  };
+  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(run, 300); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(debounce); run(); } });
+  if (clearBtn) clearBtn.onclick = () => {
+    clearTimeout(debounce);
+    input.value = '';
+    input.focus();
+    if (!searchQuery) return;
+    searchQuery = '';
+    displayLimit = 10;
+    loadStoryList();
+  };
+})();
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, kind = 'info') {
