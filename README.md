@@ -242,3 +242,7 @@ pytest
     -H "Content-Type: application/json" \
     -d '{"jsonrpc":"2.0","method":"message/send","id":1,"params":{"message":{"parts":[{"text":"이야기 하나 들려줘"}]}}}'
   ```
+
+
+<img width="1152" height="2900" alt="heart-critique-receipt-0a945a2c" src="https://github.com/user-attachments/assets/7977b8b7-f74b-4898-b1a8-8b0de3ace35d" />
+<img width="1152" height="2622" alt="heart-critique-receipt-e136403b" src="https://github.com/user-attachments/assets/27143db1-06cf-4be8-bbe5-b9fa92ff43e9" />
