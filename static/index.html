@@ -1370,6 +1370,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
       <div class="empty">
         <div class="empty-icon">📜</div>
         <div class="empty-text">아직 이야기가 없습니다.</div>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="window.scrollTo({ top: 0, behavior: 'smooth' })">새 이야기 의뢰하기</button></div>
       </div>
     </div>
     <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
@@ -2691,7 +2692,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
-        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : ''}
+        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="window.scrollTo({ top: 0, behavior: \'smooth\' })">새 이야기 의뢰하기</button></div>'}
       </div>`;
     return;
   }
