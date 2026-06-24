@@ -61,7 +61,7 @@ Docker
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              # POST /upload → Irys → Arweave Tx ID 반환
 └── static/
-    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI)
+    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI) — 글 공유(/s/<id>)·🧾영수증 PNG/QR 내보내기 포함
 ```
 
 ---
@@ -124,6 +124,18 @@ Docker
 - `WAYBACK_ENABLED=true` 설정 시 작동합니다.
 - 수집된 출처 URL을 Internet Archive(IA)의 Save Page Now API에 대기열(Queue) 형태로 위임 요청합니다.
 - 이를 통해 크롤링 차단 우회 및 공인된 외부 스냅샷 링크(`archive_url`)를 확보하고, 스토리 조회 시 제공합니다.
+
+### 7) 글 공유 & 영수증 내보내기 (Frontend Share / Export)
+
+별도 백엔드 없이 **클라이언트 사이드(`static/index.html`)에서만** 동작하는 두 가지 내보내기 기능입니다.
+
+- **🔗 공유**: 각 글마다 OG 미리보기가 붙는 영속 링크 `/s/<id>`를 복사하거나 네이티브 공유 시트로 전달합니다. 주소창은 글을 열 때 `#story=<id>`로 동기화되어 새로고침·뒤로가기·딥링크가 가능합니다.
+- **🧾 영수증**: 글을 *영수증 형태의 PNG 이미지*로 저장합니다. 외부 렌더 라이브러리 없이 **순수 `<canvas>`**로 그립니다.
+  - **상단 QR 코드** — 박제된 글이면 *Arweave 영구 원본*(`gateway.irys.xyz`/devnet) 주소를, 아직 박제 전이면 *글 영속링크*(`/s/<id>`)를 가리킵니다. QR 아래에 해당 URL을 텍스트로도 인쇄합니다.
+  - **하단 본문** — 글 내용을 영수증체 작은 글씨로(한글 글자 단위 자동 줄바꿈) 출력하고, 그 위에 메타 영수증 행(분류·발행일·글번호·출처/삭제 수·박제 Tx 또는 투표 현황·체인)과 가짜 바코드·위아래 절취선(톱니)을 그려 실제 영수증 질감을 냅니다.
+  - **QR 인코더**(`qrcode-generator`)는 버튼 클릭 시점에 jsdelivr CDN에서 **1회 지연 로드**하며 **SRI 해시로 고정**(변조 시 실행 거부)합니다. 로드/생성에 실패하면 QR 대신 링크 박스로 우아하게 폴백합니다.
+  - **저장 방식**: 데스크톱은 `<a download>`로 바로 다운로드, 터치 기기(특히 iOS)는 파일 공유 시트(`navigator.share({files})`)로 사진·파일에 저장합니다.
+  - **안전장치**: 동시 호출 차단, 본문 줄 수 클램프(브라우저 캔버스 32767px 한계 회피), QR 입력 길이 가드, `toBlob→toDataURL` 폴백.
 
 ---
 
