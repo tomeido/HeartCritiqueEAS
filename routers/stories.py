@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import uuid
 
 from fastapi import APIRouter, HTTPException, Request
@@ -165,19 +166,33 @@ async def create_story(request: Request, category: str | None = None):
     }
 
 
+# 검색어 정제: PostgREST or_/ilike 구조 문자(* % _ , ( ) \ ")를 제거해 필터 깨짐·와일드카드
+# 인젝션을 막고 정제된 부분일치 키워드만 남긴다(길이 상한 80). 한글·영문·공백·하이픈은 보존.
+_SEARCH_STRIP_RE = re.compile(r'[%_,()*\\"]+')
+
+
+def _sanitize_search(q: str | None) -> str:
+    if not q:
+        return ""
+    cleaned = _SEARCH_STRIP_RE.sub(" ", q)
+    return " ".join(cleaned.split())[:80]
+
+
 @router.get("/stories")
-async def list_stories(limit: int = 50):
+async def list_stories(limit: int = 50, q: str | None = None):
     global _capture_cols_ok
     db = get_db()
     # 음수/0 limit 이 PostgREST 에서 500 나지 않게 하한도 클램프.
     limit = max(1, min(limit, 200))
+    # 검색어가 있으면 본문·시적 사유 부분일치로 전체 아카이브를 서버에서 검색.
+    term = _sanitize_search(q)
 
     # 목록은 citations(jsonb) 자체를 전송하지 않는다(무겁다). 카운트는 추적 레코드 수로.
     def _query(cols: str):
-        return (
-            db.table("stories").select(cols)
-            .order("created_at", desc=True).limit(limit).execute()
-        )
+        sel = db.table("stories").select(cols)
+        if term:
+            sel = sel.or_(f"body.ilike.*{term}*,poetic_reason.ilike.*{term}*")
+        return sel.order("created_at", desc=True).limit(limit).execute()
 
     if _capture_cols_ok is False:
         resp = _query(_LIST_BASE_COLS)

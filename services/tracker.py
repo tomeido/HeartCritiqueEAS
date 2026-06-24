@@ -765,7 +765,7 @@ def get_status_map(story_ids: list) -> dict:
     resp = (
         db.table("citation_checks")
         .select("story_id,url,status,http_code,last_checked,reason,"
-                "first_seen,check_count,next_check_at,error_count")
+                "first_seen,check_count,next_check_at,error_count,baseline_at")
         .in_("story_id", story_ids)
         .execute()
     )

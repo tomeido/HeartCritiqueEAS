@@ -61,7 +61,7 @@ Docker
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              # POST /upload → Irys → Arweave Tx ID 반환
 └── static/
-    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI)
+    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI) — 글 공유(/s/<id>)·🧾영수증 PNG/QR 내보내기 포함
 ```
 
 ---
@@ -71,6 +71,9 @@ Docker
 ### 1) 스토리 생성
 - 사용자가 `/api/story`를 직접 호출하거나 백그라운드의 `hunter.py`가 돌면서 스토리를 탐색합니다.
 - LLM 엔진(`services/llm.py`)이 뉴스 및 커뮤니티 글을 모니터링하여 미담 혹은 비위 사건을 수집하고 한국어로 스토리를 생성 및 Supabase DB(`stories`)에 기록합니다.
+- **적합성 게이트(no_fit)**: 검색 결과에 진짜 해당 카테고리 글이 없으면 모델이 `NO_FIT`을 내고, 서로 다른 쿼리로 제한 재시도(`RELEVANCE_MAX_ATTEMPTS`)합니다. 모든 시도가 실패하면 빈 본문을 박제하지 않고 `503`으로 알려 재시도를 유도합니다.
+  - **휘발성(삭제확률) 점수는 `critique`에서만 채택 게이트로 씁니다.** `critique`는 '자본 압박으로 곧 삭제될 폭로'가 핵심이라 저휘발 글을 거르지만, `kindness`(미담)는 삭제 위험과 무관하므로 저휘발이라고 버리지 않습니다(휘발성은 표시·랭킹 전용이라는 원칙과 일관). → 미담 생성이 저휘발 글을 과도하게 거부해 `no_fit → 503`이 잦던 문제를 해소.
+- **공급자 폴백(Groq → Gemini)**: 기본 `groq`(Tavily 검색 grounding)가 한도(분당 `TPM`·일일 `TPD`) 소진이나 일시 오류로 실패하면 `gemini`(Google Search grounding)로 자동 폴백합니다. Gemini 호출은 일시적 5xx(고수요·`UNAVAILABLE`)·429·네트워크 오류에 지수 백오프로 재시도(`GEMINI_MAX_ATTEMPTS`)하여, 한 번의 일시 장애가 사용자 `503`으로 번지지 않게 합니다. Gemini 응답의 `NO_FIT`도 동일하게 감지해 본문 누수를 막습니다.
 
 ### 2) 투표 & 동적 임계값 (Threshold)
 - 사용자가 구글 소셜 로그인 후 찬성(Approve) 투표를 누릅니다.
@@ -125,6 +128,23 @@ Docker
 - 수집된 출처 URL을 Internet Archive(IA)의 Save Page Now API에 대기열(Queue) 형태로 위임 요청합니다.
 - 이를 통해 크롤링 차단 우회 및 공인된 외부 스냅샷 링크(`archive_url`)를 확보하고, 스토리 조회 시 제공합니다.
 
+### 7) 글 공유 & 영수증 내보내기 (Frontend Share / Export)
+
+별도 백엔드 없이 **클라이언트 사이드(`static/index.html`)에서만** 동작하는 두 가지 내보내기 기능입니다.
+
+- **🔗 공유**: 각 글마다 OG 미리보기가 붙는 영속 링크 `/s/<id>`를 복사하거나 네이티브 공유 시트로 전달합니다. 주소창은 글을 열 때 `#story=<id>`로 동기화되어 새로고침·뒤로가기·딥링크가 가능합니다.
+- **🧾 영수증**: 글을 *영수증 형태의 PNG 이미지*로 저장합니다. 외부 렌더 라이브러리 없이 **순수 `<canvas>`**로 그립니다.
+  - **상단 QR 코드** — 박제된 글이면 *Arweave 영구 원본*(`gateway.irys.xyz`/devnet) 주소를, 아직 박제 전이면 *글 영속링크*(`/s/<id>`)를 가리킵니다. QR 아래에 해당 URL을 텍스트로도 인쇄합니다.
+  - **하단 본문** — 글 내용을 영수증체 작은 글씨로(한글 글자 단위 자동 줄바꿈) 출력하고, 그 위에 메타 영수증 행(분류·발행일·글번호·출처/삭제 수·박제 Tx 또는 투표 현황·체인)과 가짜 바코드·위아래 절취선(톱니)을 그려 실제 영수증 질감을 냅니다.
+  - **QR 인코더**(`qrcode-generator`)는 버튼 클릭 시점에 jsdelivr CDN에서 **1회 지연 로드**하며 **SRI 해시로 고정**(변조 시 실행 거부)합니다. 로드/생성에 실패하면 QR 대신 링크 박스로 우아하게 폴백합니다.
+  - **저장 방식**: 데스크톱은 `<a download>`로 바로 다운로드, 터치 기기(특히 iOS)는 파일 공유 시트(`navigator.share({files})`)로 사진·파일에 저장합니다.
+  - **안전장치**: 동시 호출 차단, 본문 줄 수 클램프(브라우저 캔버스 32767px 한계 회피), QR 입력 길이 가드, `toBlob→toDataURL` 폴백.
+
+### 8) 이야기 검색 (Search)
+- 목록 헤더의 🔍 검색창에 키워드를 입력하면 (로드된 목록이 아니라) **전체 아카이브를 서버에서 검색**합니다(`GET /api/stories?q=`). 본문(`body`)과 시적 사유(`poetic_reason`)를 대소문자 무시 **부분일치**로 매칭합니다.
+- 입력 문자열은 PostgREST 필터 구조 문자(`* % _ , ( ) \ "`)를 제거(`_sanitize_search`)해 **필터 인젝션·와일드카드 누수를 차단**한 뒤 `or_(body.ilike.*kw*,poetic_reason.ilike.*kw*)`로 질의합니다.
+- 프론트엔드는 300ms 디바운스(+Enter 즉시 실행)로 호출하며, 결과 수·빈 결과 안내·지우기(✕)를 표시합니다. 기존 카테고리 필터 칩은 검색 결과 위에 그대로 적용됩니다.
+
 ---
 
 ## 4. 환경 변수 설정 (Environment Variables)
@@ -140,7 +160,10 @@ Docker
 | `LLM_PROVIDER` | 선택 | `groq` | LLM API 제공자 (`groq` 또는 `gemini`) |
 | `GROQ_API_KEY` | Groq 사용 시 | - | Groq Cloud API Key |
 | `TAVILY_API_KEY` | Groq 사용 시 | - | Tavily Search API Key |
-| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용) |
+| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용). 설정 시 Groq 실패의 폴백 경로로도 쓰임 |
+| `GEMINI_MAX_ATTEMPTS` | 선택 | `5` | Gemini 호출의 일시 오류(5xx·429·네트워크) 재시도 횟수(지수 백오프). Groq 한도 소진 시 Gemini가 단독 경로가 되므로 고수요 스파이크를 견디게 함 |
+| `GEMINI_RETRY_BASE` | 선택 | `1.5` | Gemini 재시도 백오프 기준 초 (1.5→3→6→12… ≈ 최대 ~22초) |
+| `RELEVANCE_MAX_ATTEMPTS` | 선택 | `2` | 적합성 게이트가 `NO_FIT`일 때 다른 쿼리로 재시도하는 최대 횟수 (Groq TPM 안전을 위해 기본 2) |
 | `IRYS_NETWORK` | 선택 | `devnet` | `devnet`(약 60일 임시 저장) 또는 `mainnet`(영구 저장, 가스비 소모). `devnet` 모드 시 UI에 임시 배지가 표시됩니다. |
 | `VOTE_THRESHOLD` | 선택 | `3` | 박제 트리거에 필요한 기본 투표수 |
 | `DYNAMIC_THRESHOLD` | 선택 | `true` | 활성 투표자 수 및 검열 신호에 따라 임계값 동적 변동 여부 |
@@ -223,9 +246,10 @@ pytest
   ```bash
   curl -X POST http://localhost:8000/api/story
   ```
-- **스토리 목록 조회**
+- **스토리 목록 조회** (`q`로 본문·시적 사유 부분일치 검색, `limit`으로 개수 조절)
   ```bash
   curl http://localhost:8000/api/stories
+  curl "http://localhost:8000/api/stories?q=택시&limit=200"   # 키워드 검색(전체 아카이브 대상)
   ```
 - **대시보드 통계 집계**
   ```bash

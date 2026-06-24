@@ -14,6 +14,7 @@ Heart & Critique - FastAPI 메인 앱 (Docker 홈서버용)
 """
 
 import asyncio
+import html
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -22,7 +23,12 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+)
 
 load_dotenv()
 
@@ -136,6 +142,14 @@ async def get_config():
         "ephemeral_signing_key": not has_configured_key(),
         "irys_network": os.environ.get("IRYS_NETWORK", "devnet"),
     }
+
+
+@app.get("/api/wallet")
+async def get_wallet():
+    """박제 비용·지갑 잔액·후원 주소(실시간, network-aware). uploader(Irys)에서 캐시 프록시.
+    devnet 이면 Sepolia 기준, IRYS_NETWORK=mainnet 전환 시 자동으로 mainnet 값이 노출된다."""
+    from services.wallet import get_wallet_info
+    return await get_wallet_info()
 
 
 # ── A2A 호환 JSON-RPC 엔드포인트 ───────────────────────────────────────────
@@ -287,6 +301,73 @@ async def jsonrpc_handler(request: Request):
         {"jsonrpc": "2.0", "id": rpc_id,
          "error": {"code": -32601, "message": f"Method not found: {method}"}},
     )
+
+
+# ── 특정 글 공유 (글별 OG 미리보기) ────────────────────────────────────────
+@app.get("/s/{story_id}")
+async def share_story(story_id: str, request: Request):
+    """특정 글 공유용 영속 링크. 크롤러(카카오톡·트위터·디스코드)에는 *그 글* 의
+    OG 메타(제목·발췌)를 주고, 사람 브라우저는 SPA 해시 라우트(/#story=<id>)로
+    즉시 보낸다. 잘못된 id·없는 글·DB 오류는 홈으로 폴백해 공유 링크가 죽지 않게 한다.
+
+    SPA 는 해시(#story=)로만 글을 열어 크롤러가 해시 조각을 못 받는다 → 미리보기가
+    항상 홈 기본값이 되던 문제를, 이 서버 렌더 경로로 해결한다."""
+    # uuid.UUID 은 검증만 한다 — 비표준 표기(urn:uuid:…·{…}·대시 없는 32자)도 통과시키므로
+    # 정규화한 문자열(sid)을 DB 조회·링크·HTML 에 일관되게 쓴다(원본 story_id 를 그대로 쓰면
+    # 비표준 표기가 그대로 HTML 에 박힌다). sid 는 36자 정규형이라 본질적으로 HTML/JS 안전.
+    try:
+        sid = str(uuid.UUID(story_id))
+    except (ValueError, AttributeError, TypeError):
+        return RedirectResponse("/")
+    try:
+        from services.db import get_db
+        resp = (
+            get_db().table("stories")
+            .select("id,category,body,arweave_tx_id")
+            .eq("id", sid).limit(1).execute()
+        )
+    except Exception as e:
+        logger.warning(f"[share] story 조회 실패 {sid}: {e!r}")
+        return RedirectResponse("/")
+    if not resp.data:
+        return RedirectResponse("/")
+
+    s = resp.data[0]
+    from services.archive import PENDING_MARKER
+    sealed = bool(s.get("arweave_tx_id")) and s.get("arweave_tx_id") != PENDING_MARKER
+    label = "따뜻한 선행" if s.get("category") == "kindness" else "인류애가 흔들리는 사건"
+    title = f"{'🗄 박제됨 · ' if sealed else ''}{label} — Heart & Critique"
+    raw = " ".join((s.get("body") or "").split())
+    desc = (raw[:140] + "…") if len(raw) > 140 else raw
+    if not desc:
+        desc = "AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제"
+
+    base = _public_url(request).rstrip("/")
+    # 사람 브라우저가 실제로 가는 곳은 항상 상대 해시 라우트(UUID 만 들어가 안전).
+    # Host 헤더(비신뢰)를 능동적 컨텍스트(JS/refresh)에 넣지 않는다 — og:url 만 절대경로.
+    target = f"/#story={sid}"
+    t = html.escape(title, quote=True)
+    d = html.escape(desc, quote=True)
+    og_url = html.escape(f"{base}/s/{sid}", quote=True)
+    page = (
+        '<!doctype html><html lang="ko"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{t}</title><meta name=\"description\" content=\"{d}\">"
+        '<meta property="og:type" content="article">'
+        '<meta property="og:site_name" content="Heart &amp; Critique">'
+        f'<meta property="og:title" content="{t}">'
+        f'<meta property="og:description" content="{d}">'
+        f'<meta property="og:url" content="{og_url}">'
+        '<meta name="twitter:card" content="summary">'
+        f'<meta name="twitter:title" content="{t}">'
+        f'<meta name="twitter:description" content="{d}">'
+        f'<link rel="canonical" href="{target}">'
+        f'<meta http-equiv="refresh" content="0; url={target}">'
+        f"<script>location.replace('{target}');</script></head>"
+        '<body style="font-family:sans-serif;padding:2rem;color:#555">'
+        f'이 글로 이동 중… <a href="{target}">바로가기</a></body></html>'
+    )
+    return HTMLResponse(page)
 
 
 # ── 프론트엔드 서빙 ────────────────────────────────────────────────────────

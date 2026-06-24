@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Heart &amp; Critique — 시간의 문지기</title>
+<meta name="description" content="AI 사냥개가 실시간 뉴스에서 따뜻한 선행과 대기업 비위를 건지고, 인간의 투표로 Arweave에 영구 박제하는 타임캡슐 아카이브."/>
+<meta property="og:type" content="website"/>
+<meta property="og:site_name" content="Heart &amp; Critique"/>
+<meta property="og:title" content="Heart &amp; Critique — 시간의 문지기"/>
+<meta property="og:description" content="AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제"/>
+<meta name="twitter:card" content="summary"/>
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 모든 이야기" href="/feed/all.xml"/>
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 박제된 이야기" href="/feed/archived.xml"/>
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 언론 격차 큰 이야기" href="/feed/extreme.xml"/>
@@ -708,6 +714,20 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .chip-badge { display: inline-block; background: var(--seal-wax); color: #fff;
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 700; padding: 1px 5px;
   border-radius: var(--r-full); margin-left: 4px; min-width: 14px; text-align: center; vertical-align: middle; }
+/* 이야기 검색 박스 — 헤더에서 한 줄을 통째로 차지(전체 폭) */
+.list-search { flex: 1 1 100%; display: flex; align-items: center; gap: 8px;
+  background: var(--bg-card-2); border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  padding: 7px 14px; transition: border-color var(--t-base); }
+.list-search:focus-within { border-color: var(--text); }
+.list-search-icon { font-size: var(--fs-sm); opacity: .7; flex-shrink: 0; }
+.list-search-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  font-family: var(--font-sans); font-size: var(--fs-base); color: var(--text); }
+.list-search-input::placeholder { color: var(--muted); }
+.list-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.list-search-clear { flex-shrink: 0; border: none; background: transparent; color: var(--muted);
+  cursor: pointer; font-size: var(--fs-base); line-height: 1; padding: 2px 6px; border-radius: var(--r-full); }
+.list-search-clear:hover { color: var(--text); background: var(--bg-2); }
+.search-status { flex: 1 1 100%; margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); }
 
 /* ── 발행소 기록(접이식 통계 대시보드) ───────────────────────────────────── */
 .dash-collapse {
@@ -769,6 +789,37 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .feed-links a { color: var(--accent-1); text-decoration: none; }
 .feed-links a:hover { text-decoration: underline; }
 
+/* 박제 비용 · 지갑 · 후원 */
+.wallet-box { margin-top: var(--sp-4); padding: 13px 15px; background: var(--bg-card-2);
+  border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--fs-sm); }
+.wallet-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.wallet-grid { margin-top: 10px; display: grid; gap: 6px; }
+.wallet-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.wallet-row .wlabel { color: var(--muted); }
+.wallet-row .wval { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 700; }
+.wallet-donate { margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--border); }
+.wallet-donate .wlabel { color: var(--muted); font-size: var(--fs-xs); }
+.donate-addr { margin-top: 7px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.donate-addr code { font-family: var(--font-mono); font-size: var(--fs-xs); word-break: break-all;
+  background: var(--bg-card); padding: 5px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  color: var(--accent-1); flex: 1 1 240px; }
+.copy-btn { appearance: none; cursor: pointer; border: 1px solid var(--border-strong);
+  background: var(--bg-card); color: var(--fg); border-radius: var(--radius-sm); padding: 5px 11px;
+  font-size: var(--fs-xs); font-weight: 600; }
+.copy-btn:hover { border-color: var(--accent-1); }
+.wallet-explorer { display: inline-block; margin-top: 9px; color: var(--accent-1);
+  text-decoration: none; font-size: var(--fs-xs); }
+.wallet-explorer:hover { text-decoration: underline; }
+.wallet-box.testnet { border-style: dashed; }
+.wallet-row-hl { padding: 5px 8px; margin: 2px -8px; background: var(--archive-bg); border-radius: 6px; }
+.wallet-row-hl .wlabel { color: var(--archive-fg); font-weight: 700; }
+.wallet-row-hl .wval { color: var(--archive-fg); font-size: 1.05em; }
+.wallet-row-hl .wval.wallet-empty { color: var(--err); }
+.wallet-transparency { margin-top: 9px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.55; }
+.wallet-note { margin-top: 10px; padding: 9px 11px; background: var(--bg-card-2); border: 1px solid var(--border);
+  border-radius: 7px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.6; }
+.wallet-note:empty { display: none; }
+
 /* ── Status / Spinner ─────────────────────────────────────────────────────── */
 .status { font-size: var(--fs-sm); opacity: .8; }
 .status:empty { display: none; }
@@ -826,7 +877,8 @@ a { color: inherit; }
 
 /* ── 접근성: 키보드 포커스 링 (포인터 클릭엔 미노출) ── */
 button:focus-visible, a:focus-visible, .stat-tile:focus-visible,
-summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
+summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
+.cit-archive:focus-visible {
   outline: 2px solid var(--accent-1); outline-offset: 2px; border-radius: var(--r-sm);
 }
 
@@ -1269,11 +1321,15 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <span class="badge hidden" id="story-gap-badge"></span>
         <span class="muted text-sm" id="story-time"></span>
         <span class="muted text-sm" id="story-model"></span>
+        <button class="btn-sm btn-outline btn-share" id="btn-share" style="margin-left:auto"
+                title="이 글의 링크 공유" aria-label="이 글의 링크 공유">🔗 공유</button>
+        <button class="btn-sm btn-outline btn-receipt" id="btn-receipt" style="margin-left:6px"
+                title="이 글을 QR 영수증 이미지로 저장" aria-label="이 글을 QR 영수증 이미지로 저장">🧾 영수증</button>
       </div>
 
       <!-- 격차 알림 (medium 이상일 때 표시) -->
       <div class="gap-alert hidden" id="gap-alert">
-        <span class="gap-alert-icon" id="gap-alert-icon">🔍</span>
+        <span class="gap-alert-icon" id="gap-alert-icon" aria-hidden="true">🔍</span>
         <div class="gap-alert-body">
           <strong id="gap-alert-title">언론 보도 격차</strong>
           <span id="gap-alert-detail"></span>
@@ -1305,7 +1361,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         </div>
         <!-- 삭제된 출처 알림 (deleted_count > 0일 때만 표시) -->
         <div class="deletion-alert hidden" id="deletion-alert">
-          <span class="deletion-alert-icon">🚨</span>
+          <span class="deletion-alert-icon" aria-hidden="true">🚨</span>
           <div class="deletion-alert-body">
             <strong id="deletion-alert-title">출처가 삭제되었습니다</strong>
             <span id="deletion-alert-detail">이 사연의 흔적이 지워지고 있습니다. 박제 가치가 큽니다.</span>
@@ -1316,7 +1372,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
 
       <!-- 박제 hero -->
       <a class="archive-hero hidden" id="archive-hero" target="_blank" rel="noopener">
-        <div class="archive-icon">🗄</div>
+        <div class="archive-icon" aria-hidden="true">🗄</div>
         <div class="archive-text">
           <div class="lbl" id="archive-lbl">Arweave 영구 박제됨</div>
           <div class="tx" id="archive-tx"></div>
@@ -1365,15 +1421,23 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
         <button class="chip" data-filter="archived">🗄 박제됨</button>
       </div>
+      <div class="list-search">
+        <span class="list-search-icon" aria-hidden="true">🔍</span>
+        <input type="search" id="story-search" class="list-search-input" autocomplete="off"
+               enterkeyhint="search" placeholder="이야기 검색 — 본문 키워드" aria-label="이야기 검색">
+        <button class="list-search-clear" id="story-search-clear" type="button" hidden aria-label="검색어 지우기">✕</button>
+      </div>
+      <p class="search-status" id="search-status" role="status" aria-live="polite" hidden></p>
     </div>
     <div id="story-list">
       <div class="empty">
-        <div class="empty-icon">📜</div>
+        <div class="empty-icon" aria-hidden="true">📜</div>
         <div class="empty-text">아직 이야기가 없습니다.</div>
+        <p class="muted text-sm" style="margin-top:8px">위의 <strong>AI 사냥개 호출</strong> 버튼을 눌러 첫 이야기를 찾아보세요.</p>
       </div>
     </div>
     <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
-      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;">더 보기</button>
+      <button class="btn-sm btn-outline" id="load-more-btn" style="width: 100%; max-width: 200px;" aria-controls="story-list" aria-label="더 많은 이야기 불러오기">더 보기</button>
     </div>
   </div>
 
@@ -1434,8 +1498,33 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <a href="/feed/extreme.xml">언론 격차</a>
         <a href="/feed/deleted.xml">사라진 출처</a>
       </div>
+
     </div>
   </details>
+
+  <!-- 박제 경제 · 후원 (실시간, network-aware) — 접지 않는 최하단 투명 공개 -->
+  <div class="wallet-box" id="wallet-box">
+    <div class="wallet-head">
+      <span class="section-title">💰 박제 경제 · 후원 <span class="muted text-xs" style="font-weight:400">(실시간 · 누구나 검증 가능)</span></span>
+      <span class="muted text-xs" id="wallet-net"></span>
+    </div>
+    <div class="wallet-grid">
+      <div class="wallet-row"><span class="wlabel">박제 1건 비용 (~10KB)</span><span class="wval" id="wallet-cost">·</span></div>
+      <div class="wallet-row"><span class="wlabel">박제 가용 잔액 (Irys 선불)</span><span class="wval" id="wallet-irys">·</span></div>
+      <div class="wallet-row wallet-row-hl" title="Irys 선불 + 온체인 지갑 잔액을 합한 박제 예산 ÷ 1건 비용"><span class="wlabel">📦 현재 잔액으로 박제 가능</span><span class="wval" id="wallet-remaining">·</span></div>
+      <div class="wallet-row"><span class="wlabel">지갑 잔액 (온체인)</span><span class="wval" id="wallet-eth">·</span></div>
+    </div>
+    <div class="wallet-note" id="wallet-note"></div>
+    <div class="wallet-donate">
+      <div class="wlabel">🪙 후원 주소 — 이 주소로 ETH 를 보내면 박제 자금이 충전됩니다</div>
+      <div class="donate-addr">
+        <code id="wallet-addr">불러오는 중…</code>
+        <button class="copy-btn" id="wallet-copy" title="주소 복사" type="button">복사</button>
+      </div>
+      <a id="wallet-explorer" class="wallet-explorer" href="#" target="_blank" rel="noopener" hidden>🔗 익스플로러에서 잔액·모든 거래 내역 검증</a>
+      <div class="wallet-transparency">이 주소의 잔액과 모든 입·출금은 블록체인에 공개되어 누구나 익스플로러에서 직접 검증할 수 있습니다. 후원은 오직 박제 자금으로만 쓰입니다.</div>
+    </div>
+  </div>
 
 </div>
 
@@ -1449,6 +1538,7 @@ let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드
 let allStories = [];
 let currentFilter = 'all';
 let displayLimit = 10;
+let searchQuery = '';          // 서버 검색어(본문·시적 사유 부분일치). 비면 일반 목록.
 let archivePollTimer = null;
 
 // ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
@@ -1524,6 +1614,7 @@ async function init() {
   // 첫 화면 공백을 없앤다 — 아래 auth 초기화가 느리거나 실패해도 데이터는 보인다.
   loadStoryList();
   loadStats();
+  loadWallet();
   try {
     cfg = await fetch('/api/config').then(r => r.json());
     if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
@@ -1580,14 +1671,409 @@ async function init() {
   }
 }
 
-// ── 해시 라우팅 ────────────────────────────────────────────────────────────
+// ── 해시 라우팅 + 특정 글 공유 ──────────────────────────────────────────────
 function handleHashRoute() {
-  const m = window.location.hash.match(/^#story=([\w-]+)/);
+  const hash = window.location.hash;
+  const m = hash.match(/^#story=([\w-]+)/);
   if (m && m[1]) {
+    // 이미 그 글을 보고 있으면(우리가 setStoryHash 로 주소만 바꾼 경우 등) 재요청 생략.
+    const cur = currentStory?.id || currentStory?.story_id;
+    if (cur === m[1]) return;
     loadAndShowStory(m[1]);
+    return;
+  }
+  // #story= 가 아닌 해시(홈으로 뒤로가기 등): 단, Supabase OAuth 토큰 조각(#access_token=…)은
+  // 건드리지 않는다(로그인 복귀 흐름 보호 — detectSessionInUrl 가 소비하게 둔다).
+  if (hash.indexOf('access_token') !== -1) return;
+  // 열려 있던 글 카드를 닫아 주소창(홈)과 화면 상태를 일치시킨다(stale 카드 방지).
+  if (currentStory) {
+    currentStory = null;
+    document.getElementById('story-card')?.classList.add('hidden');
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
+// pushState 로 바뀐 주소를 뒤로/앞으로 가기 했을 때도 해당 글을 다시 연다.
+window.addEventListener('popstate', handleHashRoute);
+
+// 글을 열 때 주소창을 #story=<id> 로 맞춰 '현재 글' 자체가 공유 가능한 링크가 되게 한다.
+// (push/replace 모두 hashchange 가 발화하지 않아 같은 글을 두 번 부르지 않는다.)
+function setStoryHash(id) {
+  if (!id) return;
+  const target = '#story=' + id;
+  if (window.location.hash === target) return;
+  // 첫 글 열기(주소에 아직 #story= 없음): replaceState 로 '제자리 교체' → 한 번의 뒤로가기로
+  // 앱을 빠져나간다(홈에 머무른 빈 항목이 끼지 않게). 이미 다른 글을 보던 중이면 pushState 로
+  // 쌓아 뒤로/앞으로가 글 사이를 오가게 한다.
+  const fromStory = /^#story=/.test(window.location.hash);
+  try {
+    if (fromStory) history.pushState(null, '', target);
+    else history.replaceState(null, '', target);
+  } catch (_) { window.location.hash = target; }
+}
+
+// 🔗 공유: 글별 OG 미리보기가 붙는 영속 링크(/s/<id>)를 복사하거나 네이티브 공유 시트로.
+async function shareStory() {
+  const id = currentStory?.id || currentStory?.story_id;
+  if (!id) { toast('공유할 글이 없습니다', 'error'); return; }
+  const url = window.location.origin + '/s/' + id;
+  const label = (currentStory?.category === 'kindness') ? '따뜻한 선행' : '인류애가 흔들리는 사건';
+  const title = label + ' — Heart & Critique';
+  if (navigator.share) {
+    try { await navigator.share({ title, url }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; /* 그 외엔 복사로 폴백 */ }
+  }
+  try {
+    await navigator.clipboard.writeText(url);
+    toast('🔗 링크가 복사되었습니다', 'success');
+  } catch (_) {
+    window.prompt('이 링크를 복사하세요', url);
+  }
+}
+
+// ── 🧾 영수증 발행: 글을 QR 코드 + 영수증체 본문이 담긴 PNG 이미지로 저장 ──────────
+// 순수 <canvas> 로 영수증을 그린다(외부 라이브러리·DOM 오염 없음). QR 인코더만
+// 클릭 시점에 1회 지연 로드(qrcode-generator, jsdelivr — supabase 와 같은 CDN).
+// 박제된 글이면 QR 은 Arweave 영구 원본, 아니면 글 영속링크(/s/<id>)를 가리킨다.
+let _qrLibPromise = null;
+function ensureQrLib() {
+  if (window.qrcode) return Promise.resolve(true);
+  if (_qrLibPromise) return _qrLibPromise;
+  _qrLibPromise = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js';
+    // SRI: CDN 변조/MITM 시 실행 거부(로드 실패 → 링크 박스로 우아하게 폴백).
+    s.integrity = 'sha384-8FWZA6BGMXhsfO+BLtrJK0We6gg5o1JyO8xQm6peWDEUs17ACA5ziE/NIAkl9z2k';
+    s.crossOrigin = 'anonymous';
+    s.async = true;
+    s.onload = () => resolve(!!window.qrcode);
+    s.onerror = () => { _qrLibPromise = null; resolve(false); };
+    document.head.appendChild(s);
+  });
+  return _qrLibPromise;
+}
+
+// 텍스트 → QR 모듈 불리언 매트릭스. 실패 시 null(영수증은 링크 박스로 폴백).
+function buildQrMatrix(text) {
+  const s = String(text);
+  // 비정상적으로 긴 입력(오염된 tx_id 등)은 QR 용량을 넘겨 '그려지지만 못 읽는' 코드가 된다.
+  // 그런 경우는 아예 null 로 돌려 링크 박스 폴백을 타게 한다(정상 URL 은 ~70자).
+  if (s.length > 1200) { console.warn('[receipt QR] 입력이 너무 깁니다 — 링크 박스로 폴백:', s.length); return null; }
+  try {
+    const qr = window.qrcode(0, 'M');   // typeNumber 0 = 길이에 맞춰 자동 버전, EC 레벨 M
+    qr.addData(s);
+    qr.make();
+    const n = qr.getModuleCount();
+    const m = [];
+    for (let r = 0; r < n; r++) {
+      const row = [];
+      for (let col = 0; col < n; col++) row.push(qr.isDark(r, col));
+      m.push(row);
+    }
+    return m;
+  } catch (e) { console.warn('[receipt QR] 생성 실패:', e); return null; }
+}
+
+// 코드포인트 단위 줄바꿈(한글: 단어 내 공백이 없어 글자 단위 wrap 필수).
+function wrapLines(ctx, text, maxW) {
+  const out = [];
+  const paras = String(text ?? '').split(/\r?\n/);
+  for (const para of paras) {
+    if (para === '') { out.push(''); continue; }
+    let line = '';
+    for (const ch of Array.from(para)) {
+      const test = line + ch;
+      if (line !== '' && ctx.measureText(test).width > maxW) {
+        out.push(line);
+        line = (ch === ' ') ? '' : ch;   // 줄머리 공백은 버린다
+      } else {
+        line = test;
+      }
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function fmtReceiptDate(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function dataUrlToBlob(dataUrl) {
+  const bin = atob(dataUrl.split(',')[1]);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: 'image/png' });
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    // toBlob 이 (드물게) null 을 주면 reject 하지 말고 toDataURL 로 폴백한다.
+    const fallback = () => {
+      try { resolve(dataUrlToBlob(canvas.toDataURL('image/png'))); }
+      catch (e) { reject(e); }
+    };
+    if (canvas.toBlob) canvas.toBlob((b) => b ? resolve(b) : fallback(), 'image/png');
+    else fallback();
+  });
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  // iOS 등 느린 환경에서 다운로드가 시작되기 전에 URL 이 무효화되지 않도록 넉넉히.
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// 모바일(특히 iOS Safari)은 <a download> 를 무시하고 이미지를 뷰어로 열어버린다.
+// 터치 기기에서 파일 공유 시트(사진/파일에 저장)가 가능하면 그쪽을 우선하고,
+// 데스크톱·미지원·공유 실패 시엔 일반 다운로드로 폴백한다. 반환: 'shared'|'downloaded'|'aborted'.
+async function saveReceiptImage(blob, filename) {
+  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const touch = (navigator.maxTouchPoints || 0) > 0;
+  try {
+    if ((coarse || touch) && navigator.canShare && typeof File === 'function') {
+      const file = new File([blob], filename, { type: 'image/png' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: 'Heart & Critique 영수증' });
+        return 'shared';
+      }
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return 'aborted';  // 사용자가 공유 취소 → 중복 다운로드 안 함
+    /* 그 외(미지원·권한·제스처 만료) → 아래 다운로드로 폴백 */
+  }
+  downloadBlob(blob, filename);
+  return 'downloaded';
+}
+
+// 영수증 한 장을 그려 PNG Blob 으로 반환. 블록 리스트로 높이를 먼저 계산한 뒤
+// 그 높이에 맞춰 캔버스를 잡고 한 번에 그린다(본문 길이에 따라 세로가 늘어남).
+async function renderReceiptBlob(data) {
+  const W = 384, PAD = 26, CW = W - PAD * 2;
+  const PAPER = '#fbfaf7', INK = '#1a1a1a', FAINT = '#6a6258', RULE = '#a39c8f';
+  const SCALE = 3;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+
+  // 블록 누적: 측정 단계에서는 기본 캔버스(스케일 1) 위에서 measureText 로 폭을 잰다.
+  const blocks = [];
+  let H = 0;
+  const push = (h, paint) => { blocks.push({ top: H, paint }); H += h; };
+
+  const addGap = (h) => push(h, () => {});
+  const addRule = (dashed) => push(16, (y) => {
+    ctx.strokeStyle = RULE; ctx.lineWidth = 1;
+    ctx.setLineDash(dashed ? [3, 3] : []);
+    ctx.beginPath(); ctx.moveTo(PAD, y + 8); ctx.lineTo(W - PAD, y + 8); ctx.stroke();
+    ctx.setLineDash([]);
+  });
+  const addCenter = (text, font, lineH, color) => {
+    push(lineH, (y) => {
+      ctx.font = font; ctx.fillStyle = color || INK;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(text, W / 2, y + lineH * 0.74);
+    });
+  };
+  const addCenterWrap = (text, font, lineH, color) => {
+    ctx.font = font;
+    const lines = wrapLines(ctx, text, CW);
+    push(lines.length * lineH, (y) => {
+      ctx.font = font; ctx.fillStyle = color || INK;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+      lines.forEach((ln, i) => ctx.fillText(ln, W / 2, y + lineH * 0.74 + i * lineH));
+    });
+  };
+  const addParagraph = (text, font, lineH, color, maxLines) => {
+    ctx.font = font;
+    let lines = wrapLines(ctx, text, CW);
+    // 브라우저 캔버스 최대 높이(~32767px) 초과 방지용 안전망. 본문이 비정상적으로 길면
+    // 줄 수를 잘라 생략 표식을 붙인다(정상 문학 스토리는 수십 줄이라 발동하지 않음).
+    if (maxLines && lines.length > maxLines) lines = lines.slice(0, maxLines).concat('…(본문 일부 생략)');
+    push(lines.length * lineH, (y) => {
+      ctx.font = font; ctx.fillStyle = color || INK;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      lines.forEach((ln, i) => ctx.fillText(ln, PAD, y + lineH * 0.76 + i * lineH));
+    });
+  };
+  const addKV = (label, value) => {
+    const font = '12px "Courier New", monospace', lineH = 18;
+    ctx.font = font;
+    const avail = Math.max(70, CW - ctx.measureText(label).width - 12);
+    const vlines = wrapLines(ctx, value, avail);
+    push(lineH * vlines.length, (y) => {
+      ctx.font = font; ctx.fillStyle = INK; ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'left'; ctx.fillText(label, PAD, y + lineH * 0.72);
+      ctx.textAlign = 'right';
+      vlines.forEach((ln, i) => ctx.fillText(ln, W - PAD, y + lineH * 0.72 + i * lineH));
+    });
+  };
+  const addQr = (matrix) => {
+    if (!matrix) {  // QR 라이브러리 로드 실패 시: 링크 박스로 폴백
+      push(66, (y) => {
+        ctx.strokeStyle = INK; ctx.lineWidth = 1.5;
+        ctx.strokeRect((W - 200) / 2, y + 6, 200, 52);
+        ctx.fillStyle = INK; ctx.font = '11px "Courier New", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('QR 생성 실패 — 아래 링크로 접속', W / 2, y + 36);
+      });
+      return;
+    }
+    const n = matrix.length, quiet = 4, target = 196;
+    const ms = Math.max(2, Math.floor(target / (n + quiet * 2)));
+    const dim = ms * (n + quiet * 2);
+    push(dim + 8, (y) => {
+      const x0 = (W - dim) / 2, top = y + 4;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(x0, top, dim, dim);
+      ctx.fillStyle = '#000000';
+      for (let r = 0; r < n; r++)
+        for (let col = 0; col < n; col++)
+          if (matrix[r][col]) ctx.fillRect(x0 + (col + quiet) * ms, top + (r + quiet) * ms, ms, ms);
+    });
+  };
+  const addBarcode = (seed) => {
+    // 글 id 로 결정적 가짜 바코드(영수증 분위기). LCG 로 막대 폭·명암 생성.
+    let st = 0;
+    for (const ch of String(seed)) st = (st * 31 + ch.charCodeAt(0)) >>> 0;
+    st = st || 12345;
+    const rnd = () => { st = (st * 1103515245 + 12345) >>> 0; return (st >>> 16) / 65536; };
+    const segs = []; let total = 0;
+    while (total < CW - 2) { const w = 1 + Math.floor(rnd() * 3); segs.push({ w, dark: rnd() > 0.45 }); total += w; }
+    push(40, (y) => {
+      let cx = PAD + (CW - total) / 2;
+      ctx.fillStyle = INK;
+      for (const sg of segs) { if (sg.dark) ctx.fillRect(cx, y + 4, sg.w, 30); cx += sg.w; }
+    });
+  };
+
+  // ── 영수증 구성 ──
+  addGap(16);
+  addCenter('HEART & CRITIQUE', '700 21px "Noto Serif KR", serif', 26);
+  addCenter('영구 박제 아카이브 · RECEIPT', '11px "Courier New", monospace', 16, FAINT);
+  addGap(6);
+  addRule(false);
+  addGap(12);
+  addQr(data.qrMatrix);
+  addGap(4);
+  addCenter(data.qrCaption, '11px "Courier New", monospace', 16, INK);
+  addCenterWrap(data.qrTarget, '10px "Courier New", monospace', 14, FAINT);
+  addGap(10);
+  addRule(true);
+  addGap(8);
+  data.meta.forEach(([k, v]) => addKV(k, v));
+  addGap(8);
+  addRule(true);
+  addGap(8);
+  addCenter('— 본문 / STORY —', '11px "Courier New", monospace', 16, FAINT);
+  addGap(6);
+  addParagraph(data.body, '12.5px "Noto Sans KR", sans-serif', 18.5, INK, 520);
+  addGap(12);
+  addRule(true);
+  addGap(8);
+  addCenterWrap(data.footerNote, '11px "Courier New", monospace', 15, INK);
+  addGap(8);
+  addBarcode(data.id);
+  addCenter('NO. ' + String(data.id).slice(0, 8).toUpperCase(), '10px "Courier New", monospace', 14, INK);
+  addGap(6);
+  addCenterWrap('발행 ' + fmtReceiptDate(new Date().toISOString()) + ' · ' + data.origin, '9px "Courier New", monospace', 13, FAINT);
+  addGap(18);
+
+  // ── 캔버스 확정 후 실제 드로잉(고해상도) ──
+  canvas.width = Math.round(W * SCALE);
+  canvas.height = Math.round(H * SCALE);
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+  ctx.fillStyle = PAPER; ctx.fillRect(0, 0, W, H);
+  blocks.forEach((b) => b.paint(b.top));
+
+  // 위·아래 톱니(영수증 절취선) — destination-out 으로 종이를 투명하게 잘라낸다.
+  const tw = 12, th = 8;
+  ctx.globalCompositeOperation = 'destination-out';
+  ctx.fillStyle = '#000';
+  ctx.beginPath();
+  for (let x = 0; x < W; x += tw) { ctx.moveTo(x, 0); ctx.lineTo(x + tw / 2, th); ctx.lineTo(x + tw, 0); ctx.closePath(); }
+  for (let x = 0; x < W; x += tw) { ctx.moveTo(x, H); ctx.lineTo(x + tw / 2, H - th); ctx.lineTo(x + tw, H); ctx.closePath(); }
+  ctx.fill();
+  ctx.globalCompositeOperation = 'source-over';
+
+  return canvasToBlob(canvas);
+}
+
+let _receiptBusy = false;
+async function makeReceipt() {
+  const s = currentStory;
+  if (!s) { toast('영수증으로 만들 글이 없습니다', 'error'); return; }
+  if (_receiptBusy) return;   // 버튼 disabled 와 별개로, 프로그램적 동시 호출까지 차단
+  _receiptBusy = true;
+  const btn = document.getElementById('btn-receipt');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 발행 중…';
+  try {
+    const id = s.id || s.story_id;
+    const origin = window.location.origin;
+    const permalink = origin + '/s/' + id;
+    const archived = !!s.arweave_tx_id;
+    const qrTarget = archived ? (gatewayUrl(s.arweave_tx_id) || permalink) : permalink;
+    const qrCaption = archived ? '스캔 → Arweave 영구 원본' : '스캔 → 이 글 보기';
+
+    // 폰트 로드 + QR 라이브러리 로드를 함께 대기(캔버스 한글 렌더 보장).
+    // Font Loading API 가 없는 구형 브라우저는 짧게 기다려 웹폰트가 붙을 틈을 준다.
+    const fontReady = (document.fonts && document.fonts.ready)
+      ? document.fonts.ready
+      : new Promise((r) => setTimeout(r, 150));
+    const [, qrOk] = await Promise.all([fontReady, ensureQrLib()]);
+    const qrMatrix = qrOk ? buildQrMatrix(qrTarget) : null;
+
+    const threshold = s.effective_threshold ?? s.default_threshold ?? 3;
+    const sources = (s.citations && s.citations.length) || s.citation_count || 0;
+    const deleted = s.deleted_count || 0;
+    const meta = [
+      ['분류 / TYPE', s.category === 'kindness' ? '따뜻한 선행' : '인류애가 흔들리는 사건'],
+      ['발행 / ISSUED', fmtReceiptDate(s.created_at)],
+      ['글번호 / NO.', String(id).slice(0, 8).toUpperCase()],
+      ['출처 / SOURCES', deleted ? `${sources}건 (삭제 ${deleted})` : `${sources}건`],
+    ];
+    if (archived) {
+      const tx = String(s.arweave_tx_id);
+      const txShort = tx.length > 22 ? tx.slice(0, 12) + '…' + tx.slice(-6) : tx;
+      const net = isPermanent() ? 'mainnet · 영구' : 'devnet · 임시';
+      meta.push(['박제 / SEALED', `${txShort}`]);
+      meta.push(['체인 / CHAIN', `Arweave (${net})`]);
+    } else {
+      meta.push(['투표 / VOTES', `${s.vote_count || 0} / ${threshold} 표`]);
+      meta.push(['박제 / SEALED', '미박제 — 투표 진행 중']);
+    }
+    const footerNote = archived
+      ? '★ 이 영수증은 블록체인에 영구 박제된 기록의 사본입니다 ★'
+      : '☆ 아직 박제 전 — 공론화 투표가 모이면 Arweave 에 영구 보관됩니다 ☆';
+
+    const blob = await renderReceiptBlob({
+      id, origin, qrTarget, qrCaption, qrMatrix,
+      meta, body: s.body || '', footerNote,
+    });
+    const how = await saveReceiptImage(blob, `heart-critique-receipt-${String(id).slice(0, 8)}.png`);
+    if (how === 'aborted') {
+      /* 사용자가 공유 시트를 닫음 — 조용히 종료 */
+    } else if (!qrMatrix) {
+      // QR 생성에 실패해 링크 박스로 대체된 경우, 성공 토스트가 오해를 주지 않게 분명히 알린다.
+      toast('🧾 영수증 저장됨 — QR 생성 실패로 링크 텍스트로 대체했습니다', 'info');
+    } else {
+      toast(how === 'shared' ? '🧾 영수증을 공유했습니다' : '🧾 영수증 이미지를 저장했습니다', 'success');
+    }
+  } catch (e) {
+    console.error('[receipt]', e);
+    toast('영수증 생성에 실패했습니다', 'error');
+  } finally {
+    _receiptBusy = false;
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
 
 // ── 대시보드 ───────────────────────────────────────────────────────────────
 async function loadStats() {
@@ -1620,7 +2106,13 @@ async function loadStats() {
     const h = d.hunter || {};
     const lines = [];
     if (th.dynamic) {
-      lines.push(`⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) · 박제 임계값 <b>${th.base}</b>표`);
+      let tline = `⚖️ 활성 투표자 <b>${th.active_voters}</b>명 (최근 7일) · 박제 임계값 <b>${th.base}</b>표`;
+      // 발행량 기반 난이도 보정(비트코인 retarget 풍): 최근 창의 생성 수로 임계값 ±조정
+      if (th.issuance_adjust) {
+        const sign = th.issuance_adjust > 0 ? '+' : '';
+        tline += ` <span style="opacity:.7">⛏ 최근 발행 ${th.issuance_count}건 → 난이도 ${sign}${th.issuance_adjust}</span>`;
+      }
+      lines.push(tline);
     }
     if (h.enabled) {
       const next = h.next_hunt_at ? new Date(h.next_hunt_at) : null;
@@ -1653,6 +2145,88 @@ async function loadStats() {
     console.error('[stats] load failed', e);
   }
 }
+
+// ── 박제 비용 · 지갑 잔액 · 후원 주소 (실시간, network-aware) ─────────────────
+async function loadWallet() {
+  const box = document.getElementById('wallet-box');
+  if (!box) return;
+  try {
+    const r = await fetch('/api/wallet');
+    if (!r.ok) throw new Error('http ' + r.status);
+    const w = await r.json();
+    const net = w.network || 'devnet';
+    const isMain = net === 'mainnet';
+    box.classList.toggle('testnet', !isMain);
+    const netEl = document.getElementById('wallet-net');
+    if (netEl) netEl.textContent = isMain ? 'mainnet · 영구' : (net + ' · 테스트넷');
+
+    const fmtEth = (v) => {
+      if (v === null || v === undefined || v === '') return '—';
+      const n = Number(v);
+      if (!isFinite(n)) return '—';
+      const u = isMain ? 'ETH' : 'SepoliaETH';
+      // 아주 작은 값은 유효숫자를 더 보여준다
+      return (n === 0 ? '0' : (n < 1e-6 ? n.toExponential(2) : n.toPrecision(4))) + ' ' + u;
+    };
+    const cost = w.price_per_10kb && w.price_per_10kb.eth ? w.price_per_10kb.eth : null;
+    document.getElementById('wallet-cost').textContent = w.error ? '조회 불가' : fmtEth(cost);
+    document.getElementById('wallet-irys').textContent = w.error ? '조회 불가' : fmtEth(w.irys_balance);
+    document.getElementById('wallet-eth').textContent  = w.error ? '조회 불가' : fmtEth(w.wallet_eth);
+
+    // 현재 잔액으로 박제 가능한 글 수 — uploader 계산값 우선, 없으면 잔액/비용으로 폴백 계산.
+    const remEl = document.getElementById('wallet-remaining');
+    if (remEl) {
+      let n = (typeof w.archives_remaining === 'number') ? w.archives_remaining : null;
+      if (n === null && !w.error) {
+        // 폴백: (Irys 선불 + 온체인 지갑) ÷ 비용 — uploader 값이 없을 때만(구버전).
+        const prepaid = Number(w.irys_balance) || 0;
+        const onchain = Number(w.wallet_eth) || 0;
+        const c = Number(cost);
+        if (isFinite(c) && c > 0) n = Math.floor((prepaid + onchain) / c);
+      }
+      const empty = !w.error && n !== null && n <= 0;
+      remEl.textContent = w.error ? '조회 불가'
+        : (n === null ? '—'
+          : (empty ? '0개 · 충전 필요' : '약 ' + n.toLocaleString('ko-KR') + '개'));
+      remEl.classList.toggle('wallet-empty', empty);
+    }
+
+    const addrEl = document.getElementById('wallet-addr');
+    const copyBtn = document.getElementById('wallet-copy');
+    const exp = document.getElementById('wallet-explorer');
+    if (w.donation_address) {
+      addrEl.textContent = w.donation_address;
+      if (copyBtn) copyBtn.dataset.addr = w.donation_address;
+      if (exp && w.explorer) { exp.href = w.explorer; exp.hidden = false; }
+    } else {
+      addrEl.textContent = w.error ? '지갑 주소를 조회할 수 없습니다' : '서명키 미설정';
+      if (copyBtn) copyBtn.style.display = 'none';
+    }
+
+    // '박제 가용 잔액(Irys 선불) 0' 과 '박제 가능 N개'가 모순처럼 보이는 혼란 해소 — 네트워크별 안내.
+    const noteEl = document.getElementById('wallet-note');
+    if (noteEl) {
+      noteEl.textContent = w.error ? '' : (isMain
+        ? "ℹ️ 박제 수수료는 ‘Irys 선불 잔액’에서 차감됩니다. 후원 주소로 받은 ETH를 선불로 충전한 만큼이 박제 예산이 됩니다."
+        : "ℹ️ devnet 테스트넷은 소용량 글 업로드가 무료라 ‘Irys 선불 잔액’이 0이어도 박제가 정상 진행됩니다(지금까지 정상 박제 중). 위 ‘박제 가능’ 수는 지갑 잔액을 1건 비용으로 나눈 예산 환산이며, 영구(mainnet) 박제로 전환할 때만 선불 충전이 필요합니다.");
+    }
+  } catch (e) {
+    console.error('[wallet] load failed', e);
+    const addrEl = document.getElementById('wallet-addr');
+    if (addrEl) addrEl.textContent = '지갑 정보를 불러오지 못했습니다';
+  }
+}
+
+// 후원 주소 복사
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#wallet-copy');
+  if (!btn || !btn.dataset.addr) return;
+  navigator.clipboard?.writeText(btn.dataset.addr).then(() => {
+    const old = btn.textContent;
+    btn.textContent = '복사됨 ✓';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  }).catch(() => toast('복사 실패 — 주소를 직접 선택해 복사하세요', 'error'));
+});
 
 // ── 시계열 차트 ────────────────────────────────────────────────────────────
 async function loadTimeseries() {
@@ -1844,6 +2418,8 @@ function restoreReturnStory() {
   try { sid = sessionStorage.getItem(RETURN_STORY_KEY); } catch (_) { return; }
   if (!sid) return;
   try { sessionStorage.removeItem(RETURN_STORY_KEY); } catch (_) {}
+  // 주소가 이미 특정 글 딥링크(#story=…)면 그 경로가 우선 — 복귀 글로 덮어쓰지 않는다.
+  if (/^#story=/.test(window.location.hash)) return;
   loadAndShowStory(sid);
 }
 
@@ -1852,7 +2428,8 @@ async function generateStory(btn, category) {
   const allBtns = document.querySelectorAll('.btn-gen');
   const orig = btn.innerHTML;
   allBtns.forEach(b => b.disabled = true);
-  btn.innerHTML = '<span class="spin"></span> 사냥 중…';
+  btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 사냥 중…';
   setStatus('gen-status', '');
 
   try {
@@ -1886,6 +2463,7 @@ async function generateStory(btn, category) {
     setStatus('gen-status', '실패: ' + e.message, 'err');
     toast('이야기 생성 실패', 'error');
   } finally {
+    btn.removeAttribute('aria-busy');
     btn.innerHTML = orig;
     allBtns.forEach(b => b.disabled = false);
   }
@@ -1895,6 +2473,8 @@ document.querySelectorAll('.btn-gen').forEach(btn => {
   btn.onclick = () => generateStory(btn, btn.dataset.category);
 });
 document.getElementById('btn-recheck').onclick = recheckCurrent;
+document.getElementById('btn-share').onclick = shareStory;
+document.getElementById('btn-receipt').onclick = makeReceipt;
 
 let typingTimer = null;
 
@@ -1921,6 +2501,15 @@ function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
   const textNode = document.createTextNode('');
   element.appendChild(textNode);
 
+  // 모션 최소화 선호 시 타이핑 애니메이션을 건너뛰고 본문을 즉시 표시(접근성).
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    textNode.nodeValue = restText;
+    element.classList.add('typing-done');
+    typingTimer = null;
+    if (callback) callback();
+    return;
+  }
+
   function type() {
     if (i < restText.length) {
       textNode.nodeValue += restText[i];
@@ -1938,6 +2527,7 @@ function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
 
 function showStory(s) {
   currentStory = s;
+  setStoryHash(s.id || s.story_id);   // 주소창을 이 글로 → 공유·새로고침·뒤로가기 가능
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
 
   const card = document.getElementById('story-card');
@@ -2163,7 +2753,8 @@ async function recheckCurrent() {
   const btn = document.getElementById('btn-recheck');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.setAttribute('aria-busy', 'true');
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 재검사 중';
   try {
     const r = await fetch(`/api/recheck/${currentStory.id}`, { method: 'POST' });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -2179,6 +2770,7 @@ async function recheckCurrent() {
   } catch (e) {
     toast('재검사 실패: ' + e.message, 'error');
   } finally {
+    btn.removeAttribute('aria-busy');
     btn.disabled = false;
     btn.innerHTML = orig;
   }
@@ -2264,7 +2856,7 @@ function renderVoteArea(storyId, data) {
   }
 
   if (data.vote_count >= data.threshold) {
-    btn.innerHTML = '<span class="spin"></span> Arweave 박제 진행 중…';
+    btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Arweave 박제 진행 중…';
     btn.className = 'btn-vote btn-sm';
     btn.disabled = true;
   } else if (data.already_voted) {
@@ -2289,7 +2881,7 @@ async function castVote(storyId) {
   const btn = document.getElementById('btn-vote');
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span>';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 투표 중';
   setStatus('vote-status', '');
 
   try {
@@ -2464,7 +3056,7 @@ function bytesToHex(bytes) {
 async function runVerification(txId, arweaveUrl) {
   const btn = document.getElementById('btn-verify');
   btn.disabled = true;
-  btn.innerHTML = '<span class="spin"></span> 검증 중...';
+  btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 검증 중...';
   document.getElementById('verify-steps').innerHTML = '';
   const finalEl = document.getElementById('verify-final');
   finalEl.className = 'verify-final';
@@ -2595,12 +3187,17 @@ async function runVerification(txId, arweaveUrl) {
 // ── 목록 ───────────────────────────────────────────────────────────────────
 async function loadStoryList() {
   try {
-    const resp = await fetch('/api/stories?limit=100');
+    // 검색 중이면 q 를 붙여 전체 아카이브를 서버에서 검색(부분일치). 더 넓은 limit 으로 매칭 확보.
+    const url = searchQuery
+      ? `/api/stories?limit=200&q=${encodeURIComponent(searchQuery)}`
+      : '/api/stories?limit=100';
+    const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     allStories = await resp.json();
     displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
+    updateSearchStatus();
   } catch (e) {
     console.error('[stories] load failed', e);
     // 빈 상태(=없음)와 실패(=에러)를 구분해서 사용자에게 알린다.
@@ -2672,6 +3269,24 @@ document.getElementById('bell-btn').onclick = () => {
   document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 };
 
+// 검색 상태 라인 + 지우기(✕) 버튼 토글. searchQuery 는 textContent 로만 출력(XSS 안전).
+function updateSearchStatus() {
+  const statusEl = document.getElementById('search-status');
+  const clearBtn = document.getElementById('story-search-clear');
+  if (clearBtn) clearBtn.hidden = !searchQuery;
+  if (!statusEl) return;
+  if (searchQuery) {
+    const n = allStories.length;
+    statusEl.textContent = n
+      ? `‘${searchQuery}’ 검색 결과 ${n}건${n >= 200 ? ' (최근 200건)' : ''}`
+      : `‘${searchQuery}’ 검색 결과 없음`;
+    statusEl.hidden = false;
+  } else {
+    statusEl.hidden = true;
+    statusEl.textContent = '';
+  }
+}
+
 function renderStoryList() {
   const el = document.getElementById('story-list');
   let stories = allStories;
@@ -2687,7 +3302,14 @@ function renderStoryList() {
   }
 
   if (!totalFiltered) {
-    el.innerHTML = `
+    el.innerHTML = searchQuery
+      ? `
+      <div class="empty">
+        <div class="empty-icon">🔍</div>
+        <div class="empty-text">‘${escHtml(searchQuery)}’에 대한 검색 결과가 없습니다.</div>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.getElementById('story-search-clear').click()">검색 지우기</button></div>
+      </div>`
+      : `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
@@ -2700,7 +3322,7 @@ function renderStoryList() {
   const defaultTh = cfg?.vote_threshold || 3;
   const lastSeen = getLastSeen();
   el.innerHTML = '';
-  const useFeature = (currentFilter === 'all');   // 전체 탭에서만 첫 글을 1면 피처로
+  const useFeature = (currentFilter === 'all' && !searchQuery);   // 전체 탭·비검색일 때만 첫 글을 1면 피처로
 
   visibleStories.forEach((s, idx) => {
     const catCls   = s.category === 'kindness' ? 'is-kindness' : 'is-critique';
@@ -2799,6 +3421,32 @@ document.querySelectorAll('.chip').forEach(chip => {
   };
 });
 
+// ── 이야기 검색 (디바운스 → 서버 검색) ───────────────────────────────────────
+(() => {
+  const input = document.getElementById('story-search');
+  const clearBtn = document.getElementById('story-search-clear');
+  if (!input) return;
+  let debounce = null;
+  const run = () => {
+    const v = input.value.trim();
+    if (v === searchQuery) return;   // 변화 없으면 재요청 생략
+    searchQuery = v;
+    displayLimit = 10;
+    loadStoryList();
+  };
+  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(run, 300); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(debounce); run(); } });
+  if (clearBtn) clearBtn.onclick = () => {
+    clearTimeout(debounce);
+    input.value = '';
+    input.focus();
+    if (!searchQuery) return;
+    searchQuery = '';
+    displayLimit = 10;
+    loadStoryList();
+  };
+})();
+
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, kind = 'info') {
   const div = document.createElement('div');
@@ -2880,6 +3528,7 @@ setInterval(() => {
   if (document.hidden) return;
   loadStoryList();
   loadStats();
+  loadWallet();   // 잔액·박제 가능 글 수·비용을 실시간 갱신(탭 보일 때만)
 }, 45000);
 // 비신뢰 URL(출처 링크)을 href 에 넣기 전 스킴 검증. javascript:/data: 등 차단.
 function safeUrl(u) {

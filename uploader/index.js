@@ -19,9 +19,17 @@ app.use(express.json({ limit: "10mb" }));
 const NETWORK = process.env.IRYS_NETWORK || "devnet";
 const PRIVATE_KEY = process.env.AGENT_PRIVATE_KEY || "";
 
+// 키 없이 쓰는 공개 RPC. 구 ankr 무료 엔드포인트는 이제 API 키를 요구해 keyless 요청에
+// result 없는 'Unauthorized' 만 돌려줬다 → 온체인 잔액이 거짓 0 으로 표시되고 irys.fund()
+// (providerUrl)도 깨지던 원인. publicnode 는 키 없이 동작. ETH_RPC_URL 로 운영자가 덮어쓸 수 있다.
 const RPC_URLS = {
-  devnet:  "https://rpc.ankr.com/eth_sepolia",
-  mainnet: "https://rpc.ankr.com/eth",
+  devnet:  process.env.ETH_RPC_URL || "https://ethereum-sepolia-rpc.publicnode.com",
+  mainnet: process.env.ETH_RPC_URL || "https://ethereum-rpc.publicnode.com",
+};
+// 잔액 조회용 폴백(주 RPC 가 일시 장애·레이트리밋이어도 거짓 0 대신 실제 잔액을 보이게).
+const RPC_FALLBACKS = {
+  devnet:  ["https://ethereum-sepolia-rpc.publicnode.com", "https://sepolia.drpc.org"],
+  mainnet: ["https://ethereum-rpc.publicnode.com", "https://eth.drpc.org"],
 };
 
 // 네트워크별 조회 게이트웨이.
@@ -150,6 +158,109 @@ app.post("/upload", async (req, res) => {
   } catch (err) {
     console.error("[uploader] 업로드 실패:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// 온체인 지갑 ETH 잔액(eth_getBalance, wei) — 후원이 들어오는 주소의 실시간 잔액.
+// Irys '로드된 잔액'(getLoadedBalance)은 박제에 미리 충전된 선불 잔액이라 별개로 함께 보여준다.
+async function _ethGetBalanceOnce(url, address) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getBalance",
+                             params: [address, "latest"] }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const j = await r.json().catch(() => null);
+    // result 없는 응답(JSON-RPC error·키 요구·HTML 등)을 0 으로 위장하지 않는다 — 거짓
+    // 0 잔액의 원흉이었다. 비정상이면 null 을 돌려 다음 폴백으로 넘기거나 UI 에 '—' 로 표시.
+    if (!j || j.error || typeof j.result !== "string") {
+      console.warn(`[uploader] eth_getBalance 비정상(${url}):`,
+        JSON.stringify(j && j.error ? j.error : j).slice(0, 160));
+      return null;
+    }
+    return BigInt(j.result);
+  } catch (e) {
+    clearTimeout(timer);
+    console.warn(`[uploader] eth_getBalance 실패(${url}):`, e.message);
+    return null;
+  }
+}
+
+async function getWalletWei(address) {
+  // 주 RPC → 폴백 순서로 시도. 하나라도 유효한 result 를 주면 그 값, 전부 실패면 null
+  // (UI 는 '—'(미상)로 표시 — 거짓 0 금지).
+  const urls = [...new Set([RPC_URLS[NETWORK] || RPC_URLS.devnet,
+                            ...(RPC_FALLBACKS[NETWORK] || [])])];
+  for (const url of urls) {
+    const wei = await _ethGetBalanceOnce(url, address);
+    if (wei !== null) return wei;
+  }
+  return null;
+}
+
+const weiToEth = (wei) => (wei === null ? null : (Number(wei) / 1e18).toFixed(8));
+
+// 박제 비용·지갑 잔액·후원 주소 실시간 조회. network 무관 동작(devnet/mainnet 자동).
+// 누구나 이 address 로 후원(ETH 전송)하면 박제 자금이 충전된다.
+app.get("/wallet", async (_req, res) => {
+  try {
+    const irys = await getIrys();
+    const address = irys.address;
+    // 박제 비용: 대표 크기들의 Irys 가격(atomic) → ETH 환산. 박제 1건은 보통 1~10KB 번들.
+    const priceFor = async (bytes) => {
+      try {
+        const p = await irys.getPrice(bytes);
+        return { bytes, atomic: p.toString(), eth: irys.utils.fromAtomic(p).toString() };
+      } catch (e) {
+        return { bytes, error: e.message };
+      }
+    };
+    const [loadedAtomic, walletWei, p1kb, p10kb] = await Promise.all([
+      irys.getLoadedBalance().catch(() => null),   // Irys 선불 잔액(atomic)
+      getWalletWei(address),                         // 온체인 ETH(wei)
+      priceFor(1024),
+      priceFor(10 * 1024),
+    ]);
+    // 박제 가능 글 수 = (Irys 선불 + 온체인 지갑) 총 ETH ÷ 1건 비용(대표 10KB).
+    // 둘 다 wei 단위(ethereum 토큰의 atomic=wei)라 합산 가능. 사용자 관점의 '지갑에 남은
+    // 금액으로 몇 개'에 맞춰 온체인 잔액도 포함한다(온체인 ETH 는 irys.fund() 로 선불 전환해
+    // 쓰는 박제 예산). atomic BigInt 정수나눗셈으로 오차 0. 잔액이 전부 미상이면 null.
+    let archivesRemaining = null;
+    try {
+      const haveAny = (loadedAtomic !== null) || (walletWei !== null);
+      if (haveAny && p10kb && p10kb.atomic) {
+        const price = BigInt(p10kb.atomic);
+        if (price > 0n) {
+          const prepaid = loadedAtomic !== null ? BigInt(loadedAtomic.toString()) : 0n;
+          const onchain = walletWei !== null ? walletWei : 0n;
+          archivesRemaining = Number((prepaid + onchain) / price);
+        }
+      }
+    } catch (_) { /* null 유지 */ }
+    res.json({
+      network: NETWORK,
+      permanent: IS_PERMANENT,
+      token: "ethereum",
+      donation_address: address,            // 후원받을 주소(= Irys 자금 지불 지갑)
+      wallet_eth: weiToEth(walletWei),      // 온체인 잔액(후원이 들어오는 곳)
+      irys_balance: loadedAtomic !== null
+        ? irys.utils.fromAtomic(loadedAtomic).toString() : null,  // 박제에 쓸 선불 잔액
+      irys_balance_atomic: loadedAtomic !== null ? loadedAtomic.toString() : null,
+      archives_remaining: archivesRemaining,  // 남은 잔액으로 박제 가능한 글 수(~10KB 기준)
+      price_per_1kb: p1kb,                  // 박제 비용(대표 크기)
+      price_per_10kb: p10kb,
+      explorer: NETWORK === "mainnet"
+        ? `https://etherscan.io/address/${address}`
+        : `https://sepolia.etherscan.io/address/${address}`,
+    });
+  } catch (err) {
+    console.error("[uploader] /wallet 실패:", err.message);
+    res.status(500).json({ error: err.message, network: NETWORK });
   }
 });
 
