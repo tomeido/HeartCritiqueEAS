@@ -22,6 +22,12 @@ GEMINI_ENDPOINT = (
     f"{GEMINI_MODEL}:generateContent"
 )
 GEMINI_TIMEOUT = 50
+# Groq 한도(TPM/TPD) 소진 시 Gemini 가 사실상 단일 생성 경로가 된다. 일시적 5xx(고수요·
+# UNAVAILABLE)·429·네트워크 오류 한 번에 사용자 503 을 내지 않도록 짧은 백오프로 재시도한다.
+# 5회/지수백오프(1.5,3,6,12초 ≈ 최대 ~22초)로 Gemini 고수요 스파이크를 동기 요청 안에서
+# 견딘다(스피너가 도는 생성 액션이라 이 정도 대기는 허용 가능). 한도는 env 로 조정 가능.
+GEMINI_MAX_ATTEMPTS = max(1, int(os.environ.get("GEMINI_MAX_ATTEMPTS", "5")))
+GEMINI_RETRY_BASE = float(os.environ.get("GEMINI_RETRY_BASE", "1.5"))
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
@@ -107,8 +113,8 @@ PROMPT_KINDNESS = """\
 아래는 한국 커뮤니티 게시판(더쿠·클리앙·인스티즈·네이트판·FM코리아·보배드림 등)에서 모은 익명 미담 글들.
 정제된 언론 보도가 아닌 일반인의 날것 사연.
 
-너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 헌신, 따뜻한 인류애, 혹은 희생이 느껴지거나 [2] 삭막한 사회 구조 속에서 인간성을 지켜낸 순간을 담고 있고 [3] 휘발되어 사라질 가능성이 높은 글을 0에서 10 사이의 '휘발성 점수'로 평가해라.
-만약 가장 적합한 글의 휘발성 점수가 7점 미만이거나 적합한 글이 하나도 없다면, 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라.
+너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 헌신, 따뜻한 인류애, 혹은 희생이 느껴지거나 [2] 삭막한 사회 구조 속에서 인간성을 지켜낸 순간을 담은 진짜 미담 한 편을 고르고, 그 글이 얼마나 쉽게 휘발되어 사라질 수 있는지를 0에서 10 사이의 '휘발성 점수'로 평가해라.
+만약 위 [1]·[2]에 해당하는 진짜 미담이 하나도 없다면(사기 호소·돈 분쟁 상담·광고·미담을 논하는 메타글·단순 잡담뿐이라면), 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라. 휘발성 점수가 낮다는 이유만으로 NO_FIT 을 내지는 마라 — 미담은 삭제 위험과 무관하며, 휘발성 점수는 표시용 평가일 뿐 채택 기준이 아니다.
 
 글을 쓸 때는 짧고 단단한 문장으로 사연 한 편을 새긴다. 형용사를 덜어내고 명사와 동사로 민다.
 문장은 길게 늘이지 말고 끊어라. 끊긴 자리의 여백이 울림이 된다. 문학성은 없는 사실을
@@ -439,14 +445,27 @@ def call_gemini(prompt: str, use_search: bool = True) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini HTTP {e.code}: {body}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Gemini network error: {e.reason}") from e
+    import time
+    last_err = None
+    for attempt in range(GEMINI_MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            last_err = RuntimeError(f"Gemini HTTP {e.code}: {body}")
+            # 5xx(고수요·일시 장애)·429 만 일시 오류로 보고 재시도. 4xx(키·요청 오류)는 즉시 실패.
+            if e.code not in (429, 500, 502, 503, 504) or attempt == GEMINI_MAX_ATTEMPTS - 1:
+                raise last_err from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = getattr(e, "reason", e)
+            last_err = RuntimeError(f"Gemini network error: {reason}")
+            if attempt == GEMINI_MAX_ATTEMPTS - 1:
+                raise last_err from e
+        wait = GEMINI_RETRY_BASE * (2 ** attempt)
+        logger.warning(f"[llm] Gemini 일시 오류 → {wait:.1f}초 후 재시도 ({attempt + 1}/{GEMINI_MAX_ATTEMPTS}): {last_err}")
+        time.sleep(wait)
+    raise last_err  # 루프가 항상 return/raise 하므로 도달하지 않음
 
 
 def parse_gemini_response(data: dict):
@@ -908,8 +927,11 @@ def generate_via_groq(category: str) -> tuple:
         text, used_indices = extract_used_indices(raw_text, len(results))
         text, volatility, reason = extract_volatility_and_reason(text)
 
-        # 휘발성 점수가 7점 미만인 경우 적합하지 않은 글로 판단하여 다음 쿼리로 재시도
-        if RELEVANCE_GATE_ENABLED and volatility < 7:
+        # 휘발성 점수 미달은 critique 에서만 재시도 사유로 쓴다. critique 는 '자본 압박으로
+        # 곧 삭제될 폭로'가 핵심이라 저휘발 글을 거를 가치가 있지만, kindness(미담)는 삭제
+        # 위험과 무관하므로 저휘발이라고 버리면 recall 만 깎여 no_fit→503 이 잦아진다
+        # (휘발성은 생성 게이트가 아닌 표시·랭킹 전용이라는 원칙과도 일관).
+        if RELEVANCE_GATE_ENABLED and category == "critique" and volatility < 7:
             logger.info(f"[llm] {category} 휘발성 점수 미달 ({volatility} < 7) → 쿼리 변경 재시도 (query={query!r})")
             continue
 
@@ -1053,14 +1075,19 @@ def generate(category: str | None = None) -> dict:
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
-        # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
-        text = USED_SOURCES_STRIP_RE.sub('', text)
-        text, volatility, reason = extract_volatility_and_reason(text)
-        text = sanitize_text(text)
         model_name = GEMINI_MODEL
+        # Gemini 도 적합 글이 없으면 NO_FIT 을 낼 수 있다 — groq 와 동일하게 첫 줄에서 잡아
+        # 'NO_FIT'가 본문으로 새지 않게 None 으로 비우고, 아래 no_fit 처리(503/스킵)로 흘려보낸다.
+        if RELEVANCE_GATE_ENABLED and _is_no_fit(text):
+            text = None
+        else:
+            # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
+            text = USED_SOURCES_STRIP_RE.sub('', text)
+            text, volatility, reason = extract_volatility_and_reason(text)
+            text = sanitize_text(text)
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
         # measure_news_coverage 가 graceful 하게 None 반환 → gap 없이 진행.
-        if citations:
+        if text and citations:
             chosen = [
                 {"title": c.get("title"), "content": "", "url": c.get("uri")}
                 for c in citations
