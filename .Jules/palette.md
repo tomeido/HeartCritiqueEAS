@@ -1,0 +1,3 @@
+## 2026-06-27 - Added Dismissal & Explicit Action Mechanisms for Story View
+**Learning:** Large, dynamically injected panels (like a detailed story view) can trap user flow. The absence of an explicit "dismiss" path leaves the user feeling out of control, while deep linking solely via automatic hash routing creates a gap in discovering sharing capability. Adding direct UI affordances (Share/Close) and keyboard shortcuts (Escape key to dismiss) empowers users.
+**Action:** When a significant UI transition occurs on screen without an explicit modal paradigm, always provide a clear dismissal mechanism (a button and keyboard escape) and surface non-obvious context features (like copy-link) directly into the UI.
