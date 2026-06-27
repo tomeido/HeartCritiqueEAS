@@ -1269,6 +1269,10 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <span class="badge hidden" id="story-gap-badge"></span>
         <span class="muted text-sm" id="story-time"></span>
         <span class="muted text-sm" id="story-model"></span>
+        <div style="margin-left: auto; display: flex; gap: 8px;">
+          <button class="btn-sm btn-outline" id="btn-share-story" aria-label="이 이야기의 링크 복사하기" title="링크 복사">🔗 공유</button>
+          <button class="btn-sm btn-outline" id="btn-close-story" aria-label="이야기 닫기" title="닫기">✕</button>
+        </div>
       </div>
 
       <!-- 격차 알림 (medium 이상일 때 표시) -->
@@ -2888,6 +2892,35 @@ function safeUrl(u) {
     return (p.protocol === 'http:' || p.protocol === 'https:') ? p.href : '#';
   } catch { return '#'; }
 }
+
+// ── 스토리 UI 컨트롤 ───────────────────────────────────────────────────────
+document.getElementById('btn-share-story')?.addEventListener('click', () => {
+  if (!currentStory?.id) return;
+  const url = new URL(window.location.href);
+  url.hash = `story=${currentStory.id}`;
+  navigator.clipboard.writeText(url.toString()).then(() => {
+    toast('🔗 링크가 복사되었습니다', 'success');
+  }).catch(() => {
+    toast('링크 복사에 실패했습니다', 'error');
+  });
+});
+
+function closeStoryCard() {
+  const card = document.getElementById('story-card');
+  if (card && !card.classList.contains('hidden')) {
+    card.classList.add('hidden');
+    currentStory = null;
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+}
+
+document.getElementById('btn-close-story')?.addEventListener('click', closeStoryCard);
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    closeStoryCard();
+  }
+});
 
 init();
 </script>
