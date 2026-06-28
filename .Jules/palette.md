@@ -1,0 +1,3 @@
+## 2024-06-28 - Button loading states and accessible names
+**Learning:** Replacing a button's entire text with a loading spinner icon dynamically causes screen readers to read "button" without context, severely degrading accessibility for async actions. Additionally, decorative emojis in buttons add noise if read literally.
+**Action:** Always append explicit text next to a loading spinner in button elements, ensure the spinner is hidden via `aria-hidden="true"`, and use `aria-busy="true"` on the parent button. Wrap decorative emojis in `<span aria-hidden="true">` to keep button text clean.
