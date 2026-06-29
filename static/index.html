@@ -1262,7 +1262,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
   </div>
 
   <!-- 현재 스토리 -->
-  <div id="story-card" class="hidden">
+  <div id="story-card" class="hidden" tabindex="-1" style="outline: none;">
     <div class="card">
       <div class="story-meta">
         <span class="badge" id="story-badge"></span>
@@ -1288,7 +1288,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         <div class="poetic-reason-text" id="poetic-reason-text"></div>
         <div class="volatility-container">
           <span>휘발성 지수</span>
-          <div class="volatility-bar">
+          <div class="volatility-bar" id="volatility-bar" role="progressbar" aria-label="휘발성 지수" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0">
             <div class="volatility-bar-fill" id="volatility-bar-fill" style="width: 0%"></div>
           </div>
           <span id="volatility-val">0/10</span>
@@ -1345,7 +1345,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
         </div>
         <!-- 임계값 감축 사유 -->
         <div class="urgency-banner hidden" id="urgency-banner"></div>
-        <div class="vote-bar" id="vote-bar">
+        <div class="vote-bar" id="vote-bar" role="progressbar" aria-label="공론화 투표 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
         </div>
         <button class="btn-vote btn-sm" id="btn-vote" disabled>로그인 후 투표</button>
@@ -1982,6 +1982,7 @@ function showStory(s) {
     const voltScore = s.volatility_score || 0;
     voltFill.style.width = (voltScore * 10) + '%';
     voltVal.textContent = `${voltScore}/10`;
+    document.getElementById('volatility-bar').setAttribute('aria-valuenow', voltScore);
     
     // 배경에 흘러가는 날것의 텍스트 노이즈 배치
     let noiseContent = '';
@@ -2034,6 +2035,7 @@ function showStory(s) {
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.focus({ preventScroll: true });
 }
 
 function makeCitation(c) {
@@ -2245,6 +2247,7 @@ function renderVoteArea(storyId, data) {
   document.getElementById('vote-threshold').textContent = data.threshold;
   const pct = Math.min(100, (data.vote_count / data.threshold) * 100);
   document.getElementById('vote-bar-fill').style.width = pct + '%';
+  document.getElementById('vote-bar').setAttribute('aria-valuenow', pct);
   document.getElementById('vote-bar').classList.toggle('complete', data.vote_count >= data.threshold);
 
   // 긴급도 배너 (임계값이 기본보다 낮을 때)
