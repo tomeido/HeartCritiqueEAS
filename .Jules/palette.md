@@ -1,0 +1,3 @@
+## 2025-02-15 - Focus Management in SPA Content Reveal
+**Learning:** When dynamically revealing content in a Single Page Application (SPA), simply using `scrollIntoView` is not enough for accessibility. Screen readers and keyboard navigation may leave focus behind on the element that triggered the reveal, making it difficult for users to access the newly shown content without tabbing through unrelated areas of the page.
+**Action:** When creating a content reveal, ensure the newly revealed container has `tabindex="-1"` and `style="outline: none;"`, and explicitly call `.focus({ preventScroll: true })` after scrolling it into view. This properly shifts the accessible context for assistive technologies.
