@@ -1,0 +1,3 @@
+## 2024-05-18 - Dynamically Revealed Content Focus Management
+**Learning:** In a Single Page Application, dynamically revealing or scrolling to new content (like a story card or a list) can leave screen reader users unaware of the new context. `scrollIntoView()` alone only updates the visual viewport, but does not move keyboard focus, causing screen readers to read from the old location.
+**Action:** When scrolling a container into view, always apply `tabindex="-1"`, `outline: none`, and programmatically call `.focus({ preventScroll: true })` on the target container to correctly transfer screen reader focus without a visual jump.

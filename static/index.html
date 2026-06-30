@@ -1783,7 +1783,13 @@ document.querySelectorAll('.stat-tile').forEach(tile => {
     const chip = document.querySelector(`.chip[data-filter="${filter}"]`);
     if (chip) {
       chip.click();
-      document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const listCard = document.getElementById('list-card');
+      if (listCard) {
+        listCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        listCard.setAttribute('tabindex', '-1');
+        listCard.style.outline = 'none';
+        listCard.focus({ preventScroll: true });
+      }
     }
   };
 });
@@ -2034,6 +2040,9 @@ function showStory(s) {
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.setAttribute('tabindex', '-1');
+  card.style.outline = 'none';
+  card.focus({ preventScroll: true });
 }
 
 function makeCitation(c) {
@@ -2669,7 +2678,13 @@ function updateBadges() {
 // 벨 클릭 → 마지막 방문 시각 갱신, 목록으로 스크롤
 document.getElementById('bell-btn').onclick = () => {
   markAsSeen();
-  document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const listCard = document.getElementById('list-card');
+  if (listCard) {
+    listCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    listCard.setAttribute('tabindex', '-1');
+    listCard.style.outline = 'none';
+    listCard.focus({ preventScroll: true });
+  }
 };
 
 function renderStoryList() {
