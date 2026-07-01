@@ -1942,6 +1942,8 @@ function showStory(s) {
 
   const card = document.getElementById('story-card');
   card.classList.remove('hidden');
+  card.tabIndex = -1;
+  card.style.outline = 'none';
   
   const inner = card.querySelector('.card');
   inner.classList.remove('is-kindness','is-critique','story-flash-deleted');
@@ -2034,6 +2036,7 @@ function showStory(s) {
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.focus({ preventScroll: true });
 }
 
 function makeCitation(c) {
