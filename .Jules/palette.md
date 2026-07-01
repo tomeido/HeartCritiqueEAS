@@ -1,0 +1,3 @@
+## 2024-05-24 - Screen Reader Focus for SPA Dynamic Content Reveal
+**Learning:** When navigating in a Single Page Application (SPA), dynamically revealing content (like expanding a story card) without managing focus breaks the experience for screen reader users. The newly revealed content is visually scrolled to, but screen readers remain at the previous location.
+**Action:** When scrolling to newly revealed containers, explicitly set `tabindex="-1"` and `outline: none` on the container, and programmatically call `.focus({ preventScroll: true })` on it. This forces the screen reader to move its virtual cursor to the new content, ensuring a seamless accessible experience without affecting mouse/keyboard focus visual styling.
