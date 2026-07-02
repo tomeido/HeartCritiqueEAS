@@ -115,10 +115,17 @@ def _value_col(db) -> bool:
         try:
             db.table("captured_posts").select("value_score").limit(1).execute()
             _value_col_supported = True
-        except Exception:
-            _value_col_supported = False
-            logger.info("[promoter] captured_posts.value_score(010) 미설치 — "
-                        "승격 순서는 volatility 단독 정렬로 폴백.")
+        except Exception as e:
+            # 컬럼 부재(010 미적용)일 때만 영구 캐시 — 일시적 연결오류를 False 로 굳히면
+            # 재시작 전까지 가치 우선 정렬이 조용히 꺼진다. 일시 오류는 이번만 폴백.
+            from services.tracker import _is_missing_column_error
+            if _is_missing_column_error(e, "value_score"):
+                _value_col_supported = False
+                logger.info("[promoter] captured_posts.value_score(010) 미설치 — "
+                            "승격 순서는 volatility 단독 정렬로 폴백.")
+            else:
+                logger.warning(f"[promoter] value_score 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
     return _value_col_supported
 
 

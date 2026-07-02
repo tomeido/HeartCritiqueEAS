@@ -50,7 +50,31 @@ TRACK_ERR_MAX_SEC  = int(os.environ.get("TRACK_ERR_MAX_SEC", "86400"))    # 에�
 # 재검사 큐 필터(공용): hard 404/410 deleted 만 영구 제외, soft(패턴/변화 기반)는 오탐
 # 가능성이 있어 큐에 남겨 다음 검사에서 live 로 자동 정정되게 한다. tracker(citation_checks)
 # 와 collector(captured_posts) 가 같은 정책을 공유하므로 한 곳에서 관리한다.
-RECHECK_QUEUE_FILTER = "status.neq.deleted,and(status.eq.deleted,http_code.not.in.(404,410))"
+# 주의: http_code 가 NULL 인 soft deleted(예: 직접 관측 timeout + 프록시 관측 삭제 판정)는
+# `not.in.(404,410)` 이 SQL NULL 로 평가돼 큐에서 조용히 영구 이탈한다 — is.null 분기를
+# 명시해 soft 자가정정 보장을 지킨다.
+RECHECK_QUEUE_FILTER = ("status.neq.deleted"
+                        ",and(status.eq.deleted,http_code.is.null)"
+                        ",and(status.eq.deleted,http_code.not.in.(404,410))")
+
+
+def _due_filter(now_iso: str) -> str:
+    """적응형 due 조건(or= 절, RECHECK_QUEUE_FILTER 와 AND 결합): 만기 도래 또는 NULL.
+    next_check_at 이 NULL 인 행은 '등록 시점에 스키마 프로브가 일시 실패해 adaptive
+    컬럼 없이 upsert 된 혼합 상태'다 — lte 단독 필터면 SQL NULL 비교(UNKNOWN)로 그 행이
+    due 큐에서 영구 누락돼 삭제 추적이 조용히 꺼진다. NULL 을 due 로 취급해 자가 복구."""
+    return f"next_check_at.is.null,next_check_at.lte.{now_iso}"
+
+
+def _is_missing_column_error(e: Exception, col: str) -> bool:
+    """PostgREST '컬럼 없음'(42703/PGRST204) 판별 — 마이그레이션 미적용과 일시 오류 구분.
+    스키마 프로브(_adaptive_supported 류)가 일시적 연결오류를 '미설치'로 영구 캐시하면
+    재시작 전까지 기능이 조용히 꺼지므로, 영구 캐시는 이 판별을 통과할 때만 한다.
+    tracker/collector/promoter 가 공유(최하층 모듈이라 import 사이클 없음)."""
+    msg = str(e).lower()
+    return ("42703" in msg or "pgrst204" in msg
+            or "does not exist" in msg or "could not find" in msg
+            or ("column" in msg and col in msg))
 
 
 def compute_next_check(status: str, check_count: int, error_count: int,
@@ -640,10 +664,16 @@ def _has_deleted_at(db) -> bool:
         try:
             db.table("citation_checks").select("deleted_at").limit(1).execute()
             _deleted_at_supported = True
-        except Exception:
-            _deleted_at_supported = False
-            logger.info("[tracker] citation_checks.deleted_at 미설치 — 시계열은 "
-                        "last_checked 폴백 (supabase_migration_2026-06.sql 적용 권장)")
+        except Exception as e:
+            # 컬럼 부재일 때만 영구 캐시 — 일시 오류를 굳히면 재시작 전까지 deleted_at
+            # (최초감지 시각)이 조용히 기록되지 않는다. 일시 오류는 이번만 폴백.
+            if _is_missing_column_error(e, "deleted_at"):
+                _deleted_at_supported = False
+                logger.info("[tracker] citation_checks.deleted_at 미설치 — 시계열은 "
+                            "last_checked 폴백 (supabase_migration_2026-06.sql 적용 권장)")
+            else:
+                logger.warning(f"[tracker] deleted_at 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
     return _deleted_at_supported
 
 
@@ -659,10 +689,16 @@ def _adaptive_supported(db) -> bool:
             (db.table("citation_checks")
              .select("next_check_at,error_count,baseline_hash").limit(1).execute())
             _adaptive_supported_flag = True
-        except Exception:
-            _adaptive_supported_flag = False
-            logger.info("[tracker] citation_checks 적응형 컬럼 미설치 — 고정 주기 폴백 "
-                        "(migrations/006_captured_posts_and_adaptive.sql 적용 권장)")
+        except Exception as e:
+            # 컬럼 부재(006 미적용)일 때만 영구 캐시 — 일시 오류를 굳히면 재시작 전까지
+            # next_check_at 갱신이 멈춰 만기 지난 행이 due 큐 앞자리를 계속 차지한다.
+            if _is_missing_column_error(e, "next_check_at"):
+                _adaptive_supported_flag = False
+                logger.info("[tracker] citation_checks 적응형 컬럼 미설치 — 고정 주기 폴백 "
+                            "(migrations/006_captured_posts_and_adaptive.sql 적용 권장)")
+            else:
+                logger.warning(f"[tracker] 적응형 컬럼 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
     return _adaptive_supported_flag
 
 
@@ -749,8 +785,9 @@ async def recheck_batch(batch_size: int = CHECK_BATCH_SIZE) -> int:
     ).or_(RECHECK_QUEUE_FILTER)
     if adaptive:
         now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
-        # 만기 도래분만(next_check_at <= now). 등록·갱신 시 항상 채워지므로 NULL 누락 없음.
-        q = q.lte("next_check_at", now_iso).order("next_check_at", desc=False, nullsfirst=True)
+        # 만기 도래분 + next_check_at NULL(등록 시 프로브 일시 실패 혼합 상태 — 자가 복구).
+        # 두 번째 or= 절은 PostgREST 에서 첫 번째(RECHECK_QUEUE_FILTER)와 AND 로 결합된다.
+        q = q.or_(_due_filter(now_iso)).order("next_check_at", desc=False, nullsfirst=True)
     else:
         q = q.order("last_checked", desc=False, nullsfirst=True)
     resp = q.limit(batch_size).execute()

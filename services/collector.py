@@ -37,6 +37,8 @@ from services.tracker import (
     USER_AGENT,
     _baseline_from_row,
     _build_update,
+    _due_filter,
+    _is_missing_column_error,
     _visible_text,
     compute_next_check,
     decide_status,
@@ -55,18 +57,34 @@ logger = logging.getLogger(__name__)
 _promo_cols_supported: Optional[bool] = None
 
 
-def _promotion_cols(db) -> bool:
+def _promotion_cols_state(db) -> Optional[bool]:
+    """009 승격 컬럼 지원 3상 판별: True/False = 확정(캐시), None = 일시 오류로 미확정.
+
+    컬럼 부재(009 미적용)일 때만 영구 캐시. 일시적 연결오류를 False 로 굳히면 그 동안
+    hard 삭제(404/410)를 감지해도 hard_deleted_at 을 못 박고, 그 행은 큐에서 영구
+    제외되므로 승격 후보가 조용히 유실된다 — 미션의 핵심 경로라 일시 오류는 None 으로
+    보고해 호출부(recheck_captured_batch)가 비가역 기록을 미루고 주기를 건너뛰게 한다."""
     global _promo_cols_supported
     if _promo_cols_supported is None:
         try:
             (db.table("captured_posts")
              .select("volatility_score,hard_deleted_at,promotion_status").limit(1).execute())
             _promo_cols_supported = True
-        except Exception:
-            _promo_cols_supported = False
-            logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
-                        "기록 생략. migrations/009 적용 후 promoter 가능.")
+        except Exception as e:
+            if _is_missing_column_error(e, "promotion_status"):
+                _promo_cols_supported = False
+                logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
+                            "기록 생략. migrations/009 적용 후 promoter 가능.")
+            else:
+                logger.warning(f"[collector] 승격 컬럼 판별 일시 실패(캐시 안 함): {e!r}")
+                return None
     return _promo_cols_supported
+
+
+def _promotion_cols(db) -> bool:
+    """불리언 간편 래퍼(_capture 용 — 일시 불명은 '이번엔 기록 생략'과 동치).
+    _capture 경로는 hard 삭제 시 본문도 없어(404) 승격 자체가 불가하므로 비가역 유실 없음."""
+    return bool(_promotion_cols_state(db))
 
 
 # migrations/010(가치 점수) 컬럼 지원 여부 — value_score. 미설치 환경에서는 payload 에서
@@ -80,10 +98,17 @@ def _value_col(db) -> bool:
         try:
             db.table("captured_posts").select("value_score").limit(1).execute()
             _value_col_supported = True
-        except Exception:
-            _value_col_supported = False
-            logger.info("[collector] captured_posts.value_score(010) 미설치 — 가치 점수 "
-                        "기록 생략. migrations/010 적용 시 승격 우선순위에 반영.")
+        except Exception as e:
+            # 컬럼 부재(010 미적용)일 때만 영구 캐시. 일시적 연결오류를 False 로 굳히면
+            # 재시작 전까지 value_score 기록이 조용히 꺼진다(routers/stories 와 동일 교훈)
+            # — 일시 오류는 캐시하지 않고 이번 호출만 생략, 다음 호출이 재판별한다.
+            if _is_missing_column_error(e, "value_score"):
+                _value_col_supported = False
+                logger.info("[collector] captured_posts.value_score(010) 미설치 — 가치 점수 "
+                            "기록 생략. migrations/010 적용 시 승격 우선순위에 반영.")
+            else:
+                logger.warning(f"[collector] value_score 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
     return _value_col_supported
 
 # 기본 비활성: migrations/006 적용 후 COLLECTOR_ENABLED=true 로 명시적으로 켠다(외부 폴링 시작).
@@ -424,7 +449,15 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
     """만기 도래한 captured_posts 를 재검사해 삭제/변화를 감지(적응형 due 순). 검사 수 반환.
     tracker 와 동일하게 hard(404/410) deleted 만 큐에서 영구 제외하고, soft 는 정정 위해 유지."""
     db = get_db()
-    promo = _promotion_cols(db)
+    promo_state = _promotion_cols_state(db)
+    if promo_state is None:
+        # 프로브 일시 불명 상태로 배치를 진행하면, 이 배치에서 감지된 hard 삭제가
+        # hard_deleted_at 없이 기록되고 그 행은 큐를 영영 떠나 승격 후보가 비가역적으로
+        # 유실된다. 이번 주기는 건너뛰고 다음 주기에 재판별한다(수집 지연 << 유실).
+        logger.warning("[collector] 승격 컬럼 판별 일시 실패 — hard 삭제 기록 유실 방지를 위해 "
+                       "이번 재검사 주기 건너뜀")
+        return 0
+    promo = promo_state
     now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     cols = (
         "id,url,check_count,status,http_code,error_count,"
@@ -438,7 +471,8 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
             db.table("captured_posts")
             .select(cols)
             .or_(RECHECK_QUEUE_FILTER)
-            .lte("next_check_at", now_iso)
+            # 만기 도래 + NULL(혼합 상태 자가 복구) — tracker.recheck_batch 와 동일 정책.
+            .or_(_due_filter(now_iso))
             .order("next_check_at", desc=False, nullsfirst=True)
             .limit(batch_size)
             .execute()

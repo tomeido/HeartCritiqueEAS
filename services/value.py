@@ -67,7 +67,8 @@ AD_RE = re.compile(
     r"수익\s*보장|재택\s*부업|원금\s*보장"
 )
 
-# 단순 질문·상담(증거·정보가치 없음): 제목이 물음으로 끝나거나 추천/질문 어휘.
+# 단순 질문·상담(증거·정보가치 없음): 질문 종결어미·추천/질문 어휘. '제목이 ? 로 끝남'은
+# 정규식 $ 가 결합 텍스트(제목\n본문)의 끝만 보므로 assess_value 에서 제목을 따로 검사한다.
 QUESTION_RE = re.compile(
     r"(?:나요|까요|을까요|는지요|가요)\s*\?|\?\s*$|"
     r"추천\s*(?:좀|부탁|해\s*주|받습니다)|뭐가\s*좋|어떤\s*게\s*좋|"
@@ -133,7 +134,8 @@ def assess_value(title: str | None, body: str | None) -> dict:
     has_consumer = bool(CONSUMER_RE.search(text))
     has_kindness = bool(KINDNESS_RE.search(text))
     has_ad = bool(AD_RE.search(text))
-    has_question = bool(QUESTION_RE.search(text))
+    # 제목이 물음표로 끝나면 질문글(어미 패턴이 못 잡는 '이거 어때?' 류 포함).
+    has_question = bool(QUESTION_RE.search(text)) or (title or "").rstrip().endswith("?")
     has_repost = bool(NEWS_REPOST_RE.search(text))
 
     comp: dict[str, int] = {}

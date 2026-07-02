@@ -22,8 +22,10 @@ tracker 의 검증된 삭제 표식 패턴(DELETION_PATTERNS)을 그대로 적�
      docs/TRANSPARENCY.md 에 공개한다.
 """
 
+import asyncio
 import os
 import re
+from urllib.parse import urlparse
 
 import httpx
 
@@ -45,6 +47,9 @@ PROXY_FETCH_BASE = os.environ.get("PROXY_FETCH_BASE", "https://r.jina.ai/").rstr
 # 키 없이도 동작하나 레이트리밋이 낮다. 키가 있으면 Bearer 로 전달.
 PROXY_FETCH_API_KEY = os.environ.get("PROXY_FETCH_API_KEY", "").strip()
 PROXY_FETCH_TIMEOUT = int(os.environ.get("PROXY_FETCH_TIMEOUT", "25"))
+# 전체 마감시한(모든 청크 합산): per-op 타임아웃만으론 슬로 드립 응답이 tracker 의
+# 직렬 재검사 루프를 장시간 붙들 수 있다(tracker.FETCH_DEADLINE_SEC 와 동일 원칙).
+_PROXY_DEADLINE_SEC = PROXY_FETCH_TIMEOUT + 15
 # 이 길이 이상의 실체 있는 본문이 오면 '생존 확인'. 짧은 응답(에러 안내 등)은 판단 유보.
 PROXY_MIN_LIVE_LEN = int(os.environ.get("PROXY_MIN_LIVE_LEN", "200"))
 MAX_PROXY_BYTES = 300_000   # 프록시 응답 상한(가시 텍스트라 충분)
@@ -112,18 +117,19 @@ async def fetch_proxy_text(url: str, client: httpx.AsyncClient) -> str | None:
     if PROXY_FETCH_API_KEY:
         headers["Authorization"] = f"Bearer {PROXY_FETCH_API_KEY}"
     try:
-        async with client.stream("GET", proxy_url(url), timeout=PROXY_FETCH_TIMEOUT,
-                                 follow_redirects=True, headers=headers) as resp:
-            if resp.status_code != 200:
-                return None
-            chunks: list[bytes] = []
-            total = 0
-            async for chunk in resp.aiter_bytes():
-                chunks.append(chunk)
-                total += len(chunk)
-                if total >= MAX_PROXY_BYTES:
-                    break
-            return b"".join(chunks).decode("utf-8", errors="replace")
+        async with asyncio.timeout(_PROXY_DEADLINE_SEC):
+            async with client.stream("GET", proxy_url(url), timeout=PROXY_FETCH_TIMEOUT,
+                                     follow_redirects=True, headers=headers) as resp:
+                if resp.status_code != 200:
+                    return None
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    chunks.append(chunk)
+                    total += len(chunk)
+                    if total >= MAX_PROXY_BYTES:
+                        break
+                return b"".join(chunks).decode("utf-8", errors="replace")
     except Exception as e:
         logger.info(f"[proxyfetch] 프록시 관측 실패 {url}: {type(e).__name__}")
         return None
@@ -159,11 +165,30 @@ async def maybe_observe_via_proxy(url: str, client: httpx.AsyncClient,
     }
 
 
+def _redacted_base() -> str:
+    """공개 API 노출용 base — userinfo(자격증명 포함 구성) 제거.
+
+    보수적 화이트리스트: 정상 http(s) URL 로 파싱될 때만 스킴+호스트+경로를 노출하고,
+    그 외(스킴 누락 'user:pass@host/' 는 urlparse 가 'user' 를 스킴으로 오파싱해
+    비밀이 path 로 새는 케이스 포함)는 전부 '(redacted)'. 최종 문자열에 '@' 가
+    남아 있으면 어떤 경로로든 자격증명 잔존 가능성이 있으므로 역시 마스킹한다."""
+    try:
+        p = urlparse(PROXY_FETCH_BASE)
+        netloc = p.netloc.rpartition("@")[2]   # user:pass@ 제거
+        if p.scheme not in ("http", "https") or not netloc:
+            return "(redacted)"
+        out = f"{p.scheme}://{netloc}{p.path or '/'}"
+        return out if "@" not in out else "(redacted)"
+    except Exception:
+        return "(redacted)"
+
+
 def get_status() -> dict:
-    """대시보드/transparency 용 상태."""
+    """대시보드/transparency 용 상태. base 는 자격증명을 걷어낸 형태로만 노출한다
+    (무인증 공개 엔드포인트 /api/stats·/api/transparency 가 그대로 내보내므로)."""
     return {
         "enabled": PROXY_FETCH_ENABLED,
-        "base": PROXY_FETCH_BASE if PROXY_FETCH_ENABLED else None,
+        "base": _redacted_base() if PROXY_FETCH_ENABLED else None,
         "has_api_key": bool(PROXY_FETCH_API_KEY),
         "min_live_len": PROXY_MIN_LIVE_LEN,
     }
