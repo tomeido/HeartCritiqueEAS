@@ -26,7 +26,18 @@ if "httpx" not in sys.modules:
                 pass
 
         httpx.AsyncClient = _AsyncClient
+        httpx.Client = _AsyncClient
         httpx.TimeoutException = type("TimeoutException", (Exception,), {})
+        # services/db.py 가 모듈 레벨에서 참조하는 심볼들(리트라이 전송 계층).
+        httpx.RemoteProtocolError = type("RemoteProtocolError", (Exception,), {})
+        httpx.ReadError = type("ReadError", (Exception,), {})
+        httpx.WriteError = type("WriteError", (Exception,), {})
+        httpx.BaseTransport = type("BaseTransport", (), {})
+        httpx.HTTPTransport = type("HTTPTransport", (), {"__init__": lambda self, *a, **k: None})
+        httpx.Limits = type("Limits", (), {"__init__": lambda self, *a, **k: None})
+        httpx.Request = type("Request", (), {})
+        httpx.Response = type("Response", (), {})
+        httpx.URL = str
         sys.modules["httpx"] = httpx
 
 if "supabase" not in sys.modules:

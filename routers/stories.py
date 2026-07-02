@@ -73,6 +73,10 @@ def _augment_with_status(story: dict, status_by_url: dict, wayback_by_url: dict 
             c["track_check_count"] = info.get("check_count", 0)
             c["track_next_check_at"] = info.get("next_check_at")
             c["track_error_count"] = info.get("error_count", 0)
+            # 콘텐츠 지문(투명성): 첫 생존 확인 시점 가시 텍스트의 sha256.
+            # 원문 재공개 없이 '그 시각에 이 내용이 존재했음'을 제3자가 대조 가능.
+            c["content_fingerprint"] = info.get("baseline_hash")
+            c["fingerprint_at"] = info.get("baseline_at")
             c["track_untrackable"] = is_untrackable_source(
                 c.get("uri"), info["http_code"], info.get("reason"))
             if info["status"] == "deleted":

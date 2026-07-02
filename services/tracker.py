@@ -210,6 +210,10 @@ BOT_CHALLENGE_PATTERNS = re.compile(
 # 봇 차단/안티봇 챌린지로 판정된 출처의 reason 센티넬(직렬화 시점 재계산에 사용).
 UNTRACKABLE_REASON = "봇 차단 — 삭제 추적 불가"
 
+# 프록시 관측(services/proxyfetch.py)으로 확보한 판정의 reason 접두어. 이 접두어가 있으면
+# '추적 불가' 라벨을 걷어낸다(봇차단 도메인이라도 프록시로 실제 관측에 성공했으므로).
+PROXY_OBSERVED_PREFIX = "프록시 관측"
+
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
@@ -309,8 +313,11 @@ def is_untrackable_source(url, http_code=None, reason=None) -> bool:
     DB 추적 레코드만으로 직렬화 시점에 재계산할 수 있다.
 
     단, 404/410 은 명백한 실제 삭제 신호라 도메인과 무관하게 신뢰한다(추적 불가로
-    가리지 않음) — FM코리아가 드물게 진짜 404 를 줄 때 '삭제됨'을 덮어쓰지 않도록."""
+    가리지 않음) — FM코리아가 드물게 진짜 404 를 줄 때 '삭제됨'을 덮어쓰지 않도록.
+    프록시 관측(proxyfetch)으로 실제 판정을 확보한 레코드도 추적 불가로 가리지 않는다."""
     if http_code in (404, 410):
+        return False
+    if reason and str(reason).startswith(PROXY_OBSERVED_PREFIX):
         return False
     host = (urlparse(url or "").hostname or "").lower()
     for d in UNTRACKABLE_DOMAINS:
@@ -664,6 +671,15 @@ async def _process_row(db, row: dict, client: httpx.AsyncClient) -> tuple[dict, 
     반환: (판정 dict, 직전 status, 갱신 성공 여부)."""
     obs = await fetch_observation(row["url"], client)
     res = decide_status(obs, row["url"], _baseline_from_row(row))
+    # 직접 관측이 봇차단으로 막힌 '추적 불가' 출처는 프록시 관측 채널로 2차 시도
+    # (옵트인 PROXY_FETCH_ENABLED, soft 신호 전용 — hard 404/410 을 만들 수 없다).
+    # 지연 import 로 사이클 회피(proxyfetch → tracker 패턴 상수).
+    if res["status"] == "error":
+        try:
+            from services.proxyfetch import maybe_observe_via_proxy
+            res = await maybe_observe_via_proxy(row["url"], client, res)
+        except Exception as e:
+            logger.warning(f"[tracker] proxy observe 실패 {row['url']}: {e}")
     prev_status = row.get("status")
     try:
         now_dt = datetime.now(timezone.utc)
@@ -765,7 +781,8 @@ def get_status_map(story_ids: list) -> dict:
     resp = (
         db.table("citation_checks")
         .select("story_id,url,status,http_code,last_checked,reason,"
-                "first_seen,check_count,next_check_at,error_count")
+                "first_seen,check_count,next_check_at,error_count,"
+                "baseline_hash,baseline_at")
         .in_("story_id", story_ids)
         .execute()
     )

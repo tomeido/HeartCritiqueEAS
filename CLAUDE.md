@@ -46,18 +46,22 @@ Docker
 │   ├── main.py               FastAPI 진입점 + JSON-RPC A2A 엔드포인트
 │   ├── routers/
 │   │   ├── stories.py        POST /api/story, GET /api/stories[/{id}]
-│   │   └── votes.py          POST /api/vote/{id}, GET /api/vote/{id}/status
+│   │   ├── votes.py          POST /api/vote/{id}, GET /api/vote/{id}/status
+│   │   └── transparency.py   GET /api/transparency(정책 스냅샷), GET /api/verify/{id}(서명 검증)
 │   └── services/
 │       ├── llm.py            Groq/Gemini 스토리 생성 파이프라인
 │       ├── hunter.py         자동 사냥꾼 — 주기적 스토리 자동 생성 루프
 │       ├── collector.py      선제 수집기 — RSS로 화제글 미리 캡처(본문+해시) → 삭제 감시
 │       ├── promoter.py       캡처→공개 승격 — hard 삭제된 캡처글을 익명 문학 스토리로 공개(PII 게이트)
 │       ├── volatility.py     삭제확률 예측기(결정적) — 캡처 우선순위·UI 배지 랭킹 전용
+│       ├── value.py          아카이브 가치 스코어러(결정적) — 캡처/승격 우선순위·스팸 제외(docs/ARCHIVAL_CRITERIA.md)
 │       ├── pii.py            구조적 PII 스캐너 — 승격 공개 전 안전 게이트
 │       ├── wayback.py        Wayback 위임 박제 — IA Save Page Now 큐(원본 삭제 대비 외부 스냅샷)
+│       ├── proxyfetch.py     추적 불가(봇차단) 출처의 프록시 2차 관측 — soft 신호 전용(옵트인)
 │       ├── tracker.py        출처/수집글 삭제 추적 + 적응형 재검사 스케줄(compute_next_check)
+│       ├── transparency.py   정책·가중치 실시간 스냅샷 + 박제물 서명 검증(docs/TRANSPARENCY.md)
 │       ├── db.py             Supabase 클라이언트 싱글톤
-│       ├── crypto.py         EC 키 서명 (secp256k1 ECDSA-SHA256)
+│       ├── crypto.py         EC 키 서명·검증 (secp256k1 ECDSA-SHA256)
 │       └── archive.py        스토리+투표 번들 → uploader 서비스 호출
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              POST /upload → Irys → Arweave Tx ID 반환
@@ -72,6 +76,9 @@ Docker
 4. **선제 수집(선택)**: `services/collector.py` → 공식 RSS 폴링으로 화제글 발견 → 신규 글만 본문 1회 GET → `captured_posts`(비공개)에 본문+sha256 해시 보관 → `tracker.fetch_observation`/`decide_status` 재사용 + 적응형 주기(`compute_next_check`)로 삭제 감시. 검색이 못 잡는 '삭제된 글'을 살아있을 때 미리 박아두는 경로. `COLLECTOR_ENABLED=false` 기본(외부 폴링이라 `migrations/006` 적용 후 수동 활성화)
 5. **캡처→공개 승격(선택, 미션의 핵심)**: `services/promoter.py` → collector 가 살아있을 때 잡아둔 `captured_posts` 가 *실제로 hard 삭제(HTTP 404/410)*되면(`collector.recheck_captured_batch` 가 `hard_deleted_at` 표식) → PII 스캐너(`services/pii.py`)로 본문 검사 → 통과 시 보관해둔 `body_text`를 기존 익명·헤지 프롬프트(`llm.generate_from_text`, 검색 grounding 없이 그 본문만 재작성)로 문학 스토리화 → `stories`에 `from_capture=true`로 INSERT → 죽은 원본 URL을 citation 으로 등록해 tracker 가 'deleted' 표시 + hard 신호로 임계값 인하. **검색은 이미 삭제된 글을 구조적으로 못 주므로, 살아있을 때 잡고(collector)→죽는 걸 감시하고(tracker)→죽은 걸 공개(promoter)하는 경로만이 진짜 사라지는 글을 박제한다.** 안전: 자동 승격은 hard 삭제만(soft 오탐 차단), critique 는 기본 수동 검토(pending_review, 명예훼손 노출 최소화), 원본 raw 본문은 절대 비공개 유지하고 LLM 익명 재작성만 공개. `volatility.py`(결정적 삭제확률)는 캡처 우선순위·UI 배지 랭킹 전용으로만 쓰고 생성 게이트·임계값·박제 결정엔 주입하지 않는다. `PROMOTER_ENABLED=false` 기본(`migrations/009` 적용 + `COLLECTOR_ENABLED=true` 필요). 수동 승격: `POST /api/admin/promote`(`ADMIN_TOKEN` 설정 시).
 6. **Wayback 위임(선택)**: citation 등록(tracker)·화제글 캡처(collector) 시 url 을 `wayback_snapshots` 큐에 'queued' 적재 → tracker 루프가 `wayback.process_batch()`로 capacity(IA 동시/일일 한도) 안에서 Save Page Now 제출 → pending → success. 직접 스크래핑 대신 IA 에 위임해 탐지 회피 + 법정 인정 타임스탬프 확보. `/stories/{id}` 응답의 citation 에 `archive_url`(영속 스냅샷) 머지. `WAYBACK_ENABLED=false` 기본(`migrations/007`+IA 키 필요)
+7. **가치 선별**: `services/value.py`(결정적 아카이브 가치 0~10, 기준 연구 `docs/ARCHIVAL_CRITERIA.md`) — collector 캡처 우선순위를 `volatility+value` 결합 점수로 정렬하고, 광고·거래 글(hard negative)은 캡처 예산에서 제외. `migrations/010` 적용 시 `captured_posts.value_score` 저장 → promoter 승격 순서(가치 우선)에 반영. volatility 와 동일하게 **박제 결정·임계값엔 절대 미주입**(우선순위·표시 전용).
+8. **프록시 관측(선택)**: 봇차단으로 '추적 불가'인 출처(fmkorea 등)를 `services/proxyfetch.py`가 렌더링 프록시(기본 Jina Reader)로 2차 관측. tracker `_process_row` 에서 직접 관측이 error 일 때만 발동. **soft 신호 전용** — 절대 hard(404/410)를 만들지 않아 임계값 인하·자동 승격에 영향 0, 배지·표시만 정확해진다. reason 접두어 `프록시 관측` 이 붙으면 `is_untrackable_source` 가 추적 불가 라벨을 해제. `PROXY_FETCH_ENABLED=false` 기본(출처 URL 이 프록시 사업자에 전달되는 트레이드오프 — `docs/TRANSPARENCY.md`).
+9. **투명성·검증**: `GET /api/transparency` — 지금 적용 중인 정책·가중치·게이트 실시간 스냅샷(문서의 '약속' vs 서버의 '현재 상태' 대조용). `GET /api/verify/{story_id}` — Arweave 번들을 게이트웨이(허용 호스트만)에서 받아 ECDSA 서명 검증 + 현재 DB 본문 대조(`crypto.verify_bundle`). citation 응답에 `content_fingerprint`(기준선 sha256) 노출. 신뢰 모델 전체: `docs/TRANSPARENCY.md`.
 
 ### A2A JSON-RPC 하위 호환
 
@@ -103,6 +110,9 @@ Docker
 | `ADMIN_TOKEN` | | 설정 시 `POST /api/admin/promote`(수동 승격, `X-Admin-Token` 헤더) 활성. 미설정이면 엔드포인트 비활성(404). |
 | `WAYBACK_ENABLED` | | Wayback 위임 박제(`services/wayback.py`) 켜기. **기본 `false`** — `migrations/007` 적용 + `TRACKER_ENABLED=true` 필요. 원본 삭제 대비 중립 외부 스냅샷을 IA Save Page Now 에 위임 |
 | `IA_ACCESS_KEY` / `IA_SECRET_KEY` | Wayback save | IA S3 키(`archive.org/account/s3.php`). 없으면 availability(기존 스냅샷 조회)만 동작, 신규 save 불가 |
+| `PROXY_FETCH_ENABLED` | | 추적 불가(봇차단) 출처의 프록시 2차 관측(`services/proxyfetch.py`) 켜기. **기본 `false`**(출처 URL 이 프록시 사업자에 전달됨 — 옵트인). soft 신호 전용이라 임계값·자동 승격엔 영향 없음. `PROXY_FETCH_BASE`(기본 Jina Reader)·`PROXY_FETCH_API_KEY` 로 프록시 교체/인증 |
+| `VALUE_W_*` | | 아카이브 가치 스코어러(`services/value.py`) 가중치 튜닝. 현재 적용값은 `GET /api/transparency` 로 공개. `migrations/010` 적용 시 `captured_posts.value_score` 저장 |
+| `VERIFY_CACHE_TTL` | | `GET /api/verify/{id}` 결과 프로세스 캐시(초, 기본 600) — 게이트웨이 GET 남용 방지 |
 
 ## Key Design Decisions
 

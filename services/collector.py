@@ -42,6 +42,7 @@ from services.tracker import (
     decide_status,
     fetch_observation,
 )
+from services.value import assess_value
 from services.volatility import predict_volatility
 from services.wayback import enqueue as wayback_enqueue
 
@@ -66,6 +67,24 @@ def _promotion_cols(db) -> bool:
             logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
                         "기록 생략. migrations/009 적용 후 promoter 가능.")
     return _promo_cols_supported
+
+
+# migrations/010(가치 점수) 컬럼 지원 여부 — value_score. 미설치 환경에서는 payload 에서
+# 빼 400 을 피한다(_promotion_cols 와 동일 패턴).
+_value_col_supported: Optional[bool] = None
+
+
+def _value_col(db) -> bool:
+    global _value_col_supported
+    if _value_col_supported is None:
+        try:
+            db.table("captured_posts").select("value_score").limit(1).execute()
+            _value_col_supported = True
+        except Exception:
+            _value_col_supported = False
+            logger.info("[collector] captured_posts.value_score(010) 미설치 — 가치 점수 "
+                        "기록 생략. migrations/010 적용 시 승격 우선순위에 반영.")
+    return _value_col_supported
 
 # 기본 비활성: migrations/006 적용 후 COLLECTOR_ENABLED=true 로 명시적으로 켠다(외부 폴링 시작).
 COLLECTOR_ENABLED = os.environ.get("COLLECTOR_ENABLED", "false").lower() == "true"
@@ -295,14 +314,19 @@ async def _capture(db, source: str, feed_url: str, item: dict,
         })
     if res["status"] == "deleted":
         row["deleted_at"] = now_iso
+    # 점수 산출 소스: 본문 있으면 본문, 없으면 제목+RSS요약.
+    vsrc = text or item.get("summary") or ""
     if _promotion_cols(db):
-        # 결정적 삭제확률(0~10): 본문 있으면 본문, 없으면 제목+RSS요약으로 산출.
-        # 캡처/모니터링 우선순위·UI 배지 전용(생성 게이트·임계값·박제 결정엔 미주입).
-        vsrc = text or item.get("summary") or ""
+        # 결정적 삭제확률(0~10): 캡처/모니터링 우선순위·UI 배지 전용
+        # (생성 게이트·임계값·박제 결정엔 미주입).
         row["volatility_score"] = predict_volatility(item.get("title"), vsrc, url)["score"]
         # 드물게 캡처 시점에 이미 hard 삭제(404/410)면 기록. 단 본문이 없으면 승격 불가.
         if res["status"] == "deleted" and res.get("http_code") in (404, 410):
             row["hard_deleted_at"] = now_iso
+    if _value_col(db):
+        # 결정적 아카이브 가치(0~10, docs/ARCHIVAL_CRITERIA.md): volatility 와 동일하게
+        # 선별·우선순위·UI 전용. 본문 확보 후 재산출하므로 발견 시 예비 점수보다 정확하다.
+        row["value_score"] = assess_value(item.get("title"), vsrc)["score"]
     nxt, ec = compute_next_check(res["status"], 1, 0, now_dt)
     row["next_check_at"] = nxt
     row["error_count"] = ec
@@ -322,7 +346,9 @@ async def _capture(db, source: str, feed_url: str, item: dict,
 
 
 async def poll_feeds(client: httpx.AsyncClient) -> dict:
-    """모든 피드를 정중하게 순회하며 신규 글을 발견·캡처. {discovered, captured} 반환.
+    """모든 피드를 정중하게 순회하며 신규 글을 발견·캡처.
+    반환: {discovered, captured, skipped_ads}. 광고·거래 글(hard negative)은 캡처하지
+    않으므로 DB 에 남지 않고, 피드에 머무는 동안 매 주기 재발견·재스킵된다(HTTP 비용 0).
 
     공정 분배: 발견(모든 피드)과 캡처를 분리하고, 캡처는 피드별로 한 건씩 번갈아 가져가는
     라운드로빈으로 주기 예산(COLLECTOR_MAX_CAPTURE_PER_CYCLE)을 소진한다. 한 고volume 피드
@@ -330,6 +356,7 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
     신규가 적은 피드는 자기 몫만 쓰고, 남은 예산은 다른 피드가 채운다(낭비 없음)."""
     db = get_db()
     discovered = 0
+    skipped_ads = 0
 
     # 1) 발견: 모든 피드에서 신규 항목만 추린다(피드 본문은 가벼워 전부 폴링).
     per_feed: list[tuple[str, str, list]] = []
@@ -350,15 +377,24 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
             urls = [it["url"] for it in items]
             existing = _existing_urls(db, urls) if urls else set()
             new_items = [it for it in items if it["url"] not in existing]
-            # 예산이 빠듯할 때 '삭제위험 높은' 글을 먼저 캡처하도록 피드 내 정렬(제목+RSS요약
-            # 기반 예비 점수, stable). 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
-            new_items.sort(
-                key=lambda it: predict_volatility(
-                    it.get("title"), it.get("summary") or "", it.get("url") or ""
-                )["score"],
-                reverse=True,
-            )
             discovered += len(new_items)
+            # 광고·거래 글(hard negative, docs/ARCHIVAL_CRITERIA.md §3)은 본문 GET 예산
+            # 자체를 쓰지 않는다 — 무가치 글에 요청을 낭비하지 않는 정중한 폴링 원칙.
+            kept = []
+            for it in new_items:
+                va = assess_value(it.get("title"), it.get("summary"))
+                if va["hard_negative"]:
+                    skipped_ads += 1
+                    continue
+                # 예산이 빠듯할 때 '곧 지워질 && 지워지면 아까운' 글부터 캡처하도록
+                # 삭제위험+가치 결합 예비 점수(제목+RSS요약 기반)로 피드 내 정렬(stable).
+                # 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
+                it["_priority"] = va["score"] + predict_volatility(
+                    it.get("title"), it.get("summary") or "", it.get("url") or ""
+                )["score"]
+                kept.append(it)
+            kept.sort(key=lambda it: it["_priority"], reverse=True)
+            new_items = kept
         per_feed.append((source, feed_url, new_items))
 
     # 2) 캡처: 라운드로빈(피드당 1건씩 돌아가며) 예산 소진. 본문은 신규 1건당 정확히 1회 GET.
@@ -381,7 +417,7 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
             budget -= 1
             await _sleep_jitter()
 
-    return {"discovered": discovered, "captured": captured}
+    return {"discovered": discovered, "captured": captured, "skipped_ads": skipped_ads}
 
 
 async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> int:
