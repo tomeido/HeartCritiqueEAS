@@ -1262,7 +1262,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
   </div>
 
   <!-- 현재 스토리 -->
-  <div id="story-card" class="hidden">
+  <div id="story-card" class="hidden" tabindex="-1" style="outline: none;">
     <div class="card">
       <div class="story-meta">
         <span class="badge" id="story-badge"></span>
@@ -1355,7 +1355,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible {
   </div>
 
   <!-- 큐레이션된 이야기 (피처-퍼스트 피드) -->
-  <div class="card" id="list-card">
+  <div class="card" id="list-card" tabindex="-1" style="outline: none;">
     <div class="list-header">
       <p class="section-title">큐레이션된 이야기</p>
       <div class="filters">
@@ -1789,7 +1789,11 @@ document.querySelectorAll('.stat-tile').forEach(tile => {
     const chip = document.querySelector(`.chip[data-filter="${filter}"]`);
     if (chip) {
       chip.click();
-      document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const listCard = document.getElementById('list-card');
+      if (listCard) {
+        listCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        listCard.focus({ preventScroll: true });
+      }
     }
   };
 });
@@ -2040,6 +2044,7 @@ function showStory(s) {
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
   card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.focus({ preventScroll: true });
 }
 
 function makeCitation(c) {
@@ -2675,7 +2680,11 @@ function updateBadges() {
 // 벨 클릭 → 마지막 방문 시각 갱신, 목록으로 스크롤
 document.getElementById('bell-btn').onclick = () => {
   markAsSeen();
-  document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const listCard = document.getElementById('list-card');
+  if (listCard) {
+    listCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    listCard.focus({ preventScroll: true });
+  }
 };
 
 function renderStoryList() {

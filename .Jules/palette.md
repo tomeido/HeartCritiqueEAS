@@ -1,0 +1,3 @@
+## 2025-02-18 - Maintain Screen Reader Focus on Scrolling
+**Learning:** When using JavaScript to programmatically scroll to a dynamically revealed container (`scrollIntoView`), the visual viewport moves but the screen reader's virtual focus remains at the old position, creating a disjointed experience for keyboard/screen-reader users.
+**Action:** When scrolling to dynamic content reveals, ensure the target container receives `tabindex="-1"` and `style="outline: none;"`, and immediately call `.focus({ preventScroll: true })` on it after scrolling. This syncs the accessibility focus with the visual viewport without triggering a default blue focus ring on non-interactive containers.
