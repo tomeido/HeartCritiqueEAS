@@ -219,17 +219,24 @@ async def _fetch_bundle(url: str) -> tuple[dict | None, str | None]:
         return None, "gateway_not_allowed"
     try:
         async with httpx.AsyncClient(timeout=_FETCH_TIMEOUT, follow_redirects=True) as client:
-            resp = await client.get(url)
-            # 리다이렉트 최종 목적지도 허용 호스트여야 한다(샌드박스 서브도메인 포함).
-            if not _gateway_allowed(str(resp.url)):
-                return None, "redirected_outside_gateway"
-            if resp.status_code == 404:
-                return None, "gateway_404 (devnet 은 약 60일 후 만료될 수 있음)"
-            if resp.status_code != 200:
-                return None, f"gateway_http_{resp.status_code}"
-            if len(resp.content) > _MAX_BUNDLE_BYTES:
-                return None, "bundle_too_large"
-            return json.loads(resp.content.decode("utf-8")), None
+            # 스트리밍 + 상한 도달 시 즉시 중단: 변조된 arweave_url 이 초대형 tx 를
+            # 가리켜도 상한 이상을 메모리에 올리지 않는다(사후 len 검사는 무의미).
+            async with client.stream("GET", url) as resp:
+                # 리다이렉트 최종 목적지도 허용 호스트여야 한다(샌드박스 서브도메인 포함).
+                if not _gateway_allowed(str(resp.url)):
+                    return None, "redirected_outside_gateway"
+                if resp.status_code == 404:
+                    return None, "gateway_404 (devnet 은 약 60일 후 만료될 수 있음)"
+                if resp.status_code != 200:
+                    return None, f"gateway_http_{resp.status_code}"
+                chunks: list[bytes] = []
+                total = 0
+                async for chunk in resp.aiter_bytes():
+                    total += len(chunk)
+                    if total > _MAX_BUNDLE_BYTES:
+                        return None, "bundle_too_large"
+                    chunks.append(chunk)
+            return json.loads(b"".join(chunks).decode("utf-8")), None
     except json.JSONDecodeError:
         return None, "bundle_not_json"
     except Exception as e:
@@ -281,9 +288,13 @@ async def verify_story_archive(story_id: str) -> dict:
 
     bundle_body = (((bundle.get("payload") or {}).get("story")) or {}).get("body") or ""
     db_body = story.get("body") or ""
+    # 헤드라인 ok = 서명이 수학적으로 유효 *그리고* 이 에이전트의 키로 서명됨.
+    # 서명만 유효한 '남의 키' 번들(변조된 arweave_url 이 가리키는 위조 번들)에
+    # ok=true 를 주면 검증 엔드포인트 자체가 오도된다. 키 미설정(None)은 비교 생략.
+    foreign_key = sig["matches_agent_key"] is False
     result = {
-        "ok": bool(sig["valid"]),
-        "reason": sig["reason"],
+        "ok": bool(sig["valid"]) and not foreign_key,
+        "reason": sig["reason"] or ("foreign_signing_key" if foreign_key else None),
         "story_id": story_id,
         "arweave_url": url,
         "network": os.environ.get("IRYS_NETWORK", "devnet"),

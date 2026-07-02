@@ -71,7 +71,15 @@ def test_short_post_penalized_but_no_body_neutral():
     short = val.assess_value("제목", "ㅋㅋ")
     none = val.assess_value("제목", None)
     assert "한 줄 글" in short["signals"]
-    assert none["score"] >= short["score"]
+    # 0-클램프 때문에 score 비교는 허수가 된다 — 컴포넌트로 감산 발화 여부를 직접 확인.
+    assert short["components"].get("short", 0) < 0
+    assert "short" not in none["components"]   # 본문 없음(RSS 요약만)은 중립
+
+
+def test_title_ending_question_mark_penalized():
+    # 종결어미 패턴이 못 잡는 '이거 어때?' 류 — 제목의 물음표 종결로 잡는다.
+    r = val.assess_value("이 노트북 어때?", "구매를 고민하고 있습니다. 의견 부탁드립니다.")
+    assert "질문·상담성" in r["signals"]
 
 
 def test_score_clamped_0_10():
