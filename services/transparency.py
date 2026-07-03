@@ -48,7 +48,10 @@ def _cache_put(story_id: str, result: dict) -> None:
 
 # 박제물 게이트웨이 허용 호스트(SSRF 방어): DB 의 arweave_url 이 변조돼도 임의 호스트로
 # 서버 GET 을 유발할 수 없다. 서브도메인 허용(<txid>.arweave.net 샌드박스 리다이렉트).
-_ALLOWED_GATEWAY_SUFFIXES = ("gateway.irys.xyz", "devnet.irys.xyz", "arweave.net")
+# datasprite-cdn.com: irys 게이트웨이(gateway/devnet.irys.xyz)가 307/302 로 넘기는
+# 자체 CDN(<해시>.devnet-1.datasprite-cdn.com 등) — 미허용 시 devnet 검증이 전부 실패.
+_ALLOWED_GATEWAY_SUFFIXES = ("gateway.irys.xyz", "devnet.irys.xyz", "arweave.net",
+                             "datasprite-cdn.com")
 _FETCH_TIMEOUT = 30
 _MAX_BUNDLE_BYTES = 5_000_000
 
