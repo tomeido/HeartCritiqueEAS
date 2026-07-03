@@ -634,14 +634,46 @@ KINDNESS_RESCUE_RE = re.compile(
     r'지켜줬|지켜준|막아줬|막아준|찾아줬|찾아주신|찾아준|양보|기부|선행|베풀|베푼|'
     r'챙겨줬|챙겨주신|챙겨준|데려다|일으켜|들어줬|씌워줬|업어|업고'
 )
+# 미담 positive 신호: 이 중 하나도 없는 글(게임/연예 잡담·게시판 목차·스포츠 등)은 미담
+# 후보에서 제외한다. critique 의 positive 필터와 같은 철학 — Tavily 가 커뮤니티 쿼리에
+# 게시판 잡동사니를 돌려줄 때 약한 모델이 비미담을 '미담'으로 오수락하는 것을 입력 단계에서
+# 차단한다. 이 필터로 전부 걸러지면 no_fit → Gemini(검색 grounding) 폴백이 recall 을 받친다.
+KINDNESS_POSITIVE_RE = re.compile(
+    r'도와|도움|도운|구해|구조|구했|살렸|살려|감동|뭉클|울컥|눈물|감사|고마|보답|'
+    r'선행|미담|훈훈|따뜻|친절|천사|의인|은인|영웅|호의|온정|정성|'
+    r'기부|기탁|후원|나눔|나눠|양보|베풀|배려|선물|보살펴|보살핌|돌봐|돌봄|'
+    r'챙겨|지켜|막아줬|막아준|돌려줬|돌려준|되찾|주웠|주운|갚았|은혜'
+)
+# 미담 '출력' 검사용 비위 신호: 입력 필터와 모델 게이트를 다 지나고도 갑질 폭로류가
+# 미담으로 새는 경우(약한 모델의 오수락)를 생성 결과 단계에서 결정적으로 잡는다.
+KINDNESS_OUTPUT_CRITIQUE_RE = re.compile(
+    r'갑질|폭로|비위|내부\s?고발|폭언|착취|횡령|배임|괴롭힘|불매|보이콧'
+)
+
+
+def kindness_output_off_topic(text: str) -> bool:
+    """생성된 '미담' 본문이 미담이 아닌지 결정적으로 판정(출력 게이트).
+    - positive 신호가 하나도 없으면 미담이 아니다(잡담·정보글을 이야기로 재작성한 경우).
+    - 비위 어휘가 있는데 '선행 완료'(RESCUE) 문맥이 없으면 critique 누수다
+      ('갑질에서 지켜준 동료' 같은 진짜 미담은 RESCUE 로 살아남는다)."""
+    t = text or ""
+    if not KINDNESS_POSITIVE_RE.search(t):
+        return True
+    if KINDNESS_OUTPUT_CRITIQUE_RE.search(t) and not KINDNESS_RESCUE_RE.search(t):
+        return True
+    return False
 
 
 def looks_off_topic_kindness(item: dict) -> bool:
-    """미담이 아닌 글(사기 호소·돈분쟁·괴담·협박·상담 등)로 보이면 True.
-    제목+본문 앞부분(200자)에서 비-미담 신호가 잡혀도, 본문 전체(600자)에 '선행 완료'
-    신호가 있으면 진짜 미담으로 보고 살린다(RESCUE 화이트리스트로 과필터 억제)."""
+    """미담이 아닌 글로 보이면 True. 두 단계:
+    1) positive 게이트 — 제목+본문에 미담 신호가 하나도 없으면 컷(게임·연예 잡담,
+       게시판 목차 페이지 등). 신호 어휘는 넓게 잡아 과필터를 억제한다.
+    2) 비-미담 블록리스트 — 사기 호소·돈분쟁·괴담·협박·상담 신호가 잡히면 컷하되,
+       본문 전체(600자)에 '선행 완료' 신호가 있으면 진짜 미담으로 보고 살린다(RESCUE)."""
     title = item.get("title") or ""
     content = item.get("content") or ""
+    if not KINDNESS_POSITIVE_RE.search(title + " " + content):
+        return True
     if not KINDNESS_OFFTOPIC_RE.search(title + " " + content[:200]):
         return False
     # RESCUE 는 본문 전체에서 찾아 200~600자 구간의 해결 동사까지 포착(과필터 회피 우선)
@@ -864,14 +896,13 @@ def _groq_search(query: str, category: str, domains) -> tuple:
     # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 적합성 필터는 유지
     if not results:
         results = normalize_search_results(search_data, drop_news=False, off_topic_fn=off_fn)
-    # 3차: 도메인 풀고 재검색. kindness 는 모든 필터 해제(뭐라도 생성 우선)지만, critique 는
-    # 적합성 필터를 유지한다 — 스포츠·게임·연예 잡담을 '기업 비위'로 둔갑시키느니 생성을 건너뛴다.
+    # 3차: 도메인 풀고 재검색. 적합성 필터는 두 카테고리 모두 유지한다 — 게임·연예 잡담을
+    # '미담'이나 '기업 비위'로 둔갑시키느니 생성을 건너뛴다. (과거 kindness 는 '뭐라도 생성
+    # 우선'으로 필터를 해제했지만, 이제 no_fit 이면 Gemini 검색 grounding 폴백이 있어
+    # 오수락 위험을 감수할 이유가 없다.)
     if not results:
         search_data = tavily_search(query)
-        results = normalize_search_results(
-            search_data, drop_news=False,
-            off_topic_fn=(off_fn if category == "critique" else None),
-        )
+        results = normalize_search_results(search_data, drop_news=False, off_topic_fn=off_fn)
 
     community_count = len(results) if results else 0
     # 본문 스니펫이 빈약한 출처는 모델이 일반론으로 공허해지므로 선택 후보에서 제외(전부 빈약하면 폴백)
@@ -933,6 +964,12 @@ def generate_via_groq(category: str) -> tuple:
         # (휘발성은 생성 게이트가 아닌 표시·랭킹 전용이라는 원칙과도 일관).
         if RELEVANCE_GATE_ENABLED and category == "critique" and volatility < 7:
             logger.info(f"[llm] {category} 휘발성 점수 미달 ({volatility} < 7) → 쿼리 변경 재시도 (query={query!r})")
+            continue
+
+        # 출력 게이트(kindness): 입력 필터·NO_FIT 게이트를 지나고도 비위 글이 미담으로
+        # 재작성된 경우를 결정적으로 컷. 재시도 소진 시 no_fit → Gemini 폴백이 받는다.
+        if RELEVANCE_GATE_ENABLED and category == "kindness" and kindness_output_off_topic(text):
+            logger.info(f"[llm] {category} 출력이 미담 아님(비위/잡담 누수) → 쿼리 변경 재시도 (query={query!r})")
             continue
 
         text = sanitize_text(text)
@@ -1070,6 +1107,16 @@ def generate(category: str | None = None) -> dict:
                 actual_provider = "gemini"
             else:
                 raise e
+        else:
+            # groq 경로가 예외 없이 no_fit(text=None)으로 끝난 경우에도 Gemini 로 폴백한다.
+            # Tavily 가 커뮤니티 쿼리에 게시판 목차·잡담만 돌려주면 모델이 (올바르게) 전부
+            # NO_FIT 을 내는데, 이는 '적합 글이 세상에 없음'이 아니라 '이 검색 채널이 못
+            # 찾음'이다 — Google Search grounding 은 다른 채널이므로 1회 더 시도할 가치가
+            # 있다. Gemini 경로도 아래에서 동일한 NO_FIT 게이트를 통과해야 하므로 환각
+            # 방지 게이트는 약화되지 않는다(둘 다 없다고 하면 그대로 no_fit→503).
+            if (text is None or not text.strip()) and GEMINI_API_KEY:
+                logger.info(f"[llm] {category} groq 적합 글 미발견 → Gemini(검색 grounding)로 폴백 재시도")
+                actual_provider = "gemini"
 
     if actual_provider == "gemini":
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
@@ -1085,6 +1132,11 @@ def generate(category: str | None = None) -> dict:
             text = USED_SOURCES_STRIP_RE.sub('', text)
             text, volatility, reason = extract_volatility_and_reason(text)
             text = sanitize_text(text)
+            # 출력 게이트(kindness): groq 경로와 동일 — 비위/잡담이 미담으로 재작성된
+            # 경우 결정적으로 컷하고 no_fit(503) 처리(잘못된 글을 공개하느니 재시도 유도).
+            if RELEVANCE_GATE_ENABLED and category == "kindness" and kindness_output_off_topic(text):
+                logger.info("[llm] kindness(gemini) 출력이 미담 아님(비위/잡담 누수) → no_fit")
+                text = None
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
         # measure_news_coverage 가 graceful 하게 None 반환 → gap 없이 진행.
         if text and citations:
