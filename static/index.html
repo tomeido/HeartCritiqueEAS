@@ -881,6 +881,8 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
 .cit-archive:focus-visible {
   outline: 2px solid var(--accent-1); outline-offset: 2px; border-radius: var(--r-sm);
 }
+/* 프로그램적 포커스 대상 컨테이너(tabindex=-1) — 시각 링 없이 SR 포커스만 이동 */
+#story-card:focus, #list-card:focus { outline: none; }
 
 /* ── 모션 최소화 ── */
 @media (prefers-reduced-motion: reduce) {
@@ -1306,15 +1308,15 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <span class="gen-sub">커뮤니티 게시판(더쿠·블라인드·FM코리아·디시 등)과 뉴스에서 미담·폭로를 길어 올립니다</span>
     </p>
     <div class="gen-buttons">
-      <button class="btn-gen btn-gen-kindness" data-category="kindness">🌸 따뜻한 미담</button>
-      <button class="btn-gen btn-gen-critique" data-category="critique">🔥 대기업 비위</button>
-      <button class="btn-gen btn-gen-random" data-category="">🎲 무작위</button>
+      <button class="btn-gen btn-gen-kindness" data-category="kindness"><span aria-hidden="true">🌸</span> 따뜻한 미담</button>
+      <button class="btn-gen btn-gen-critique" data-category="critique"><span aria-hidden="true">🔥</span> 대기업 비위</button>
+      <button class="btn-gen btn-gen-random" data-category=""><span aria-hidden="true">🎲</span> 무작위</button>
     </div>
     <div class="status" id="gen-status" role="status" aria-live="polite"></div>
   </div>
 
   <!-- 현재 스토리 -->
-  <div id="story-card" class="hidden">
+  <div id="story-card" class="hidden" tabindex="-1">
     <div class="card">
       <div class="story-meta">
         <span class="badge" id="story-badge"></span>
@@ -1325,6 +1327,8 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
                 title="이 글의 링크 공유" aria-label="이 글의 링크 공유">🔗 공유</button>
         <button class="btn-sm btn-outline btn-receipt" id="btn-receipt" style="margin-left:6px"
                 title="이 글을 QR 영수증 이미지로 저장" aria-label="이 글을 QR 영수증 이미지로 저장">🧾 영수증</button>
+        <button class="btn-sm btn-outline btn-close-story" id="btn-close-story" style="margin-left:6px"
+                title="이야기 닫기" aria-label="이야기 닫기">✕</button>
       </div>
 
       <!-- 격차 알림 (medium 이상일 때 표시) -->
@@ -1344,7 +1348,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         <div class="poetic-reason-text" id="poetic-reason-text"></div>
         <div class="volatility-container">
           <span>휘발성 지수</span>
-          <div class="volatility-bar">
+          <div class="volatility-bar" id="volatility-bar" role="progressbar" aria-label="휘발성 지수" aria-valuemin="0" aria-valuemax="10" aria-valuenow="0">
             <div class="volatility-bar-fill" id="volatility-bar-fill" style="width: 0%"></div>
           </div>
           <span id="volatility-val">0/10</span>
@@ -1401,7 +1405,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         </div>
         <!-- 임계값 감축 사유 -->
         <div class="urgency-banner hidden" id="urgency-banner"></div>
-        <div class="vote-bar" id="vote-bar">
+        <div class="vote-bar" id="vote-bar" role="progressbar" aria-label="공론화 투표 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
         </div>
         <button class="btn-vote btn-sm" id="btn-vote" disabled>로그인 후 투표</button>
@@ -1411,10 +1415,10 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
   </div>
 
   <!-- 큐레이션된 이야기 (피처-퍼스트 피드) -->
-  <div class="card" id="list-card">
+  <div class="card" id="list-card" tabindex="-1">
     <div class="list-header">
       <p class="section-title">큐레이션된 이야기</p>
-      <div class="filters">
+      <div class="filters" role="group" aria-label="이야기 필터">
         <button class="chip active" data-filter="all">전체</button>
         <button class="chip" data-filter="kindness">선행</button>
         <button class="chip" data-filter="critique">비판</button>
@@ -1699,6 +1703,27 @@ function handleHashRoute() {
 window.addEventListener('hashchange', handleHashRoute);
 // pushState 로 바뀐 주소를 뒤로/앞으로 가기 했을 때도 해당 글을 다시 연다.
 window.addEventListener('popstate', handleHashRoute);
+
+// ✕ 닫기: 열린 글 카드를 닫고 주소창의 #story= 를 지워 화면·주소를 일치시킨다.
+// (replaceState 는 hashchange 미발화 → handleHashRoute 와 이중 처리 없음)
+function closeStoryCard() {
+  const card = document.getElementById('story-card');
+  if (!card || card.classList.contains('hidden')) return;
+  card.classList.add('hidden');
+  currentStory = null;
+  // 폴링 가드(pollForArchive)는 currentStory=null 이면 curId falsy 로 계속 돌므로 여기서 반드시 끊는다.
+  if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
+  if (/^#story=/.test(window.location.hash)) {
+    try { history.replaceState(null, '', window.location.pathname + window.location.search); }
+    catch (_) { window.location.hash = ''; }
+  }
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const t = e.target;  // 검색창 등 입력 중엔 네이티브 Escape(입력 지우기)와 충돌하지 않게 양보
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+  closeStoryCard();
+});
 
 // 글을 열 때 주소창을 #story=<id> 로 맞춰 '현재 글' 자체가 공유 가능한 링크가 되게 한다.
 // (push/replace 모두 hashchange 가 발화하지 않아 같은 글을 두 번 부르지 않는다.)
@@ -2355,6 +2380,14 @@ function renderTimeseries(data) {
   svg.ontouchcancel = hideTooltip;
 }
 
+// 동적 콘텐츠로 스크롤한 뒤 키보드/스크린리더 포커스를 함께 옮긴다(접근성).
+// 대상 컨테이너는 마크업의 tabindex=-1 로 프로그램적 포커스만 허용.
+function scrollFocus(el) {
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  el.focus({ preventScroll: true });
+}
+
 // 타일 클릭 → 목록 필터 점프
 document.querySelectorAll('.stat-tile').forEach(tile => {
   tile.onclick = () => {
@@ -2362,7 +2395,7 @@ document.querySelectorAll('.stat-tile').forEach(tile => {
     const chip = document.querySelector(`.chip[data-filter="${filter}"]`);
     if (chip) {
       chip.click();
-      document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      scrollFocus(document.getElementById('list-card'));
     }
   };
 });
@@ -2480,6 +2513,7 @@ document.querySelectorAll('.btn-gen').forEach(btn => {
 document.getElementById('btn-recheck').onclick = recheckCurrent;
 document.getElementById('btn-share').onclick = shareStory;
 document.getElementById('btn-receipt').onclick = makeReceipt;
+document.getElementById('btn-close-story').onclick = closeStoryCard;
 
 let typingTimer = null;
 
@@ -2577,6 +2611,7 @@ function showStory(s) {
     const voltScore = s.volatility_score || 0;
     voltFill.style.width = (voltScore * 10) + '%';
     voltVal.textContent = `${voltScore}/10`;
+    document.getElementById('volatility-bar').setAttribute('aria-valuenow', voltScore);
     
     // 배경에 흘러가는 날것의 텍스트 노이즈 배치
     let noiseContent = '';
@@ -2600,6 +2635,7 @@ function showStory(s) {
   } else {
     poeticOverlay.classList.add('hidden');
     bgNoise.innerHTML = '';
+    document.getElementById('volatility-bar').setAttribute('aria-valuenow', '0');
   }
 
   renderGapSignal(s.gap_score, s.community_count, s.news_count);
@@ -2628,7 +2664,7 @@ function showStory(s) {
   vbtn.onclick = null;
   setStatus('vote-status', '');
   refreshVoteStatus(s.id);
-  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  scrollFocus(card);
 }
 
 function makeCitation(c) {
@@ -2824,6 +2860,7 @@ async function refreshVoteStatus(storyId) {
     // 투표 버튼이 showStory 에서 disabled 로 무력화된 채 남지 않게 복구 경로 제공.
     const btn = document.getElementById('btn-vote');
     if (btn) {
+      btn.removeAttribute('aria-busy');
       btn.disabled = false;
       btn.textContent = '↻ 투표 상태 다시 불러오기';
       btn.onclick = () => refreshVoteStatus(storyId);
@@ -2842,6 +2879,7 @@ function renderVoteArea(storyId, data) {
   document.getElementById('vote-threshold').textContent = data.threshold;
   const pct = Math.min(100, (data.vote_count / data.threshold) * 100);
   document.getElementById('vote-bar-fill').style.width = pct + '%';
+  document.getElementById('vote-bar').setAttribute('aria-valuenow', Math.round(pct));
   document.getElementById('vote-bar').classList.toggle('complete', data.vote_count >= data.threshold);
 
   // 긴급도 배너 (임계값이 기본보다 낮을 때)
@@ -2860,8 +2898,10 @@ function renderVoteArea(storyId, data) {
     return;
   }
 
+  btn.removeAttribute('aria-busy');
   if (data.vote_count >= data.threshold) {
     btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Arweave 박제 진행 중…';
+    btn.setAttribute('aria-busy', 'true');
     btn.className = 'btn-vote btn-sm';
     btn.disabled = true;
   } else if (data.already_voted) {
@@ -2887,6 +2927,7 @@ async function castVote(storyId) {
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 투표 중';
+  btn.setAttribute('aria-busy', 'true');
   setStatus('vote-status', '');
 
   try {
@@ -2910,6 +2951,7 @@ async function castVote(storyId) {
   } catch (e) {
     setStatus('vote-status', '실패: ' + e.message, 'err');
     toast('투표 실패: ' + e.message, 'error');
+    btn.removeAttribute('aria-busy');
     btn.disabled = false;
     btn.innerHTML = orig;
   }
@@ -3062,6 +3104,7 @@ async function runVerification(txId, arweaveUrl) {
   const btn = document.getElementById('btn-verify');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin" aria-hidden="true"></span> 검증 중...';
+  btn.setAttribute('aria-busy', 'true');
   document.getElementById('verify-steps').innerHTML = '';
   const finalEl = document.getElementById('verify-final');
   finalEl.className = 'verify-final';
@@ -3185,6 +3228,7 @@ async function runVerification(txId, arweaveUrl) {
     finalEl.textContent = '❌ 검증 실패 — 단계별 메시지를 확인하세요';
   }
 
+  btn.removeAttribute('aria-busy');
   btn.disabled = false;
   btn.innerHTML = '🔍 다시 검증';
 }
@@ -3271,7 +3315,7 @@ function updateBadges() {
 // 벨 클릭 → 마지막 방문 시각 갱신, 목록으로 스크롤
 document.getElementById('bell-btn').onclick = () => {
   markAsSeen();
-  document.getElementById('list-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  scrollFocus(document.getElementById('list-card'));
 };
 
 // 검색 상태 라인 + 지우기(✕) 버튼 토글. searchQuery 는 textContent 로만 출력(XSS 안전).
@@ -3318,7 +3362,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
-        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : ''}
+        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.gen-card\').scrollIntoView({ behavior: \'smooth\', block: \'start\' })">새 이야기 의뢰하기</button></div>'}
       </div>`;
     return;
   }
