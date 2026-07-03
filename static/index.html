@@ -1328,7 +1328,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         <button class="btn-sm btn-outline btn-receipt" id="btn-receipt" style="margin-left:6px"
                 title="이 글을 QR 영수증 이미지로 저장" aria-label="이 글을 QR 영수증 이미지로 저장">🧾 영수증</button>
         <button class="btn-sm btn-outline btn-close-story" id="btn-close-story" style="margin-left:6px"
-                title="이야기 닫기" aria-label="이야기 닫기">✕</button>
+                title="이야기 닫기 (Esc)" aria-label="이야기 닫기 (Esc)">✕</button>
       </div>
 
       <!-- 격차 알림 (medium 이상일 때 표시) -->
@@ -1716,6 +1716,17 @@ function closeStoryCard() {
   if (/^#story=/.test(window.location.hash)) {
     try { history.replaceState(null, '', window.location.pathname + window.location.search); }
     catch (_) { window.location.hash = ''; }
+  }
+
+  if (storyReturnFocus && document.body.contains(storyReturnFocus)) {
+    storyReturnFocus.focus({ preventScroll: true });
+  } else if (lastOpenedStoryId) {
+    const item = document.querySelector(`.list-item[data-id="${lastOpenedStoryId}"]`);
+    if (item) item.focus({ preventScroll: true });
+    else {
+      const listCard = document.getElementById('list-card');
+      if (listCard) listCard.focus({ preventScroll: true });
+    }
   }
 }
 document.addEventListener('keydown', (e) => {
@@ -2516,6 +2527,8 @@ document.getElementById('btn-receipt').onclick = makeReceipt;
 document.getElementById('btn-close-story').onclick = closeStoryCard;
 
 let typingTimer = null;
+let storyReturnFocus = null;
+let lastOpenedStoryId = null;
 
 function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
   if (typingTimer) {
@@ -2565,6 +2578,8 @@ function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
 }
 
 function showStory(s) {
+  storyReturnFocus = document.activeElement;
+  lastOpenedStoryId = s.id || s.story_id;
   currentStory = s;
   setStoryHash(s.id || s.story_id);   // 주소창을 이 글로 → 공유·새로고침·뒤로가기 가능
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
@@ -3398,6 +3413,7 @@ function renderStoryList() {
       : `${s.vote_count}/${threshold}표`;
 
     const div = document.createElement('div');
+    div.dataset.id = s.id || s.story_id;
     const isGhost = !isArchived && dC === 0;
     const isDeletedWarning = dC > 0 && !isArchived;
 
