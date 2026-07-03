@@ -105,13 +105,45 @@ def _mark(db, captured_id: str, fields: dict) -> None:
         logger.warning(f"[promoter] captured 갱신 실패 {captured_id}: {e}")
 
 
+# migrations/011(value_score) 지원 여부 — 미적용이면 select/order 에서 빼 400 을 피한다.
+_value_col_supported: Optional[bool] = None
+
+
+def _value_col(db) -> bool:
+    global _value_col_supported
+    if _value_col_supported is None:
+        try:
+            db.table("captured_posts").select("value_score").limit(1).execute()
+            _value_col_supported = True
+        except Exception as e:
+            # 컬럼 부재(010 미적용)일 때만 영구 캐시 — 일시적 연결오류를 False 로 굳히면
+            # 재시작 전까지 가치 우선 정렬이 조용히 꺼진다. 일시 오류는 이번만 폴백.
+            from services.tracker import _is_missing_column_error
+            if _is_missing_column_error(e, "value_score"):
+                _value_col_supported = False
+                logger.info("[promoter] captured_posts.value_score(010) 미설치 — "
+                            "승격 순서는 volatility 단독 정렬로 폴백.")
+            else:
+                logger.warning(f"[promoter] value_score 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
+    return _value_col_supported
+
+
 def find_promotable(db, limit: int) -> list:
     """승격 후보: hard 삭제 확정(404/410) + 본문 보유 + 아직 미승격 + 미처리.
-    soft 삭제는 절대 포함하지 않는다(hard_deleted_at IS NOT NULL 로 강제)."""
+    soft 삭제는 절대 포함하지 않는다(hard_deleted_at IS NOT NULL 로 강제).
+
+    정렬: 후보는 전부 이미 hard 삭제됐으므로 '삭제 위험'은 실현된 상태 — 남은 축은
+    '박제 가치'다(docs/ARCHIVAL_CRITERIA.md §4). 주기당 배치 상한이 있어 가치 높은
+    글부터 승격되도록 value_score(010) 우선, volatility 차선, 오래된 hard 삭제 순."""
     try:
+        cols = "id,url,title,body_text,volatility_score,hard_deleted_at,promotion_status"
+        use_value = _value_col(db)
+        if use_value:
+            cols += ",value_score"
         q = (
             db.table("captured_posts")
-            .select("id,url,title,body_text,volatility_score,hard_deleted_at,promotion_status")
+            .select(cols)
             .not_.is_("hard_deleted_at", "null")
             .not_.is_("body_text", "null")
             .is_("promoted_story_id", "null")
@@ -119,6 +151,8 @@ def find_promotable(db, limit: int) -> list:
         )
         if PROMOTER_MIN_VOLATILITY > 0:
             q = q.gte("volatility_score", PROMOTER_MIN_VOLATILITY)
+        if use_value:
+            q = q.order("value_score", desc=True, nullsfirst=False)
         resp = (
             q.order("volatility_score", desc=True, nullsfirst=False)
             .order("hard_deleted_at", desc=False)

@@ -37,11 +37,14 @@ from services.tracker import (
     USER_AGENT,
     _baseline_from_row,
     _build_update,
+    _due_filter,
+    _is_missing_column_error,
     _visible_text,
     compute_next_check,
     decide_status,
     fetch_observation,
 )
+from services.value import assess_value
 from services.volatility import predict_volatility
 from services.wayback import enqueue as wayback_enqueue
 
@@ -54,18 +57,59 @@ logger = logging.getLogger(__name__)
 _promo_cols_supported: Optional[bool] = None
 
 
-def _promotion_cols(db) -> bool:
+def _promotion_cols_state(db) -> Optional[bool]:
+    """009 승격 컬럼 지원 3상 판별: True/False = 확정(캐시), None = 일시 오류로 미확정.
+
+    컬럼 부재(009 미적용)일 때만 영구 캐시. 일시적 연결오류를 False 로 굳히면 그 동안
+    hard 삭제(404/410)를 감지해도 hard_deleted_at 을 못 박고, 그 행은 큐에서 영구
+    제외되므로 승격 후보가 조용히 유실된다 — 미션의 핵심 경로라 일시 오류는 None 으로
+    보고해 호출부(recheck_captured_batch)가 비가역 기록을 미루고 주기를 건너뛰게 한다."""
     global _promo_cols_supported
     if _promo_cols_supported is None:
         try:
             (db.table("captured_posts")
              .select("volatility_score,hard_deleted_at,promotion_status").limit(1).execute())
             _promo_cols_supported = True
-        except Exception:
-            _promo_cols_supported = False
-            logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
-                        "기록 생략. migrations/009 적용 후 promoter 가능.")
+        except Exception as e:
+            if _is_missing_column_error(e, "promotion_status"):
+                _promo_cols_supported = False
+                logger.info("[collector] captured_posts 승격 컬럼(009) 미설치 — 삭제확률/hard삭제 "
+                            "기록 생략. migrations/009 적용 후 promoter 가능.")
+            else:
+                logger.warning(f"[collector] 승격 컬럼 판별 일시 실패(캐시 안 함): {e!r}")
+                return None
     return _promo_cols_supported
+
+
+def _promotion_cols(db) -> bool:
+    """불리언 간편 래퍼(_capture 용 — 일시 불명은 '이번엔 기록 생략'과 동치).
+    _capture 경로는 hard 삭제 시 본문도 없어(404) 승격 자체가 불가하므로 비가역 유실 없음."""
+    return bool(_promotion_cols_state(db))
+
+
+# migrations/011(가치 점수) 컬럼 지원 여부 — value_score. 미설치 환경에서는 payload 에서
+# 빼 400 을 피한다(_promotion_cols 와 동일 패턴).
+_value_col_supported: Optional[bool] = None
+
+
+def _value_col(db) -> bool:
+    global _value_col_supported
+    if _value_col_supported is None:
+        try:
+            db.table("captured_posts").select("value_score").limit(1).execute()
+            _value_col_supported = True
+        except Exception as e:
+            # 컬럼 부재(010 미적용)일 때만 영구 캐시. 일시적 연결오류를 False 로 굳히면
+            # 재시작 전까지 value_score 기록이 조용히 꺼진다(routers/stories 와 동일 교훈)
+            # — 일시 오류는 캐시하지 않고 이번 호출만 생략, 다음 호출이 재판별한다.
+            if _is_missing_column_error(e, "value_score"):
+                _value_col_supported = False
+                logger.info("[collector] captured_posts.value_score(010) 미설치 — 가치 점수 "
+                            "기록 생략. migrations/011 적용 시 승격 우선순위에 반영.")
+            else:
+                logger.warning(f"[collector] value_score 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
+    return _value_col_supported
 
 # 기본 비활성: migrations/006 적용 후 COLLECTOR_ENABLED=true 로 명시적으로 켠다(외부 폴링 시작).
 COLLECTOR_ENABLED = os.environ.get("COLLECTOR_ENABLED", "false").lower() == "true"
@@ -295,14 +339,19 @@ async def _capture(db, source: str, feed_url: str, item: dict,
         })
     if res["status"] == "deleted":
         row["deleted_at"] = now_iso
+    # 점수 산출 소스: 본문 있으면 본문, 없으면 제목+RSS요약.
+    vsrc = text or item.get("summary") or ""
     if _promotion_cols(db):
-        # 결정적 삭제확률(0~10): 본문 있으면 본문, 없으면 제목+RSS요약으로 산출.
-        # 캡처/모니터링 우선순위·UI 배지 전용(생성 게이트·임계값·박제 결정엔 미주입).
-        vsrc = text or item.get("summary") or ""
+        # 결정적 삭제확률(0~10): 캡처/모니터링 우선순위·UI 배지 전용
+        # (생성 게이트·임계값·박제 결정엔 미주입).
         row["volatility_score"] = predict_volatility(item.get("title"), vsrc, url)["score"]
         # 드물게 캡처 시점에 이미 hard 삭제(404/410)면 기록. 단 본문이 없으면 승격 불가.
         if res["status"] == "deleted" and res.get("http_code") in (404, 410):
             row["hard_deleted_at"] = now_iso
+    if _value_col(db):
+        # 결정적 아카이브 가치(0~10, docs/ARCHIVAL_CRITERIA.md): volatility 와 동일하게
+        # 선별·우선순위·UI 전용. 본문 확보 후 재산출하므로 발견 시 예비 점수보다 정확하다.
+        row["value_score"] = assess_value(item.get("title"), vsrc)["score"]
     nxt, ec = compute_next_check(res["status"], 1, 0, now_dt)
     row["next_check_at"] = nxt
     row["error_count"] = ec
@@ -322,7 +371,9 @@ async def _capture(db, source: str, feed_url: str, item: dict,
 
 
 async def poll_feeds(client: httpx.AsyncClient) -> dict:
-    """모든 피드를 정중하게 순회하며 신규 글을 발견·캡처. {discovered, captured} 반환.
+    """모든 피드를 정중하게 순회하며 신규 글을 발견·캡처.
+    반환: {discovered, captured, skipped_ads}. 광고·거래 글(hard negative)은 캡처하지
+    않으므로 DB 에 남지 않고, 피드에 머무는 동안 매 주기 재발견·재스킵된다(HTTP 비용 0).
 
     공정 분배: 발견(모든 피드)과 캡처를 분리하고, 캡처는 피드별로 한 건씩 번갈아 가져가는
     라운드로빈으로 주기 예산(COLLECTOR_MAX_CAPTURE_PER_CYCLE)을 소진한다. 한 고volume 피드
@@ -330,6 +381,7 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
     신규가 적은 피드는 자기 몫만 쓰고, 남은 예산은 다른 피드가 채운다(낭비 없음)."""
     db = get_db()
     discovered = 0
+    skipped_ads = 0
 
     # 1) 발견: 모든 피드에서 신규 항목만 추린다(피드 본문은 가벼워 전부 폴링).
     per_feed: list[tuple[str, str, list]] = []
@@ -350,15 +402,24 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
             urls = [it["url"] for it in items]
             existing = _existing_urls(db, urls) if urls else set()
             new_items = [it for it in items if it["url"] not in existing]
-            # 예산이 빠듯할 때 '삭제위험 높은' 글을 먼저 캡처하도록 피드 내 정렬(제목+RSS요약
-            # 기반 예비 점수, stable). 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
-            new_items.sort(
-                key=lambda it: predict_volatility(
-                    it.get("title"), it.get("summary") or "", it.get("url") or ""
-                )["score"],
-                reverse=True,
-            )
             discovered += len(new_items)
+            # 광고·거래 글(hard negative, docs/ARCHIVAL_CRITERIA.md §3)은 본문 GET 예산
+            # 자체를 쓰지 않는다 — 무가치 글에 요청을 낭비하지 않는 정중한 폴링 원칙.
+            kept = []
+            for it in new_items:
+                va = assess_value(it.get("title"), it.get("summary"))
+                if va["hard_negative"]:
+                    skipped_ads += 1
+                    continue
+                # 예산이 빠듯할 때 '곧 지워질 && 지워지면 아까운' 글부터 캡처하도록
+                # 삭제위험+가치 결합 예비 점수(제목+RSS요약 기반)로 피드 내 정렬(stable).
+                # 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
+                it["_priority"] = va["score"] + predict_volatility(
+                    it.get("title"), it.get("summary") or "", it.get("url") or ""
+                )["score"]
+                kept.append(it)
+            kept.sort(key=lambda it: it["_priority"], reverse=True)
+            new_items = kept
         per_feed.append((source, feed_url, new_items))
 
     # 2) 캡처: 라운드로빈(피드당 1건씩 돌아가며) 예산 소진. 본문은 신규 1건당 정확히 1회 GET.
@@ -381,14 +442,22 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
             budget -= 1
             await _sleep_jitter()
 
-    return {"discovered": discovered, "captured": captured}
+    return {"discovered": discovered, "captured": captured, "skipped_ads": skipped_ads}
 
 
 async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> int:
     """만기 도래한 captured_posts 를 재검사해 삭제/변화를 감지(적응형 due 순). 검사 수 반환.
     tracker 와 동일하게 hard(404/410) deleted 만 큐에서 영구 제외하고, soft 는 정정 위해 유지."""
     db = get_db()
-    promo = _promotion_cols(db)
+    promo_state = _promotion_cols_state(db)
+    if promo_state is None:
+        # 프로브 일시 불명 상태로 배치를 진행하면, 이 배치에서 감지된 hard 삭제가
+        # hard_deleted_at 없이 기록되고 그 행은 큐를 영영 떠나 승격 후보가 비가역적으로
+        # 유실된다. 이번 주기는 건너뛰고 다음 주기에 재판별한다(수집 지연 << 유실).
+        logger.warning("[collector] 승격 컬럼 판별 일시 실패 — hard 삭제 기록 유실 방지를 위해 "
+                       "이번 재검사 주기 건너뜀")
+        return 0
+    promo = promo_state
     now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     cols = (
         "id,url,check_count,status,http_code,error_count,"
@@ -402,7 +471,8 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
             db.table("captured_posts")
             .select(cols)
             .or_(RECHECK_QUEUE_FILTER)
-            .lte("next_check_at", now_iso)
+            # 만기 도래 + NULL(혼합 상태 자가 복구) — tracker.recheck_batch 와 동일 정책.
+            .or_(_due_filter(now_iso))
             .order("next_check_at", desc=False, nullsfirst=True)
             .limit(batch_size)
             .execute()

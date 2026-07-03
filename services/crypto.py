@@ -72,3 +72,37 @@ def get_public_key_hex() -> str:
         serialization.Encoding.X962,
         serialization.PublicFormat.UncompressedPoint,
     ).hex()
+
+
+def verify_bundle(bundle: dict, expected_pubkey_hex: str | None = None) -> dict:
+    """박제 번들(sign_dataset 출력 형식)의 서명을 검증 — '우릴 믿지 말고 검증하라'용.
+
+    검증 로직은 서버 비밀 없이 누구나 재현 가능하다(docs/TRANSPARENCY.md 에 공개):
+      canonical = JSON(payload, sort_keys=True, ensure_ascii=False) → UTF-8
+      ECDSA-secp256k1-SHA256 로 signature 를 publicKey 에 대해 검증.
+
+    반환: {valid, reason, matches_agent_key}
+      · valid            : 서명이 payload·publicKey 와 수학적으로 일치하는가
+      · matches_agent_key: 번들의 publicKey 가 expected_pubkey_hex(현재 에이전트 키)와
+                           같은가 (None 이면 비교 생략). 서명이 유효해도 다른 키로
+                           서명된 번들은 이 에이전트의 박제물이 아니다.
+    """
+    if not isinstance(bundle, dict):
+        return {"valid": False, "reason": "bundle_not_object", "matches_agent_key": None}
+    payload = bundle.get("payload")
+    sig_hex = bundle.get("signature")
+    pub_hex = bundle.get("publicKey")
+    if payload is None or not isinstance(sig_hex, str) or not isinstance(pub_hex, str):
+        return {"valid": False, "reason": "missing_fields", "matches_agent_key": None}
+    try:
+        pub = ec.EllipticCurvePublicKey.from_encoded_point(
+            ec.SECP256K1(), bytes.fromhex(pub_hex))
+    except Exception:
+        return {"valid": False, "reason": "bad_public_key", "matches_agent_key": None}
+    matches = (pub_hex.lower() == expected_pubkey_hex.lower()) if expected_pubkey_hex else None
+    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    try:
+        pub.verify(bytes.fromhex(sig_hex), canonical, ec.ECDSA(hashes.SHA256()))
+    except Exception:
+        return {"valid": False, "reason": "signature_mismatch", "matches_agent_key": matches}
+    return {"valid": True, "reason": None, "matches_agent_key": matches}

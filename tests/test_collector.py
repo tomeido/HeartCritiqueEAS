@@ -209,6 +209,102 @@ def test_poll_feeds_redistributes_leftover(monkeypatch):
     assert got["fa"] == 1 and got["fb"] + got["fc"] == 5 and abs(got["fb"] - got["fc"]) <= 1
 
 
+def test_poll_feeds_skips_hard_negative_ads(monkeypatch):
+    """광고·거래 글(hard negative)은 본문 GET 예산 자체를 쓰지 않는다
+    (docs/ARCHIVAL_CRITERIA.md §3). discovered 에는 잡히되 캡처에서 제외."""
+    monkeypatch.setattr(collector, "COMMUNITY_FEEDS", [("a", "fa")])
+    monkeypatch.setattr(collector, "COLLECTOR_MAX_CAPTURE_PER_CYCLE", 10)
+    monkeypatch.setattr(collector, "get_db", lambda: object())
+
+    async def _no_sleep():
+        return None
+    monkeypatch.setattr(collector, "_sleep_jitter", _no_sleep)
+
+    async def _fetch(url, client):
+        return (b"x", 200)
+    monkeypatch.setattr(collector, "_fetch_feed", _fetch)
+
+    items = [
+        {"url": "u-ad", "title": "노트북 팝니다 (쿠폰 드려요, 문의는 카톡)",
+         "guid": "u-ad", "summary": None},
+        {"url": "u-keep", "title": "대기업 갑질 제보합니다", "guid": "u-keep", "summary": None},
+    ]
+    monkeypatch.setattr(collector, "_parse_feed", lambda raw: items)
+    monkeypatch.setattr(collector, "_existing_urls", lambda db, urls: set())
+
+    captured = []
+
+    async def _cap(db, source, feed_url, item, client):
+        captured.append(item["url"])
+        return True
+    monkeypatch.setattr(collector, "_capture", _cap)
+
+    res = asyncio.run(collector.poll_feeds(client=None))
+    assert res["discovered"] == 2
+    assert res["skipped_ads"] == 1
+    assert captured == ["u-keep"]   # 광고는 캡처 예산을 쓰지 않는다
+
+
+class _ProbeDB:
+    """스키마 프로브(select 1행) 스텁 — err 가 있으면 그 예외를 던진다."""
+    def __init__(self, err=None):
+        self.err = err
+
+    def table(self, name):
+        return self
+
+    def select(self, *a, **k):
+        return self
+
+    def limit(self, n):
+        return self
+
+    def execute(self):
+        if self.err:
+            raise self.err
+        return type("R", (), {"data": []})()
+
+
+def test_promotion_cols_transient_error_not_cached(monkeypatch):
+    """일시적 연결오류를 '009 미설치'로 영구 캐시하면 그 동안 hard 삭제가 감지돼도
+    hard_deleted_at 미기록 → 그 행은 큐에서 영구 제외 → 승격 후보 조용한 유실.
+    일시 오류는 캐시 없이 다음 호출이 재판별해 자가 복구돼야 한다."""
+    monkeypatch.setattr(collector, "_promo_cols_supported", None)
+    assert collector._promotion_cols(_ProbeDB(ConnectionError("reset"))) is False
+    assert collector._promo_cols_supported is None      # 캐시 안 됨
+    assert collector._promotion_cols(_ProbeDB()) is True  # DB 복구 시 즉시 재활성
+
+
+def test_promotion_cols_missing_column_cached(monkeypatch):
+    monkeypatch.setattr(collector, "_promo_cols_supported", None)
+    err = Exception("column captured_posts.promotion_status does not exist (42703)")
+    assert collector._promotion_cols(_ProbeDB(err)) is False
+    assert collector._promo_cols_supported is False     # 컬럼 부재는 영구 캐시(정상)
+
+
+def test_value_col_transient_error_not_cached(monkeypatch):
+    monkeypatch.setattr(collector, "_value_col_supported", None)
+    assert collector._value_col(_ProbeDB(ConnectionError("reset"))) is False
+    assert collector._value_col_supported is None
+    assert collector._value_col(_ProbeDB()) is True
+
+
+def test_promotion_cols_state_tri_state(monkeypatch):
+    """일시 오류는 None(미확정), 컬럼 부재는 False(확정 캐시), 성공은 True."""
+    monkeypatch.setattr(collector, "_promo_cols_supported", None)
+    assert collector._promotion_cols_state(_ProbeDB(ConnectionError("reset"))) is None
+    assert collector._promo_cols_supported is None
+    assert collector._promotion_cols_state(_ProbeDB()) is True
+
+
+def test_recheck_skips_cycle_on_transient_probe_failure(monkeypatch):
+    """프로브 일시 불명 상태로 배치를 진행하면 그 배치의 hard 삭제가 hard_deleted_at 없이
+    기록돼 승격 후보가 비가역 유실된다 — 이번 주기를 통째로 건너뛰어야 한다."""
+    monkeypatch.setattr(collector, "_promo_cols_supported", None)
+    monkeypatch.setattr(collector, "get_db", lambda: _ProbeDB(ConnectionError("reset")))
+    assert asyncio.run(collector.recheck_captured_batch()) == 0
+
+
 # ── 공용 _build_update 계약: collector.recheck_captured_batch 가 이걸 재사용한다 ──
 def test_build_update_adaptive_contract():
     res = {

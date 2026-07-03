@@ -10,6 +10,7 @@ from services.db import get_db
 from services.hunter import get_status as get_hunter_status
 from services.collector import get_status as get_collector_status
 from services.promoter import get_status as get_promoter_status
+from services.proxyfetch import get_status as get_proxy_status
 from services.wayback import get_status as get_wayback_status
 from services.threshold import (
     DEFAULT_THRESHOLD,
@@ -51,6 +52,7 @@ async def get_stats():
         cached["collector"] = get_collector_status()
         cached["promoter"] = get_promoter_status()
         cached["wayback"] = {**cached.get("wayback", {}), **get_wayback_status()}
+        cached["proxy"] = get_proxy_status()
         return cached
 
     now = datetime.now(timezone.utc)
@@ -121,6 +123,7 @@ async def get_stats():
             stale["collector"] = get_collector_status()
             stale["promoter"] = get_promoter_status()
             stale["wayback"] = {**stale.get("wayback", {}), **get_wayback_status()}
+            stale["proxy"] = get_proxy_status()
             return stale
         # 캐시도 없으면(콜드스타트) 0 으로 표시하되 캐시는 남기지 않아 다음 호출이 곧 재시도.
 
@@ -176,6 +179,7 @@ async def get_stats():
         "hunter": get_hunter_status(),
         "collector": get_collector_status(),
         "promoter": get_promoter_status(),
+        "proxy": get_proxy_status(),
     }
     # 모든 카운트가 성공했을 때만 캐시(실패분을 60초 동안 0 으로 들고 있지 않게).
     if complete:

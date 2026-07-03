@@ -11,6 +11,8 @@ Heart & Critique - FastAPI 메인 앱 (Docker 홈서버용)
   GET  /api/vote/{story_id}/status    → 투표 현황
   GET  /api/stories                   → 최근 스토리 목록
   GET  /api/stories/{story_id}        → 스토리 상세
+  GET  /api/transparency              → 정책·가중치·게이트 실시간 스냅샷
+  GET  /api/verify/{story_id}         → 박제 번들 서명 검증 + DB 본문 대조
 """
 
 import asyncio
@@ -32,7 +34,7 @@ from fastapi.responses import (
 
 load_dotenv()
 
-from routers import feed, stats, stories, votes  # noqa: E402
+from routers import feed, stats, stories, transparency, votes  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
 from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
@@ -102,6 +104,7 @@ app.include_router(stories.router)
 app.include_router(votes.router)
 app.include_router(stats.router)
 app.include_router(feed.router)
+app.include_router(transparency.router)
 
 
 @app.get("/health")
