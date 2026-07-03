@@ -45,23 +45,27 @@ Docker
 │   ├── routers/
 │   │   ├── stories.py        # POST /api/story, GET /api/stories[/{id}]
 │   │   ├── votes.py          # POST /api/vote/{id}, GET /api/vote/{id}/status
-│   │   └── stats.py          # GET /api/stats (대시보드 통계)
+│   │   ├── stats.py          # GET /api/stats (대시보드 통계)
+│   │   └── transparency.py   # GET /api/transparency(정책 스냅샷), GET /api/verify/{id}(서명 검증)
 │   └── services/
 │       ├── llm.py            # Groq/Gemini 스토리 생성 파이프라인
 │       ├── hunter.py         # 자동 사냥꾼 — 주기적 스토리 자동 생성 루프
 │       ├── collector.py      # 선제 수집기 — RSS로 화제글 미리 캡처(본문+해시+삭제확률) → 삭제 감시
 │       ├── promoter.py       # ★ 캡처→공개 승격 — hard 삭제된 캡처글을 익명 문학 스토리로 공개(PII 게이트)
 │       ├── volatility.py     # 삭제확률 예측기(결정적) — 캡처 우선순위·필터·UI 배지 랭킹 전용
+│       ├── value.py          # 아카이브 가치 스코어러(결정적) — 캡처/승격 우선순위·스팸 제외(docs/ARCHIVAL_CRITERIA.md)
 │       ├── pii.py            # 구조적 PII 스캐너 — 승격 공개 전 안전 게이트
 │       ├── wayback.py        # Wayback 위임 박제 — IA Save Page Now 큐(원본 삭제 대비 외부 스냅샷)
+│       ├── proxyfetch.py     # 추적 불가(봇차단) 출처의 프록시 2차 관측 — soft 신호 전용(옵트인)
 │       ├── tracker.py        # 출처/수집글 삭제 추적 + 적응형 재검사 스케줄(compute_next_check)
+│       ├── transparency.py   # 정책·가중치 실시간 스냅샷 + 박제물 서명 검증(docs/TRANSPARENCY.md)
 │       ├── db.py             # Supabase 클라이언트 싱글톤
-│       ├── crypto.py         # EC 키 서명 (secp256k1 ECDSA-SHA256)
+│       ├── crypto.py         # EC 키 서명·검증 (secp256k1 ECDSA-SHA256)
 │       └── archive.py        # 스토리+투표 번들 → uploader 서비스 호출
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              # POST /upload → Irys → Arweave Tx ID 반환
 └── static/
-    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI)
+    └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI) — 글 공유(/s/<id>)·🧾영수증 PNG/QR 내보내기 포함
 ```
 
 ---
@@ -71,6 +75,9 @@ Docker
 ### 1) 스토리 생성
 - 사용자가 `/api/story`를 직접 호출하거나 백그라운드의 `hunter.py`가 돌면서 스토리를 탐색합니다.
 - LLM 엔진(`services/llm.py`)이 뉴스 및 커뮤니티 글을 모니터링하여 미담 혹은 비위 사건을 수집하고 한국어로 스토리를 생성 및 Supabase DB(`stories`)에 기록합니다.
+- **적합성 게이트(no_fit)**: 검색 결과에 진짜 해당 카테고리 글이 없으면 모델이 `NO_FIT`을 내고, 서로 다른 쿼리로 제한 재시도(`RELEVANCE_MAX_ATTEMPTS`)합니다. 모든 시도가 실패하면 빈 본문을 박제하지 않고 `503`으로 알려 재시도를 유도합니다.
+  - **휘발성(삭제확률) 점수는 `critique`에서만 채택 게이트로 씁니다.** `critique`는 '자본 압박으로 곧 삭제될 폭로'가 핵심이라 저휘발 글을 거르지만, `kindness`(미담)는 삭제 위험과 무관하므로 저휘발이라고 버리지 않습니다(휘발성은 표시·랭킹 전용이라는 원칙과 일관). → 미담 생성이 저휘발 글을 과도하게 거부해 `no_fit → 503`이 잦던 문제를 해소.
+- **공급자 폴백(Groq → Gemini)**: 기본 `groq`(Tavily 검색 grounding)가 한도(분당 `TPM`·일일 `TPD`) 소진이나 일시 오류로 실패하면 `gemini`(Google Search grounding)로 자동 폴백합니다. Gemini 호출은 일시적 5xx(고수요·`UNAVAILABLE`)·429·네트워크 오류에 지수 백오프로 재시도(`GEMINI_MAX_ATTEMPTS`)하여, 한 번의 일시 장애가 사용자 `503`으로 번지지 않게 합니다. Gemini 응답의 `NO_FIT`도 동일하게 감지해 본문 누수를 막습니다.
 
 ### 2) 투표 & 동적 임계값 (Threshold)
 - 사용자가 구글 소셜 로그인 후 찬성(Approve) 투표를 누릅니다.
@@ -106,8 +113,9 @@ Docker
        │        3. 삭제확률 필터(PROMOTER_MIN_VOLATILITY): 저가치 잡담 제외
        │        4. stories에 from_capture=true INSERT + 죽은 원본 URL을 citation 등록
        ▼
-[공개·투표]   이제 사람이 볼 수 있고 투표 가능. 출처가 hard 삭제라 임계값이 낮아져
-             소수 투표로도 Arweave 영구 박제가 트리거된다.
+[공개·투표]   이제 사람이 볼 수 있고 투표 가능. 죽은 원본 citation 은 '사라진 출처'
+             배지로 표시된다(임계값 인하는 tracker 가 살아있는 걸 직접 목격한 뒤
+             삭제된 hard 신호만 반영 — 이미 죽은 채 등록된 링크는 표시 전용).
 ```
 
 **안전 원칙 (Arweave 박제는 되돌릴 수 없으므로):**
@@ -125,6 +133,38 @@ Docker
 - 수집된 출처 URL을 Internet Archive(IA)의 Save Page Now API에 대기열(Queue) 형태로 위임 요청합니다.
 - 이를 통해 크롤링 차단 우회 및 공인된 외부 스냅샷 링크(`archive_url`)를 확보하고, 스토리 조회 시 제공합니다.
 
+### 7) 글 공유 & 영수증 내보내기 (Frontend Share / Export)
+
+별도 백엔드 없이 **클라이언트 사이드(`static/index.html`)에서만** 동작하는 두 가지 내보내기 기능입니다.
+
+- **🔗 공유**: 각 글마다 OG 미리보기가 붙는 영속 링크 `/s/<id>`를 복사하거나 네이티브 공유 시트로 전달합니다. 주소창은 글을 열 때 `#story=<id>`로 동기화되어 새로고침·뒤로가기·딥링크가 가능합니다.
+- **🧾 영수증**: 글을 *영수증 형태의 PNG 이미지*로 저장합니다. 외부 렌더 라이브러리 없이 **순수 `<canvas>`**로 그립니다.
+  - **상단 QR 코드** — 박제된 글이면 *Arweave 영구 원본*(`gateway.irys.xyz`/devnet) 주소를, 아직 박제 전이면 *글 영속링크*(`/s/<id>`)를 가리킵니다. QR 아래에 해당 URL을 텍스트로도 인쇄합니다.
+  - **하단 본문** — 글 내용을 영수증체 작은 글씨로(한글 글자 단위 자동 줄바꿈) 출력하고, 그 위에 메타 영수증 행(분류·발행일·글번호·출처/삭제 수·박제 Tx 또는 투표 현황·체인)과 가짜 바코드·위아래 절취선(톱니)을 그려 실제 영수증 질감을 냅니다.
+  - **QR 인코더**(`qrcode-generator`)는 버튼 클릭 시점에 jsdelivr CDN에서 **1회 지연 로드**하며 **SRI 해시로 고정**(변조 시 실행 거부)합니다. 로드/생성에 실패하면 QR 대신 링크 박스로 우아하게 폴백합니다.
+  - **저장 방식**: 데스크톱은 `<a download>`로 바로 다운로드, 터치 기기(특히 iOS)는 파일 공유 시트(`navigator.share({files})`)로 사진·파일에 저장합니다.
+  - **안전장치**: 동시 호출 차단, 본문 줄 수 클램프(브라우저 캔버스 32767px 한계 회피), QR 입력 길이 가드, `toBlob→toDataURL` 폴백.
+
+### 8) 이야기 검색 (Search)
+- 목록 헤더의 🔍 검색창에 키워드를 입력하면 (로드된 목록이 아니라) **전체 아카이브를 서버에서 검색**합니다(`GET /api/stories?q=`). 본문(`body`)과 시적 사유(`poetic_reason`)를 대소문자 무시 **부분일치**로 매칭합니다.
+- 입력 문자열은 PostgREST 필터 구조 문자(`* % _ , ( ) \ "`)를 제거(`_sanitize_search`)해 **필터 인젝션·와일드카드 누수를 차단**한 뒤 `or_(body.ilike.*kw*,poetic_reason.ilike.*kw*)`로 질의합니다.
+- 프론트엔드는 300ms 디바운스(+Enter 즉시 실행)로 호출하며, 결과 수·빈 결과 안내·지우기(✕)를 표시합니다. 기존 카테고리 필터 칩은 검색 결과 위에 그대로 적용됩니다.
+
+### 9) 아카이브 가치 선별 (Archival Value Scoring)
+- `services/value.py`가 **"사라지면 아까운 정도"를 0~10 결정적 점수**로 평가합니다(기준 연구: `docs/ARCHIVAL_CRITERIA.md` — 셸렌버그 증거/정보가치, 유일성, DocNow 윤리 하한). 1인칭 직접 경험·물증(녹취/영수증/CCTV)·공익 제보(실명+고발)·내부고발·소비자 안전·목격 미담은 가산, 질문글·기사 펌글·한 줄 글은 감산됩니다.
+- collector의 캡처 우선순위가 기존 삭제확률(volatility) 단독에서 **삭제위험+가치 결합 점수**로 바뀌고, 광고·거래 글(hard negative)은 본문 GET 예산 자체에서 제외됩니다(단 "허위 광고에 당했다" 류 피해 고발은 보호). promoter의 승격 순서는 가치 우선으로 정렬됩니다(`migrations/011_value_score.sql` 적용 시 — 미적용이어도 자동 폴백).
+- 원칙: volatility와 동일하게 점수는 **우선순위·표시 전용** — 박제 결정·투표 임계값에는 절대 주입하지 않습니다. 가중치는 `VALUE_W_*`로 튜닝하며 현재 적용값은 `GET /api/transparency`로 공개됩니다.
+
+### 10) 프록시 관측 (추적 불가 사이트 2차 채널, 옵트인)
+- fmkorea 등 봇차단으로 "🚫 삭제 추적 불가"였던 출처를 `services/proxyfetch.py`가 렌더링 프록시(기본 Jina Reader)로 2차 관측합니다. 직접 관측이 봇차단으로 실패했을 때만 발동합니다.
+- **soft 신호 전용 설계**: 절대 hard(404/410)를 만들지 않아 임계값 인하·자동 승격에 영향이 없고, 배지·표시만 정확해집니다. 프록시 관측에 성공하면 추적 불가 라벨이 해제됩니다.
+- 기본 꺼짐(`PROXY_FETCH_ENABLED=false`) — 출처 URL이 프록시 사업자에 전달되는 트레이드오프가 있어 옵트인이며, 이 한계는 `docs/TRANSPARENCY.md`에 공개되어 있습니다.
+
+### 11) 투명성·검증 — "우릴 믿지 말고 검증하라"
+- `GET /api/transparency`: 서버가 **지금 실제로 적용 중인** 정책·가중치·게이트·활성 모듈·에이전트 공개키의 실시간 스냅샷. 문서(`docs/TRANSPARENCY.md`)의 '약속'과 대조하면 약속 위반이 드러나는 구조입니다.
+- `GET /api/verify/{story_id}`: 박제된 글의 Arweave 번들을 허용 게이트웨이에서 직접 받아 ECDSA(secp256k1-SHA256) 서명을 검증하고, **박제 이후 DB 본문이 몰래 바뀌지 않았는지**까지 대조합니다(`body_matches_db`). 서버 없이 재현하는 절차는 `docs/TRANSPARENCY.md` 참고.
+- 출처 citation에 `content_fingerprint`(첫 생존 확인 시점 본문의 sha256)가 노출되어, 원문 재공개 없이 "그 시각에 그 내용이 존재했음"을 제3자가 대조할 수 있습니다.
+
 ---
 
 ## 4. 환경 변수 설정 (Environment Variables)
@@ -140,7 +180,10 @@ Docker
 | `LLM_PROVIDER` | 선택 | `groq` | LLM API 제공자 (`groq` 또는 `gemini`) |
 | `GROQ_API_KEY` | Groq 사용 시 | - | Groq Cloud API Key |
 | `TAVILY_API_KEY` | Groq 사용 시 | - | Tavily Search API Key |
-| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용) |
+| `GEMINI_API_KEY` | Gemini 사용 시 | - | Google Gemini API Key (Search Grounding 적용). 설정 시 Groq 실패의 폴백 경로로도 쓰임 |
+| `GEMINI_MAX_ATTEMPTS` | 선택 | `5` | Gemini 호출의 일시 오류(5xx·429·네트워크) 재시도 횟수(지수 백오프). Groq 한도 소진 시 Gemini가 단독 경로가 되므로 고수요 스파이크를 견디게 함 |
+| `GEMINI_RETRY_BASE` | 선택 | `1.5` | Gemini 재시도 백오프 기준 초 (1.5→3→6→12… ≈ 최대 ~22초) |
+| `RELEVANCE_MAX_ATTEMPTS` | 선택 | `2` | 적합성 게이트가 `NO_FIT`일 때 다른 쿼리로 재시도하는 최대 횟수 (Groq TPM 안전을 위해 기본 2) |
 | `IRYS_NETWORK` | 선택 | `devnet` | `devnet`(약 60일 임시 저장) 또는 `mainnet`(영구 저장, 가스비 소모). `devnet` 모드 시 UI에 임시 배지가 표시됩니다. |
 | `VOTE_THRESHOLD` | 선택 | `3` | 박제 트리거에 필요한 기본 투표수 |
 | `DYNAMIC_THRESHOLD` | 선택 | `true` | 활성 투표자 수 및 검열 신호에 따라 임계값 동적 변동 여부 |
@@ -152,6 +195,10 @@ Docker
 | `WAYBACK_ENABLED` | 선택 | `false` | Internet Archive Wayback Machine 백업 위임 활성화 여부 (`migrations/007` 필요) |
 | `IA_ACCESS_KEY` | Wayback 사용 시 | - | Internet Archive S3 Access Key |
 | `IA_SECRET_KEY` | Wayback 사용 시 | - | Internet Archive S3 Secret Key |
+| `PROXY_FETCH_ENABLED` | 선택 | `false` | 봇차단 출처의 프록시 2차 관측. soft 신호 전용 — 임계값·자동 승격 영향 없음. 출처 URL이 프록시 사업자에 전달됨(옵트인) |
+| `PROXY_FETCH_BASE` / `PROXY_FETCH_API_KEY` | 선택 | Jina Reader / - | 렌더링 프록시 교체·인증(키 없이도 동작, 낮은 레이트리밋) |
+| `VALUE_W_*` | 선택 | `value.py` 참고 | 가치 스코어러 가중치(캡처/승격 우선순위 전용, 박제 결정 미주입). 적용값은 `/api/transparency`로 공개 |
+| `VERIFY_CACHE_TTL` | 선택 | `600` | `/api/verify` 결과 캐시(초) — 게이트웨이 GET 남용 방지 |
 
 ---
 
@@ -171,6 +218,8 @@ cp .env.example .env
 # - migrations/007_wayback_snapshots.sql            (선택: Wayback 위임)
 # - migrations/008_poetic_reason_and_volatility.sql (박제 사유/휘발성 점수)
 # - migrations/009_capture_promotion_bridge.sql     (★ 캡처→공개 승격: Promoter)
+# - migrations/010_cleanup_preserve_captures.sql     (미박제 글 정리 시 캡처 승격글 보존)
+# - migrations/011_value_score.sql                   (아카이브 가치 점수 저장 — 승격 우선순위)
 
 # 3. Docker 컨테이너 빌드 및 실행
 docker compose up -d
@@ -223,13 +272,19 @@ pytest
   ```bash
   curl -X POST http://localhost:8000/api/story
   ```
-- **스토리 목록 조회**
+- **스토리 목록 조회** (`q`로 본문·시적 사유 부분일치 검색, `limit`으로 개수 조절)
   ```bash
   curl http://localhost:8000/api/stories
+  curl "http://localhost:8000/api/stories?q=택시&limit=200"   # 키워드 검색(전체 아카이브 대상)
   ```
 - **대시보드 통계 집계**
   ```bash
   curl http://localhost:8000/api/stats
+  ```
+- **투명성 스냅샷 / 박제물 서명 검증** — 지금 적용 중인 정책·가중치 공개, Arweave 번들 ECDSA 검증
+  ```bash
+  curl http://localhost:8000/api/transparency
+  curl http://localhost:8000/api/verify/<story_id>   # /api/recheck 와 per-IP 레이트리밋 공유
   ```
 - **수동 승격 (어드민, `ADMIN_TOKEN` 설정 시)** — 캡처글을 검토 후 직접 공개 박제
   ```bash
@@ -254,7 +309,7 @@ pytest
 
 
 
-## 9. 영상
+## 10. 영상
 
 
 https://github.com/user-attachments/assets/5bb99954-6c67-4204-9ff4-72f7c41a9db4

@@ -105,7 +105,7 @@ def _mark(db, captured_id: str, fields: dict) -> None:
         logger.warning(f"[promoter] captured 갱신 실패 {captured_id}: {e}")
 
 
-# migrations/010(value_score) 지원 여부 — 미적용이면 select/order 에서 빼 400 을 피한다.
+# migrations/011(value_score) 지원 여부 — 미적용이면 select/order 에서 빼 400 을 피한다.
 _value_col_supported: Optional[bool] = None
 
 

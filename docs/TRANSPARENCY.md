@@ -9,7 +9,7 @@
 | # | 약속 | 강제 지점 |
 |---|---|---|
 | 1 | **박제는 인간 투표로만 실행된다.** AI 점수(삭제확률·가치)는 우선순위·표시 전용이며 박제 여부를 결정하지 않는다 | `services/threshold.py`, `services/volatility.py`·`value.py` 주석의 미주입 원칙 |
-| 2 | **임계값 인하는 hard 신호만.** HTTP 404/410(삭제)·403(차단)만 임계값을 낮춘다. 본문 패턴 기반 soft 신호는 배지 표시용 | `threshold.count_citation_signals` |
+| 2 | **임계값 인하는 '목격한' hard 신호만.** 살아있는 걸 직접 확인(기준선 캡처)한 출처가 그 뒤 HTTP 404/410(삭제)·403(차단)된 경우만 임계값을 낮춘다. 첫 검사부터 죽어 있던 링크·본문 패턴 기반 soft 신호는 배지 표시용 | `threshold.count_citation_signals` (witnessed 게이트) |
 | 3 | **자동 승격은 hard 삭제만.** 캡처글의 공개 승격은 404/410 확정 삭제에서만 자동. soft 는 절대 자동화하지 않음 | `promoter.find_promotable` (hard_deleted_at 강제) |
 | 4 | **원본 raw 본문은 절대 공개하지 않는다.** 공개되는 것은 LLM 익명·헤지 재작성뿐. 승격 전·후 2회 PII 스캔 | `promoter.promote_one`, `services/pii.py` |
 | 5 | **박제물은 서명된다.** 스토리+투표 로그+출처 생존 증거를 canonical JSON 으로 직렬화해 ECDSA-secp256k1-SHA256(low-S)로 서명 후 Arweave 업로드 | `services/crypto.py`, `services/archive.py` |

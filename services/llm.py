@@ -22,6 +22,12 @@ GEMINI_ENDPOINT = (
     f"{GEMINI_MODEL}:generateContent"
 )
 GEMINI_TIMEOUT = 50
+# Groq 한도(TPM/TPD) 소진 시 Gemini 가 사실상 단일 생성 경로가 된다. 일시적 5xx(고수요·
+# UNAVAILABLE)·429·네트워크 오류 한 번에 사용자 503 을 내지 않도록 짧은 백오프로 재시도한다.
+# 5회/지수백오프(1.5,3,6,12초 ≈ 최대 ~22초)로 Gemini 고수요 스파이크를 동기 요청 안에서
+# 견딘다(스피너가 도는 생성 액션이라 이 정도 대기는 허용 가능). 한도는 env 로 조정 가능.
+GEMINI_MAX_ATTEMPTS = max(1, int(os.environ.get("GEMINI_MAX_ATTEMPTS", "5")))
+GEMINI_RETRY_BASE = float(os.environ.get("GEMINI_RETRY_BASE", "1.5"))
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
@@ -107,8 +113,8 @@ PROMPT_KINDNESS = """\
 아래는 한국 커뮤니티 게시판(더쿠·클리앙·인스티즈·네이트판·FM코리아·보배드림 등)에서 모은 익명 미담 글들.
 정제된 언론 보도가 아닌 일반인의 날것 사연.
 
-너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 헌신, 따뜻한 인류애, 혹은 희생이 느껴지거나 [2] 삭막한 사회 구조 속에서 인간성을 지켜낸 순간을 담고 있고 [3] 휘발되어 사라질 가능성이 높은 글을 0에서 10 사이의 '휘발성 점수'로 평가해라.
-만약 가장 적합한 글의 휘발성 점수가 7점 미만이거나 적합한 글이 하나도 없다면, 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라.
+너는 다음 긁어온 글 중에서 [1] 작성자의 가감 없는 날것의 헌신, 따뜻한 인류애, 혹은 희생이 느껴지거나 [2] 삭막한 사회 구조 속에서 인간성을 지켜낸 순간을 담은 진짜 미담 한 편을 고르고, 그 글이 얼마나 쉽게 휘발되어 사라질 수 있는지를 0에서 10 사이의 '휘발성 점수'로 평가해라.
+만약 위 [1]·[2]에 해당하는 진짜 미담이 하나도 없다면(사기 호소·돈 분쟁 상담·광고·미담을 논하는 메타글·단순 잡담뿐이라면), 아래 내용을 작성하지 말고 오직 'NO_FIT' 한 단어만 첫 줄에 출력해라. 휘발성 점수가 낮다는 이유만으로 NO_FIT 을 내지는 마라 — 미담은 삭제 위험과 무관하며, 휘발성 점수는 표시용 평가일 뿐 채택 기준이 아니다.
 
 글을 쓸 때는 짧고 단단한 문장으로 사연 한 편을 새긴다. 형용사를 덜어내고 명사와 동사로 민다.
 문장은 길게 늘이지 말고 끊어라. 끊긴 자리의 여백이 울림이 된다. 문학성은 없는 사실을
@@ -218,6 +224,8 @@ USED_SOURCES: [번호]
 관심 분야: 직장 갑질·폭언, 노동 환경 문제, 하청·납품 갑질, 내부고발자 보복, 임금 체불,
 제품 결함·소비자 기만, 오너 일가의 도덕적 타락(갑질·폭언·마약·음주운전·성범죄·횡령·탈세),
 회계 부정. 사소한 광고 트집·개인 분쟁은 피하고 다수에게 영향 가는 사건 우선.
+대상이 아닌 글: 스포츠 경기 결과·승부 예측, 게임·카드·수집품 잡담, 연예인 가십,
+진영 정치 논쟁, 단순 일상·후기. 이런 글뿐이면 NO_FIT.
 """
 
 # 검색어에서 '미담/훈훈/감동' 같은 추상 프레이밍 명사를 뺀다 — 그런 단어는 '미담 모음'·
@@ -238,23 +246,29 @@ SEARCH_QUERIES_KINDNESS = [
     "익명 커뮤니티 감동 사연 후기",
 ]
 
+# 모든 시드는 '기업 비위·시스템 부조리' 앵커(직장/대기업/하청/소비자/제도)를 반드시 포함한다.
+# 앵커 없는 범용 시드('실시간 베스트·정치 시사·트렌드·억울한 사건')는 스포츠·게임·연예·진영
+# 정치 같은 trivial 글을 끌어와 구조필터(looks_off_topic_critique)에서 통째로 컷되며 recall 만
+# 깎으므로 제거했다. 신선도는 토큰 안전을 위해 time_range/재시도수 대신 '실시간/오늘' 어휘로만 유도.
 SEARCH_QUERIES_CRITIQUE = [
-    "디시인사이드 실시간 베스트 폭로 의혹",
-    "에펨코리아 정치 시사 게시판 폭로",
-    "블라인드 회사 비리 내부고발",
-    "트위터 실시간 트렌드 사건 폭로",
+    # 직장·노동
+    "블라인드 직장 갑질 폭언 내부고발",
+    "블라인드 실시간 핫 직장 내부고발 제보",
+    "에펨코리아 직장 갑질 임금체불 폭로",
+    "디시 직장인 회사 비리 내부고발",
+    # 대기업·오너·하청
     "디시 개념글 대기업 갑질 폭로",
-    "에펨코리아 대기업 비리 폭로",
-    "블라인드 직장 갑질 폭언 의혹",
-    "네이트판 억울한 사건 제보 폭로",
+    "에펨코리아 대기업 오너 갑질 비리 폭로",
     "익명 커뮤니티 묻힌 대기업 비리 폭로",
-    "자본의 힘으로 삭제 위협받는 폭로 글",
-    # 신선도·삭제위험 편향(durable 베스트 대신 '지금 터지는' 논란을 더 잡으려는 시드).
-    # time_range/재시도수는 토큰 안전 위해 건드리지 않고, '실시간/오늘' 어휘로만 신선도 유도.
-    "디시 실시간 베스트 기업 갑질 논란",
-    "에펨코리아 실시간 인기글 직장 갑질 폭로",
-    "블라인드 실시간 핫 직장 내부고발",
-    "네이트판 오늘 핫이슈 갑질 폭로 제보",
+    "하청 납품업체 단가 후려치기 갑질 제보",
+    "재벌 오너 일가 횡령 탈세 갑질 의혹",
+    # 소비자·제품
+    "제품 결함 리콜 거부 소비자 기만 폭로",
+    "보배드림 자동차 결함 제조사 대응 논란",
+    "프랜차이즈 본사 가맹점주 갑질 정산 논란",
+    # 제도·구조 부조리 / 테마(검열·삭제)
+    "병원 산재 과로 노동환경 고발",
+    "자본의 힘으로 삭제 위협받는 기업 비리 폭로",
 ]
 
 # 줄 끝/문장 끝/단독 줄 어디든 잡도록 앵커 완화
@@ -431,14 +445,27 @@ def call_gemini(prompt: str, use_search: bool = True) -> dict:
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Gemini HTTP {e.code}: {body}") from e
-    except urllib.error.URLError as e:
-        raise RuntimeError(f"Gemini network error: {e.reason}") from e
+    import time
+    last_err = None
+    for attempt in range(GEMINI_MAX_ATTEMPTS):
+        try:
+            with urllib.request.urlopen(req, timeout=GEMINI_TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            last_err = RuntimeError(f"Gemini HTTP {e.code}: {body}")
+            # 5xx(고수요·일시 장애)·429 만 일시 오류로 보고 재시도. 4xx(키·요청 오류)는 즉시 실패.
+            if e.code not in (429, 500, 502, 503, 504) or attempt == GEMINI_MAX_ATTEMPTS - 1:
+                raise last_err from e
+        except (urllib.error.URLError, TimeoutError) as e:
+            reason = getattr(e, "reason", e)
+            last_err = RuntimeError(f"Gemini network error: {reason}")
+            if attempt == GEMINI_MAX_ATTEMPTS - 1:
+                raise last_err from e
+        wait = GEMINI_RETRY_BASE * (2 ** attempt)
+        logger.warning(f"[llm] Gemini 일시 오류 → {wait:.1f}초 후 재시도 ({attempt + 1}/{GEMINI_MAX_ATTEMPTS}): {last_err}")
+        time.sleep(wait)
+    raise last_err  # 루프가 항상 return/raise 하므로 도달하지 않음
 
 
 def parse_gemini_response(data: dict):
@@ -623,7 +650,49 @@ def looks_off_topic_kindness(item: dict) -> bool:
     return True
 
 
-def normalize_search_results(data: dict, drop_news: bool = True, drop_off_topic: bool = False) -> list:
+# critique 적합성: '기업 비위·시스템 부조리' 신호가 하나도 없는 글(스포츠 경기 결과·
+# 게임/카드/수집품 잡담·연예 가십·진영 정치 논쟁·개인 일상)이 critique 로 새는 것을
+# 구조적으로 컷한다. kindness 는 looks_off_topic_kindness(부정 신호 차단)였지만, critique 는
+# 사기·갑질·횡령이 '정상 주제'라 그 부정필터를 못 쓴다 → 반대로 '기업/노동/소비자/제도의
+# 부조리 신호를 하나라도 보유'할 것을 요구하는 positive gate 로 둔다.
+CRITIQUE_ONTOPIC_RE = re.compile(
+    r'대기업|기업|회사|직장|사장|본사|지사|점주|가맹|프랜차이즈|오너|재벌|총수|임원|상사|사주|업체|'
+    r'갑질|갑을|폭언|폭행|괴롭힘|따돌림|부당|불공정|차별|성희롱|성추행|성범죄|'
+    r'임금|월급|급여|연봉|체불|수당|야근|초과근무|과로|산재|산업재해|해고|권고사직|계약직|비정규직|노조|파업|'
+    r'하청|재하청|납품|단가|대금|미지급|위탁|용역|일용직|'
+    r'내부고발|제보|폭로|비리|부정|횡령|배임|탈세|회계|분식|뇌물|로비|담합|독점|불법|위법|'
+    r'결함|불량|하자|리콜|단종|환불|보상|소비자|기만|허위|과장\s*광고|먹튀|사기|'
+    r'본부|대리점|편의점|배달|라이더|플랫폼|수수료|정산|블랙컨슈머|'
+    r'의료|병원|간호|요양|어린이집|보육|복지|연금|보험금|보험사|약값|산하기관|공공기관|관공서|'
+    r'은행|대출|이자|보증금|전세|월세|임대|분양|입주|하자보수'
+)
+# 명백한 비-critique 영역(스포츠·게임/수집품·연예·잡담)의 강한 신호. 단독 토큰의 오탐을
+# 피하려 구체 어구로만 둔다.
+CRITIQUE_OFFTOPIC_RE = re.compile(
+    r'월드컵|올림픽|아시안게임|챔피언스리그|프리미어리그|K리그|프로야구|프로축구|메이저리그|'
+    r'경기\s*결과|승부\s*예측|선발\s*(?:명단|라인업)|득점왕|해트트릭|대표팀\s*명단|'
+    r'포켓몬|트레이딩\s*카드|카드\s*뽑기|가챠|컬렉션|피규어|굿즈|'
+    r'아이돌|컴백|데뷔조|음원\s*차트|뮤직비디오|예능|드라마\s*결말|웹툰\s*결말|'
+    r'맛집|레시피|여행\s*후기|오늘의\s*운세|짤방',
+    re.IGNORECASE,
+)
+
+
+def looks_off_topic_critique(item: dict) -> bool:
+    """critique(기업 비위·시스템 부조리)와 무관한 글이면 True.
+    제목+본문 앞부분에 기업/노동/소비자/제도 부조리 신호(ON-TOPIC)가 하나라도 있으면
+    살린다(과필터 방지). 그 신호가 전혀 없으면 off-topic 으로 본다(positive gate).
+    스포츠·게임·연예 같은 강한 비주제 신호는 로그·가독성용으로만 본다 — 판정은 ON-TOPIC
+    보유 여부가 단독 기준이다(없으면 어차피 컷)."""
+    title = item.get("title") or ""
+    content = item.get("content") or ""
+    blob = title + " " + content[:400]
+    return not CRITIQUE_ONTOPIC_RE.search(blob)
+
+
+def normalize_search_results(data: dict, drop_news: bool = True, off_topic_fn=None) -> list:
+    """off_topic_fn: item→bool 콜백(True 면 제외). 카테고리별 적합성 필터를 주입한다
+    (kindness=looks_off_topic_kindness, critique=looks_off_topic_critique). None 이면 미적용."""
     out = []
     for r in data.get("results") or []:
         if not isinstance(r, dict):
@@ -638,7 +707,7 @@ def normalize_search_results(data: dict, drop_news: bool = True, drop_off_topic:
         }
         if drop_news and looks_like_news(item):
             continue
-        if drop_off_topic and looks_off_topic_kindness(item):
+        if off_topic_fn and off_topic_fn(item):
             continue
         out.append(item)
     return out
@@ -746,9 +815,11 @@ _GATE_CRITERIA = {
         "단순 잡담이나 광고는 미담이 아니다."
     ),
     "critique": (
-        "대기업이나 기업의 실제 비위·갑질·부정 제보(직장 갑질·하청 갑질·오너 비위·제품 결함·"
-        "임금 체불·회계 부정 등)가 하나라도 있는가? 개인 간 분쟁·사소한 불만·일반 잡담은 "
-        "기업 비위가 아니다."
+        "대기업·기업·기관의 실제 비위·시스템 부조리 제보(직장 갑질·폭언, 하청/납품 갑질, 오너 "
+        "비위, 제품 결함·소비자 기만, 임금 체불·산업재해, 내부고발, 회계 부정, 의료·복지·금융의 "
+        "구조적 부조리 등)가 하나라도 있는가? 스포츠 경기 결과·승부 예측, 게임/카드/수집품 잡담, "
+        "연예인 가십, 진영 정치 논쟁, 개인 간 사소한 다툼, 단순 잡담·후기는 '기업 비위·시스템 "
+        "부조리'가 아니다 — 그런 글뿐이면 반드시 NO_FIT 을 출력하라."
     ),
 }
 
@@ -782,19 +853,25 @@ def _is_no_fit(raw_text: str) -> bool:
     return False
 
 
-def _groq_search(query: str, category: str, domains, off: bool) -> tuple:
+def _groq_search(query: str, category: str, domains) -> tuple:
     """한 쿼리에 대해 3단 폴백 검색 → (results, community_count).
-    community_count 는 빈약(rich)필터 이전의 전체 결과 수(검열 격차 신호 왜곡 방지)."""
-    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + (kindness) 비미담 필터
+    community_count 는 빈약(rich)필터 이전의 전체 결과 수(검열 격차 신호 왜곡 방지).
+    카테고리별 적합성 필터(kindness=비미담 차단, critique=기업 비위 신호 요구)를 주입한다."""
+    off_fn = looks_off_topic_kindness if category == "kindness" else looks_off_topic_critique
+    # 1차: 커뮤니티 도메인 한정 + 뉴스 복붙 필터 + 카테고리 적합성 필터
     search_data = tavily_search(query, include_domains=domains)
-    results = normalize_search_results(search_data, drop_news=True, drop_off_topic=off)
-    # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 비미담 필터는 유지
+    results = normalize_search_results(search_data, drop_news=True, off_topic_fn=off_fn)
+    # 2차: 뉴스 필터 해제 (전부 뉴스 복붙이었을 때). 적합성 필터는 유지
     if not results:
-        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=off)
-    # 3차: 도메인·필터 모두 풀고 재검색 (부정필터로 과필터돼 비는 것까지 폴백으로 흡수)
+        results = normalize_search_results(search_data, drop_news=False, off_topic_fn=off_fn)
+    # 3차: 도메인 풀고 재검색. kindness 는 모든 필터 해제(뭐라도 생성 우선)지만, critique 는
+    # 적합성 필터를 유지한다 — 스포츠·게임·연예 잡담을 '기업 비위'로 둔갑시키느니 생성을 건너뛴다.
     if not results:
         search_data = tavily_search(query)
-        results = normalize_search_results(search_data, drop_news=False, drop_off_topic=False)
+        results = normalize_search_results(
+            search_data, drop_news=False,
+            off_topic_fn=(off_fn if category == "critique" else None),
+        )
 
     community_count = len(results) if results else 0
     # 본문 스니펫이 빈약한 출처는 모델이 일반론으로 공허해지므로 선택 후보에서 제외(전부 빈약하면 폴백)
@@ -809,9 +886,8 @@ def generate_via_groq(category: str) -> tuple:
     domains = TAVILY_INCLUDE_DOMAINS_OVERRIDE or (
         DOMAINS_KINDNESS if category == "kindness" else DOMAINS_CRITIQUE
     )
-    # 비-미담(사기·괴담·돈분쟁·상담) 부정필터는 kindness 에만. critique 엔 그것이 정상
-    # 주제(사기·갑질·횡령)이므로 절대 켜지 않는다.
-    off = (category == "kindness")
+    # 카테고리 적합성 필터는 _groq_search 안에서 category 로 분기한다(kindness=비미담 차단,
+    # critique=기업 비위·시스템 부조리 신호 요구). 여기선 system 프롬프트만 고른다.
     system_prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
 
     # 적합성 게이트: 결과에 진짜 해당 글이 없으면 NO_FIT → 서로 다른 쿼리로 제한 재시도
@@ -822,7 +898,7 @@ def generate_via_groq(category: str) -> tuple:
     last_query = queries[0]
     for query in queries:
         last_query = query
-        results, community_count = _groq_search(query, category, domains, off)
+        results, community_count = _groq_search(query, category, domains)
         if not results:
             continue
 
@@ -851,8 +927,11 @@ def generate_via_groq(category: str) -> tuple:
         text, used_indices = extract_used_indices(raw_text, len(results))
         text, volatility, reason = extract_volatility_and_reason(text)
 
-        # 휘발성 점수가 7점 미만인 경우 적합하지 않은 글로 판단하여 다음 쿼리로 재시도
-        if RELEVANCE_GATE_ENABLED and volatility < 7:
+        # 휘발성 점수 미달은 critique 에서만 재시도 사유로 쓴다. critique 는 '자본 압박으로
+        # 곧 삭제될 폭로'가 핵심이라 저휘발 글을 거를 가치가 있지만, kindness(미담)는 삭제
+        # 위험과 무관하므로 저휘발이라고 버리면 recall 만 깎여 no_fit→503 이 잦아진다
+        # (휘발성은 생성 게이트가 아닌 표시·랭킹 전용이라는 원칙과도 일관).
+        if RELEVANCE_GATE_ENABLED and category == "critique" and volatility < 7:
             logger.info(f"[llm] {category} 휘발성 점수 미달 ({volatility} < 7) → 쿼리 변경 재시도 (query={query!r})")
             continue
 
@@ -996,14 +1075,19 @@ def generate(category: str | None = None) -> dict:
         prompt = PROMPT_KINDNESS if category == "kindness" else PROMPT_CRITIQUE
         raw = call_gemini(prompt)
         text, citations, queries = parse_gemini_response(raw)
-        # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
-        text = USED_SOURCES_STRIP_RE.sub('', text)
-        text, volatility, reason = extract_volatility_and_reason(text)
-        text = sanitize_text(text)
         model_name = GEMINI_MODEL
+        # Gemini 도 적합 글이 없으면 NO_FIT 을 낼 수 있다 — groq 와 동일하게 첫 줄에서 잡아
+        # 'NO_FIT'가 본문으로 새지 않게 None 으로 비우고, 아래 no_fit 처리(503/스킵)로 흘려보낸다.
+        if RELEVANCE_GATE_ENABLED and _is_no_fit(text):
+            text = None
+        else:
+            # gemini 는 grounding 으로 citation 을 얻으므로 모델이 남긴 USED_SOURCES 줄은 버린다
+            text = USED_SOURCES_STRIP_RE.sub('', text)
+            text, volatility, reason = extract_volatility_and_reason(text)
+            text = sanitize_text(text)
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
         # measure_news_coverage 가 graceful 하게 None 반환 → gap 없이 진행.
-        if citations:
+        if text and citations:
             chosen = [
                 {"title": c.get("title"), "content": "", "url": c.get("uri")}
                 for c in citations

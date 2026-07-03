@@ -87,7 +87,7 @@ def _promotion_cols(db) -> bool:
     return bool(_promotion_cols_state(db))
 
 
-# migrations/010(가치 점수) 컬럼 지원 여부 — value_score. 미설치 환경에서는 payload 에서
+# migrations/011(가치 점수) 컬럼 지원 여부 — value_score. 미설치 환경에서는 payload 에서
 # 빼 400 을 피한다(_promotion_cols 와 동일 패턴).
 _value_col_supported: Optional[bool] = None
 
@@ -105,7 +105,7 @@ def _value_col(db) -> bool:
             if _is_missing_column_error(e, "value_score"):
                 _value_col_supported = False
                 logger.info("[collector] captured_posts.value_score(010) 미설치 — 가치 점수 "
-                            "기록 생략. migrations/010 적용 시 승격 우선순위에 반영.")
+                            "기록 생략. migrations/011 적용 시 승격 우선순위에 반영.")
             else:
                 logger.warning(f"[collector] value_score 판별 일시 실패(캐시 안 함): {e!r}")
                 return False

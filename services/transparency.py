@@ -48,7 +48,10 @@ def _cache_put(story_id: str, result: dict) -> None:
 
 # 박제물 게이트웨이 허용 호스트(SSRF 방어): DB 의 arweave_url 이 변조돼도 임의 호스트로
 # 서버 GET 을 유발할 수 없다. 서브도메인 허용(<txid>.arweave.net 샌드박스 리다이렉트).
-_ALLOWED_GATEWAY_SUFFIXES = ("gateway.irys.xyz", "devnet.irys.xyz", "arweave.net")
+# datasprite-cdn.com: irys 게이트웨이(gateway/devnet.irys.xyz)가 307/302 로 넘기는
+# 자체 CDN(<해시>.devnet-1.datasprite-cdn.com 등) — 미허용 시 devnet 검증이 전부 실패.
+_ALLOWED_GATEWAY_SUFFIXES = ("gateway.irys.xyz", "devnet.irys.xyz", "arweave.net",
+                             "datasprite-cdn.com")
 _FETCH_TIMEOUT = 30
 _MAX_BUNDLE_BYTES = 5_000_000
 
@@ -119,14 +122,18 @@ def build_snapshot() -> dict:
         },
         "threshold_policy": {
             "description": (
-                "박제는 인간 투표가 임계값에 달해야 실행. 임계값 인하는 hard 신호"
-                "(HTTP 404/410 삭제, 403 차단)만 반영 — 본문 패턴 기반 soft 신호는 "
-                "배지 표시용일 뿐 되돌릴 수 없는 박제를 앞당기지 않는다."
+                "박제는 인간 투표가 임계값에 달해야 실행. 임계값 인하는 '목격한' hard 신호"
+                "(살아있는 걸 직접 확인·기준선 캡처한 뒤 HTTP 404/410 삭제·403 차단된 출처)만 "
+                "반영 — 첫 검사부터 죽어 있던 링크와 본문 패턴 기반 soft 신호는 배지 표시용일 "
+                "뿐 되돌릴 수 없는 박제를 앞당기지 않는다. 발행량 기반 난이도 보정(issuance)이 "
+                "기본 임계값을 가감한다."
             ),
             "default": DEFAULT_THRESHOLD,
             "dynamic": DYNAMIC_THRESHOLD_ENABLED,
             "current_base": base["threshold"],
             "active_voters": base["active_voters"],
+            "issuance_count": base.get("issuance_count", 0),
+            "issuance_adjust": base.get("issuance_adjust", 0),
             "min": MIN_BASE_THRESHOLD,
             "max": MAX_BASE_THRESHOLD,
             "voters_per_vote": VOTERS_PER_VOTE,
