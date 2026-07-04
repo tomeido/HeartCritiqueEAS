@@ -103,7 +103,9 @@ Docker
 | `GEMINI_API_KEY` | Gemini 모드 | |
 | `IRYS_NETWORK` | | `devnet`(기본/테스트, **약 60일 후 삭제 — 영구 아님**) 또는 `mainnet`(진짜 영구 박제, 소액 ETH 필요). devnet이면 UI가 자동으로 '임시' 라벨 + devnet.irys.xyz 링크 표시 |
 | `VOTE_THRESHOLD` | | 박제 트리거 투표수 (기본: 3, `services/threshold.py`의 `DEFAULT_THRESHOLD`가 단일 출처) |
+| `STORY_DEDUP_ENABLED` | | 생성 중복 방지 게이트(`services/dedup.py`). **기본 `true`** — 이미 스토리로 만든 출처 URL(citation_checks)을 검색 후보에서 제외해 같은 글의 근사 중복 스토리 방지. DB 조회 실패 시 필터 없이 통과(가용성 우선). 박제 결정·임계값과 무관 |
 | `LLM_PROVIDER` | | `groq`(기본) 또는 `gemini` |
+| `GEMINI_MAX_ATTEMPTS` / `GEMINI_RETRY_BASE` | | Gemini 일시 오류(5xx/429/네트워크) 지수백오프 재시도 횟수(기본 5)·기준 대기초(기본 1.5). Groq 한도 소진 시 Gemini 가 단일 경로가 되므로 고수요 스파이크를 재시도로 흡수 |
 | `COLLECTOR_ENABLED` | | 선제 수집기(`services/collector.py`) 켜기. **기본 `false`** — `migrations/006` 적용 후 `true`. RSS로 화제글을 살아있을 때 미리 잡아 `captured_posts`(비공개)에 본문+해시 보관, 적응형 주기로 삭제 감시 |
 | `PROMOTER_ENABLED` | | 캡처→공개 승격(`services/promoter.py`) 켜기. **기본 `false`** — `migrations/009` 적용 + `COLLECTOR_ENABLED=true` 필요. hard 삭제된 캡처글을 PII 게이트·익명 재작성 후 공개 스토리로 승격(검색이 못 잡는 '진짜 사라진 글' 박제). critique 는 기본 수동 검토(`PROMOTER_AUTO_CRITIQUE=true`로 자동화) |
 | `PROMOTER_AUTO_CRITIQUE` | | critique(기업 비위) 캡처도 자동 승격할지. **기본 `false`**(명예훼손 노출 최소화 — 수동 검토 큐). |
@@ -111,8 +113,9 @@ Docker
 | `WAYBACK_ENABLED` | | Wayback 위임 박제(`services/wayback.py`) 켜기. **기본 `false`** — `migrations/007` 적용 + `TRACKER_ENABLED=true` 필요. 원본 삭제 대비 중립 외부 스냅샷을 IA Save Page Now 에 위임 |
 | `IA_ACCESS_KEY` / `IA_SECRET_KEY` | Wayback save | IA S3 키(`archive.org/account/s3.php`). 없으면 availability(기존 스냅샷 조회)만 동작, 신규 save 불가 |
 | `PROXY_FETCH_ENABLED` | | 추적 불가(봇차단) 출처의 프록시 2차 관측(`services/proxyfetch.py`) 켜기. **기본 `false`**(출처 URL 이 프록시 사업자에 전달됨 — 옵트인). soft 신호 전용이라 임계값·자동 승격엔 영향 없음. `PROXY_FETCH_BASE`(기본 Jina Reader)·`PROXY_FETCH_API_KEY` 로 프록시 교체/인증 |
-| `VALUE_W_*` | | 아카이브 가치 스코어러(`services/value.py`) 가중치 튜닝. 현재 적용값은 `GET /api/transparency` 로 공개. `migrations/010` 적용 시 `captured_posts.value_score` 저장 |
+| `VALUE_W_*` | | 아카이브 가치 스코어러(`services/value.py`) 가중치 튜닝. 현재 적용값은 `GET /api/transparency` 로 공개. `migrations/010` 적용 시 `captured_posts.value_score` 저장, `migrations/012` 적용 시 승격 글(`stories.value_score`)에 승계되어 상세 화면 캡처 기원 알림에 표시(표시 전용 — 박제 결정 미주입) |
 | `VERIFY_CACHE_TTL` | | `GET /api/verify/{id}` 결과 프로세스 캐시(초, 기본 600) — 게이트웨이 GET 남용 방지 |
+| `STORY_CLEANUP_MAX_VOTES` | | 이 표 수 이하의 오래된 미박제 글만 정리(기본: 임계값-1). 캡처 승격글(`from_capture`)은 어떤 경로로도 정리하지 않음 — RPC 경로는 `migrations/011` 적용 필요 |
 
 ## Key Design Decisions
 

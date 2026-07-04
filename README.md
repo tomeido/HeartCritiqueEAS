@@ -125,6 +125,39 @@ Docker
 - 수집된 출처 URL을 Internet Archive(IA)의 Save Page Now API에 대기열(Queue) 형태로 위임 요청합니다.
 - 이를 통해 크롤링 차단 우회 및 공인된 외부 스냅샷 링크(`archive_url`)를 확보하고, 스토리 조회 시 제공합니다.
 
+### 7) 투명성·검증 — "우릴 믿지 말고 검증하라"
+- **`GET /api/transparency`**: 서버가 *지금 실제로* 적용 중인 정책·가중치·게이트(임계값
+  정책, 활성 모듈, 생성/승격 게이트, 점수 가중치, 추적 불가 도메인, 서명 공개키)의 실시간
+  스냅샷. 프론트 하단의 접이식 **투명성 패널**이 같은 데이터를 사람이 읽는 형태로 렌더합니다.
+- **`GET /api/verify/{story_id}`**: 박제 번들을 게이트웨이에서 받아 ECDSA 서명 검증 +
+  현재 DB 본문 대조(`body_matches_db` — 박제 후 몰래 수정 감지). 박제된 글 상세의
+  "🔐 박제 무결성 검증" 카드는 같은 검증을 브라우저에서 독립 수행하고, 박제본과 화면
+  본문까지 대조합니다.
+- **콘텐츠 지문**: 각 출처의 검사 이력(📋)에 첫 생존 확인 시점 본문의 sha256
+  (`content_fingerprint`)과 채취 시각을 표시 — 원문 재공개 없이 "그 시각 그 내용이
+  존재했음"을 제3자가 대조할 수 있습니다.
+- **'목격한 삭제'만 임계값 인하**: 살아있는 원본을 직접 확인(기준선 캡처)한 뒤의
+  hard 404/410/403 만 박제 임계값을 낮춥니다. 첫 접촉부터 죽어 있던 링크(오탐 구분
+  불가)는 배지로만 표시 — 오탐 한 번이 1표 영구 박제를 트리거하는 사고를 차단합니다.
+  승격 글의 죽은 원본은 collector 의 생전 목격 기록을 기준선으로 승계합니다.
+- 신뢰 모델 전체: [docs/TRANSPARENCY.md](docs/TRANSPARENCY.md)
+
+### 8) 공유·영수증·검색 — 박제물의 가치
+- **글 공유(`GET /s/{story_id}`)**: 글별 OG 미리보기(카톡·트위터·디스코드)가 붙는 영속
+  링크. 글을 열면 주소창이 `#story=<id>` 로 동기화되어 지금 보는 글 자체가 공유 가능한
+  링크가 됩니다(🔗 공유 버튼: 네이티브 시트 → 클립보드 폴백).
+- **🧾 영수증**: 글 한 편을 QR(박제본/영속링크) + 메타(분류·번호·박제 Tx·체인·본문
+  sha256 지문·검증 경로) + 본문이 담긴 영수증 PNG 로 저장/공유(순수 canvas, 하단 9장
+  샘플 참고).
+- **이야기 검색(`GET /api/stories?q=`)**: 본문·박제 사유 부분일치 서버 검색. 목록 헤더
+  🔍 검색박스(디바운스 + 결과수 상태 라인).
+- **🗳 내 투표(`GET /api/my/votes`)**: 로그인 계정으로 투표한 글만 모아 보는 개인
+  아카이브 필터 — 내 결단이 박제로 남는 과정을 추적할 수 있습니다.
+- **생성 품질 게이트**: 같은 출처 URL 의 중복 스토리 방지(dedup), critique 는 기업/노동/
+  소비자/제도 부조리 신호가 있는 글만(스포츠·연예·정치 잡담의 '비위 둔갑' 차단), 미담은
+  저휘발이어도 생성(휘발성 점수는 표시 전용). 적용 상태는 `/api/transparency` 의
+  `generation_gates` 로 공개됩니다.
+
 ---
 
 ## 4. 환경 변수 설정 (Environment Variables)
@@ -149,6 +182,9 @@ Docker
 | `PROMOTER_AUTO_CRITIQUE` | 선택 | `false` | `critique`(기업 비위) 캡처도 자동 승격할지. 기본은 수동 검토(`pending_review`, 명예훼손 노출 최소화) |
 | `PROMOTER_MIN_VOLATILITY` | 선택 | `0` | 승격 최소 삭제확률(0~10). 높일수록 저가치 잡담을 걸러내고 고위험 글만 공개 (hard 삭제가 이미 강한 게이트) |
 | `ADMIN_TOKEN` | 선택 | - | 설정 시 `POST /api/admin/promote`(수동 승격) 활성화. `X-Admin-Token` 헤더로 인증. 미설정이면 엔드포인트 비활성(404) |
+| `STORY_DEDUP_ENABLED` | 선택 | `true` | 이미 스토리로 만든 출처 URL 을 검색 후보에서 제외(중복 스토리 방지). DB 조회 실패 시 필터 없이 통과 |
+| `GEMINI_MAX_ATTEMPTS` / `GEMINI_RETRY_BASE` | 선택 | `5` / `1.5` | Gemini 일시 오류(5xx/429/네트워크) 지수백오프 재시도 — Groq 한도 소진 시 단일 경로 보호 |
+| `STORY_CLEANUP_MAX_VOTES` | 선택 | 임계값-1 | 이 표 수 이하의 오래된 미박제 글만 정리. 캡처 승격글(`from_capture`)은 항상 보존 (`migrations/011` 권장) |
 | `WAYBACK_ENABLED` | 선택 | `false` | Internet Archive Wayback Machine 백업 위임 활성화 여부 (`migrations/007` 필요) |
 | `IA_ACCESS_KEY` | Wayback 사용 시 | - | Internet Archive S3 Access Key |
 | `IA_SECRET_KEY` | Wayback 사용 시 | - | Internet Archive S3 Secret Key |
@@ -167,10 +203,14 @@ cp .env.example .env
 
 # 2. Supabase SQL Editor 에서 아래 스키마 스크립트들을 순서대로 실행 (멱등성 보장)
 # - supabase_schema.sql
+# - supabase_migration_2026-06.sql                  (원자적 cleanup RPC 등 2026-06 갱신)
 # - migrations/006_captured_posts_and_adaptive.sql  (선제 수집/적응형 추적)
 # - migrations/007_wayback_snapshots.sql            (선택: Wayback 위임)
 # - migrations/008_poetic_reason_and_volatility.sql (박제 사유/휘발성 점수)
 # - migrations/009_capture_promotion_bridge.sql     (★ 캡처→공개 승격: Promoter)
+# - migrations/010_value_score.sql                  (선택: 아카이브 가치 점수 저장)
+# - migrations/011_cleanup_preserve_captures.sql    (cleanup 이 캡처 승격글을 보존하도록 RPC 갱신)
+# - migrations/012_story_value_score.sql             (선택: 승격 글에 아카이브 가치 점수 승계·표시)
 
 # 3. Docker 컨테이너 빌드 및 실행
 docker compose up -d
@@ -223,13 +263,20 @@ pytest
   ```bash
   curl -X POST http://localhost:8000/api/story
   ```
-- **스토리 목록 조회**
+- **스토리 목록 조회 (검색: `?q=` 본문·박제 사유 부분일치)**
   ```bash
   curl http://localhost:8000/api/stories
+  curl "http://localhost:8000/api/stories?q=%ED%83%9D%EC%8B%9C"   # q=택시
   ```
 - **대시보드 통계 집계**
   ```bash
   curl http://localhost:8000/api/stats
+  ```
+- **투명성 스냅샷 / 박제 검증 / 글 공유 링크**
+  ```bash
+  curl http://localhost:8000/api/transparency          # 지금 적용 중인 정책·가중치·게이트
+  curl http://localhost:8000/api/verify/<story_id>     # 서명 검증 + DB 본문 대조
+  curl -i http://localhost:8000/s/<story_id>           # OG 미리보기 + SPA 리다이렉트
   ```
 - **수동 승격 (어드민, `ADMIN_TOKEN` 설정 시)** — 캡처글을 검토 후 직접 공개 박제
   ```bash
@@ -254,7 +301,7 @@ pytest
 
 
 
-## 9. 영상
+## 10. 영상
 
 
 https://github.com/user-attachments/assets/5bb99954-6c67-4204-9ff4-72f7c41a9db4

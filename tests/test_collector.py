@@ -159,6 +159,80 @@ def test_parse_bobaedream_html_success():
     assert items[0]["guid"] == "https://www.bobaedream.co.kr/view?code=freeb&No=67890"
 
 
+def test_parse_theqoo_html_success():
+    """더쿠 HOT 목록(2026-07-04 실측 구조): 일반 글만 추출, 공지(tr.notice)·
+    댓글 링크(#fragment)·중복 제외, 엔티티 디코드."""
+    raw = (
+        '<table>'
+        '<tr class="notice  nofn" data-document_srl="111">'
+        '  <td class="title"><a href="/hot/111"><strong><span>[공지] 이용 규칙</span></strong></a></td>'
+        '</tr>'
+        '<tr>'
+        '  <td class="no">157585</td>'
+        '  <td class="cate"><span>이슈</span></td>'
+        '  <td class="title">'
+        '    <a href="/hot/4267400742">홍명보, 측근에 &quot;한국 돌아올 생각 없다&quot;</a>'
+        '    <i class="fas fa-images"></i>'
+        '    <a href="/hot/4267400742#4267400742_comment" class="replyNum">242</a>'
+        '  </td>'
+        '  <td class="time">02:16</td>'
+        '</tr>'
+        '<tr>'
+        '  <td class="title"><a href="/hot/4267400742">중복 URL 글</a></td>'
+        '</tr>'
+        '</table>'
+    ).encode("utf-8")
+    items = collector._parse_theqoo_html(raw)
+    assert len(items) == 1                       # 공지 제외 + 중복 제거
+    assert items[0]["url"] == "https://theqoo.net/hot/4267400742"
+    assert items[0]["title"] == '홍명보, 측근에 "한국 돌아올 생각 없다"'   # 엔티티 디코드
+    assert items[0]["guid"] == items[0]["url"]
+
+
+def test_parse_theqoo_html_garbage_safe():
+    assert collector._parse_theqoo_html(b"<not html") == []
+    assert collector._parse_theqoo_html(b"") == []
+
+
+def test_parse_pann_html_success():
+    """네이트판 랭킹(2026-07-04 실측 구조): 제목(title 속성)과 본문 미리보기(dd.txt)를
+    함께 추출 — 미리보기는 예비 가치·삭제확률 점수용 summary 로 전달된다."""
+    raw = (
+        '<ul><li>'
+        '<dl>'
+        '<dt><h2><a href="/talk/375497362"  onclick="vndr(\'BDW03\');" '
+        'title="제가 말 안 듣는 며느리라네요^^;;">제가 말 안 듣는 며느리라네요^^;;</a></h2>'
+        '<span class="reple-num">(116)</span></dt>'
+        '<dd class="txt"><a href="/talk/375497362"  onclick="vndr(\'BDW03\');">'
+        'A. 남편과 저는 동갑부부로 어린 자식이 &quot;한 명&quot; 있습니다.</a></dd>'
+        '</dl>'
+        '</li><li>'
+        '<dl>'
+        '<dt><h2><a href="/talk/375497362" title="중복 URL 글">중복 URL 글</a></h2></dt>'
+        '</dl>'
+        '</li></ul>'
+    ).encode("utf-8")
+    items = collector._parse_pann_html(raw)
+    assert len(items) == 1                       # URL 중복 제거
+    assert items[0]["url"] == "https://pann.nate.com/talk/375497362"
+    assert items[0]["title"] == "제가 말 안 듣는 며느리라네요^^;;"
+    assert items[0]["summary"] == 'A. 남편과 저는 동갑부부로 어린 자식이 "한 명" 있습니다.'
+    assert items[0]["guid"] == items[0]["url"]
+
+
+def test_parse_pann_html_no_summary_ok():
+    raw = ('<dt><h2><a href="/talk/99" title="미리보기 없는 글">미리보기 없는 글</a></h2></dt>'
+           ).encode("utf-8")
+    items = collector._parse_pann_html(raw)
+    assert len(items) == 1
+    assert items[0]["summary"] is None
+
+
+def test_parse_pann_html_garbage_safe():
+    assert collector._parse_pann_html(b"<not html") == []
+    assert collector._parse_pann_html(b"") == []
+
+
 # ── poll_feeds 공정 분배: 한 피드가 주기 예산을 독식하지 못하고 라운드로빈으로 분산 ──
 def _setup_poll(monkeypatch, feeds, items_per_feed, budget):
     """poll_feeds 의 IO(피드 fetch·파싱·중복조회·캡처·지터)를 메모리 stub 으로 격리."""
