@@ -50,8 +50,11 @@ def _patch_db(monkeypatch, known_rows, error=None):
     return db
 
 
-R1 = {"title": "글1", "url": "https://pann.nate.com/talk/1", "content": "x" * 100}
-R2 = {"title": "글2", "url": "https://theqoo.net/hot/2", "content": "y" * 100}
+# kindness positive 입력 필터(KINDNESS_POSITIVE_RE)를 통과하도록 미담 어휘 포함
+R1 = {"title": "훈훈한 글1", "url": "https://pann.nate.com/talk/1",
+      "content": "지하철에서 쓰러진 시민을 도와줬다는 훈훈한 사연. " * 5}
+R2 = {"title": "훈훈한 글2", "url": "https://theqoo.net/hot/2",
+      "content": "길에서 주운 지갑을 주인에게 돌려줬다는 사연. " * 5}
 
 
 # ── filter_known_sources ─────────────────────────────────────────────────────

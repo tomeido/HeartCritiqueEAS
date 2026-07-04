@@ -23,10 +23,10 @@ ONTOPIC_RESULT = {  # critique 적합성 필터(갑질)와 rich 필터(>=80자)�
     "url": "https://x.com/post/1",
     "content": "상사가 직원에게 갑질과 폭언을 했다는 제보가 올라왔다. " * 5,
 }
-KIND_RESULT = {  # kindness 비미담 필터에 안 걸리는 순수 미담
+KIND_RESULT = {  # kindness positive 입력 필터(도와/훈훈)를 통과하는 순수 미담
     "title": "훈훈한 사연",
     "url": "https://x.com/post/2",
-    "content": "지하철에서 한 시민이 쓰러진 노인을 부축해 병원까지 동행했다고 한다. " * 5,
+    "content": "지하철에서 한 시민이 쓰러진 노인을 도와 병원까지 동행했다는 훈훈한 사연. " * 5,
 }
 
 
@@ -45,7 +45,7 @@ def _patch_pipeline(monkeypatch, result):
 def test_kindness_low_volatility_still_generates(monkeypatch):
     _patch_pipeline(monkeypatch, KIND_RESULT)
     monkeypatch.setattr(llm, "call_groq",
-                        _low_vol_groq("한 시민이 노인을 부축했다는 글이 올라왔다고 한다."))
+                        _low_vol_groq("한 시민이 쓰러진 노인을 도와 병원까지 함께 갔다는 훈훈한 글이 올라왔다고 한다."))
     text, citations, *_rest, volatility, _reason = llm.generate_via_groq("kindness")
     assert text is not None          # 저휘발이어도 미담은 생성
     assert volatility == 5
@@ -137,9 +137,9 @@ def test_generate_gemini_no_fit_detected(monkeypatch):
 def test_generate_gemini_normal_text_passes(monkeypatch):
     monkeypatch.setattr(llm, "LLM_PROVIDER", "gemini")
     monkeypatch.setattr(llm, "call_gemini", lambda p, use_search=True: _gemini_raw(
-        "한 시민이 노인을 부축해 병원까지 동행했다는 글이 올라왔다고 한다.\n"
+        "한 시민이 쓰러진 노인을 도와 병원까지 동행했다는 훈훈한 글이 올라왔다고 한다.\n"
         "휘발성 점수: 6\n박제 사유: 조용한 온기"))
     r = llm.generate("kindness")
     assert r["no_fit"] is False
-    assert "부축해" in r["body"]
+    assert "도와" in r["body"]
     assert r["volatility_score"] == 6

@@ -85,10 +85,11 @@ def test_groq_search_critique_keeps_filter_in_tier3(monkeypatch):
     assert results == []   # 스포츠·연예 글을 '비위'로 둔갑시키느니 빈 후보(→NO_FIT 스킵)
 
 
-def test_groq_search_kindness_releases_filter_in_tier3(monkeypatch):
-    # kindness 3차 폴백은 '뭐라도 생성 우선' — 필터 전부 해제되어 결과가 남는다.
+def test_groq_search_kindness_keeps_filter_in_tier3(monkeypatch):
+    # kindness 도 3차 폴백에서 적합성 필터 유지 — no_fit 이면 Gemini 폴백이 있어
+    # 사기·괴담을 '미담'으로 둔갑시키는 오수락을 감수할 이유가 없다.
     scam = [{"title": "보이스피싱 당할 뻔", "url": "https://x.com/3", "content": "사기 전화 " * 20}]
     monkeypatch.setattr(llm, "tavily_search", _fake_tavily(scam))
     monkeypatch.setattr(llm.dedup, "filter_known_sources", lambda r: (r, 0))
     results, _count = llm._groq_search("쿼리", "kindness", None)
-    assert len(results) == 1
+    assert results == []

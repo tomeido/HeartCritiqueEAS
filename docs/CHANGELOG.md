@@ -292,7 +292,7 @@ s/·검색) 추가, 중복 절번호(9→10) 수정. 전체 166 passed.
   당했다" 류 소비자 고발은 피해 정황 교차 검사로 보호).
 - **promoter 통합**: hard 삭제 확정 후보는 삭제위험이 이미 실현된 상태이므로
   **가치 우선**으로 승격 순서 변경.
-- **`migrations/010_value_score.sql`**: `captured_posts.value_score` 컬럼.
+- **`migrations/011_value_score.sql`**: `captured_posts.value_score` 컬럼.
   미적용 환경은 자동 폴백(기존 동작 유지).
 - 원칙 유지: 점수는 **우선순위·표시 전용** — 박제 결정·투표 임계값에 절대 미주입.
 
@@ -355,7 +355,7 @@ s/·검색) 추가, 중복 절번호(9→10) 수정. 전체 166 passed.
   `%2B` 인코딩을 라이브러리 수준에서 실증.
 
 ### 운영자 조치 (배포 시)
-1. Supabase SQL Editor 에서 **`migrations/010_value_score.sql` 실행** (미적용이어도
+1. Supabase SQL Editor 에서 **`migrations/011_value_score.sql` 실행** (미적용이어도
    동작은 하되 가치 우선 정렬이 비활성).
 2. 선택: `PROXY_FETCH_ENABLED=true` 로 추적 불가 출처의 프록시 관측 활성화
    (트레이드오프는 `docs/TRANSPARENCY.md` §5 참고).

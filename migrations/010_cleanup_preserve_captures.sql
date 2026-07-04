@@ -1,5 +1,4 @@
--- 마이그레이션 011: 오래된 미박제 글 정리 시 캡처 승격글(from_capture) 보존.
--- (디자인 브랜치에선 010 이었으나 main 의 010_value_score.sql 과 번호 충돌로 011 로 재부여)
+-- 마이그레이션 010: 오래된 미박제 글 정리 시 캡처 승격글(from_capture) 보존.
 --
 -- 배경: cleanup 은 오래된 미박제(arweave_tx_id IS NULL) 글을 정리한다. 그런데 캡처에서
 --   승격된 글(stories.from_capture=true)은 '실제로 삭제된 원본'의 공개 기록이라 미션의 핵심
