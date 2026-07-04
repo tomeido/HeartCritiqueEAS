@@ -176,13 +176,15 @@ def count_citation_signals(rows: list) -> dict:
     """citation_checks 행(또는 status/http_code/baseline_at 을 가진 dict)들에서 신호를 집계.
     반환: {deleted, blocked}=표시용 raw, {hard_deleted, hard_blocked}=임계값용.
 
-    임계값 인하는 '목격한 삭제'만 — 우리가 살아있는 걸 직접 확인(baseline_at 캡처)한 출처가
+    임계값 인하는 '목격한 삭제'만 — 살아있는 원본을 직접 확인(baseline_at 캡처)한 출처가
     그 뒤 hard 404/410 으로 사라진 경우만 hard 로 센다. 첫 검사부터 404였던(한 번도 살아있는
     걸 못 본) 링크는 표시용 'deleted' 로는 잡되 hard 에서는 제외한다. 이유:
       · 이미 죽은 링크는 보존할 원본이 없어 '사라지기 전에 박제'할 가치가 없고,
       · 첫 접촉 404 는 일시 장애·안티봇 404 와 구분 불가인데 hard 404 는 sticky(재검사 영구
         제외)라 한 번 오탐이 영구 박제(1표)를 트리거하는 사고가 된다.
-    collector/promoter('살아있을 때 잡고→죽는 걸 감시→죽은 걸 공개') 철학과도 정합."""
+    승격(promoter) 글의 죽은 원본은 collector 가 살아있을 때 목격한 기록(captured_at·
+    content_hash)을 register_citations 가 기준선으로 승계하므로 이 게이트를 정당하게
+    통과한다 — '살아있을 때 잡고→죽는 걸 감시→죽은 걸 공개' 철학과 정합."""
     deleted = blocked = hard_deleted = hard_blocked = 0
     for r in rows or []:
         st = r.get("status")

@@ -504,14 +504,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-family: var(--font-sans); font-size: var(--fs-xs); font-weight: 700; letter-spacing: .06em; }
 .badge-kindness { background: var(--kindness-bg); color: var(--kindness-fg); }
 .badge-critique { background: var(--critique-bg); color: var(--critique-fg); }
-.badge-gap-medium { background: #f6e6bf; color: #7a5410; }
-.badge-gap-high   { background: #f1cf9f; color: #8a3d12; }
-.badge-gap-extreme{ background: #f1c4bc; color: #8c2018; }
-@media (prefers-color-scheme: dark) {
-  .badge-gap-medium { background: #3a2906; color: #f0cf86; }
-  .badge-gap-high   { background: #3d1f08; color: #f0b884; }
-  .badge-gap-extreme{ background: #441715; color: #f0b3ab; }
-}
 
 /* ── Citations · 경보 ─────────────────────────────────────────────────────── */
 .citations { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px dashed var(--border-strong); }
@@ -550,22 +542,33 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 .cit-archive.is-rescued { background: #1f7a4d; color: #fff; opacity: 1; }
 .cit-archive.is-rescued:hover { background: #155f3a; color: #fff; }
 
-/* 격차/삭제 경보 — 1면 긴급 단신 */
-.gap-alert, .deletion-alert {
+/* 삭제 경보 — 1면 긴급 단신 */
+.deletion-alert {
   display: flex; align-items: flex-start; gap: 12px;
   margin-top: var(--sp-4); padding: 14px 16px; border-radius: var(--r-md);
-}
-.gap-alert { background: linear-gradient(135deg, var(--kindness-wash), var(--bg-card-2));
-  border: 1px solid var(--kindness-soft); border-left: 4px solid var(--kindness-rule); }
-.gap-alert.gap-extreme, .deletion-alert {
   background: linear-gradient(135deg, var(--critique-wash), var(--bg-card-2));
   border: 1px solid var(--critique-border); border-left: 4px solid var(--critique-rule); }
-.gap-alert-icon, .deletion-alert-icon { font-size: 20px; flex-shrink: 0; line-height: 1.2; }
-.gap-alert-body, .deletion-alert-body { flex: 1; font-size: var(--fs-base); line-height: 1.6; }
-.gap-alert-body strong, .deletion-alert-body strong {
+.deletion-alert-icon { font-size: 20px; flex-shrink: 0; line-height: 1.2; }
+.deletion-alert-body { flex: 1; font-size: var(--fs-base); line-height: 1.6; }
+.deletion-alert-body strong {
+  font-family: var(--font-serif); display: block; font-weight: 700; font-size: var(--fs-md);
+  margin-bottom: var(--sp-1); color: var(--critique-accent); }
+
+/* 캡처→승격 기원 알림 — 살아있을 때 캡처한 원본이 실제 삭제된 뒤 복원된 글(미션의 핵심) */
+.capture-alert {
+  display: flex; align-items: flex-start; gap: 12px;
+  margin-top: var(--sp-4); padding: 14px 16px; border-radius: var(--r-md);
+  background: var(--archive-bg); color: var(--archive-fg);
+  border: 1px solid var(--seal-border); border-left: 4px solid var(--seal-gold);
+}
+.capture-alert-icon { font-size: 20px; flex-shrink: 0; line-height: 1.2; }
+.capture-alert-body { flex: 1; font-size: var(--fs-base); line-height: 1.6; }
+.capture-alert-body strong {
   font-family: var(--font-serif); display: block; font-weight: 700; font-size: var(--fs-md); margin-bottom: var(--sp-1); }
-.deletion-alert-body strong { color: var(--critique-accent); }
-.gap-alert-stats { margin-top: 6px; font-family: var(--font-mono); font-size: var(--fs-xs); opacity: .8; }
+.capture-alert-value { margin-top: 7px; font-family: var(--font-mono); font-size: var(--fs-xs); opacity: .85; }
+.capture-alert-value .val-bar { display: inline-block; vertical-align: middle; width: 72px; height: 6px;
+  margin: 0 6px; background: rgba(0,0,0,.15); border-radius: var(--r-full); overflow: hidden; }
+.capture-alert-value .val-bar i { display: block; height: 100%; background: var(--seal-gold); border-radius: var(--r-full); }
 
 /* ── ★ 박제 SEALED 히어로 ─────────────────────────────────────────────────── */
 .archive-hero {
@@ -679,6 +682,8 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   background: linear-gradient(90deg, var(--accent-1), var(--accent-2));
   border-radius: var(--r-full); transition: width .8s cubic-bezier(.4,0,.2,1); }
 #vote-status { margin-top: var(--sp-3); }
+.vote-explain { margin: var(--sp-3) 0 0; font-size: var(--fs-xs); color: var(--muted); line-height: 1.65; }
+.vote-explain strong { color: var(--text); }
 .vote-bar.complete .vote-bar-fill { background: linear-gradient(90deg, var(--seal-wax), var(--seal-gold));
   animation: pulse 1.5s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.72} }
@@ -770,6 +775,38 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-size: var(--fs-sm); line-height: 1.55; }
 .threshold-info.shown { display: block; }              /* shown 토글 의미 유지 */
 .threshold-info b { color: var(--accent-1); font-weight: 700; }
+/* 투명성 패널 — 정책 스냅샷을 사람이 읽는 형태로 */
+.tp-section { margin-top: var(--sp-5); }
+.tp-section:first-child { margin-top: 0; }
+.tp-title { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 700;
+  letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin-bottom: var(--sp-2); }
+.tp-mission { font-family: var(--font-serif); font-size: var(--fs-base); line-height: 1.7; color: var(--text); }
+.tp-never { padding: 12px 14px; border-radius: var(--r-md); line-height: 1.7; font-size: var(--fs-sm);
+  background: var(--critique-wash, var(--bg-card-2)); border: 1px solid var(--critique-border);
+  border-left: 4px solid var(--critique-rule); }
+.tp-never li { margin-left: 18px; }
+.tp-list { font-size: var(--fs-sm); line-height: 1.7; }
+.tp-list li { margin-left: 18px; }
+.tp-modules { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+.tp-mod { display: flex; align-items: flex-start; gap: 8px; padding: 9px 11px;
+  background: var(--bg-card-2); border: 1px solid var(--border); border-radius: var(--r-md);
+  font-size: var(--fs-xs); line-height: 1.5; }
+.tp-mod .dot { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; margin-top: 4px;
+  background: var(--border); }
+.tp-mod.on .dot { background: var(--ok, #2f7d4f); box-shadow: 0 0 6px rgba(47,125,79,.5); }
+.tp-mod .nm { font-weight: 700; color: var(--text); }
+.tp-mod .role { color: var(--muted); }
+.tp-kv { display: flex; flex-wrap: wrap; gap: 8px 18px; font-family: var(--font-mono);
+  font-size: var(--fs-xs); color: var(--muted); }
+.tp-kv b { color: var(--text); font-weight: 700; }
+.tp-note { font-size: var(--fs-xs); color: var(--muted); line-height: 1.65; margin-top: var(--sp-2); }
+.tp-weights { margin-top: var(--sp-3); }
+.tp-weights summary { cursor: pointer; font-size: var(--fs-xs); color: var(--muted);
+  font-family: var(--font-mono); user-select: none; }
+.tp-wgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 16px; margin-top: var(--sp-2); font-family: var(--font-mono); font-size: var(--fs-2xs, 10px); }
+.tp-wrow { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--border); padding: 2px 0; }
+.tp-links { margin-top: var(--sp-5); padding-top: var(--sp-3); border-top: 1px solid var(--rule); }
 /* 시계열 차트 */
 .chart-section { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--border); }
 .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: var(--sp-3); flex-wrap: wrap; gap: 8px; }
@@ -1320,7 +1357,6 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
     <div class="card">
       <div class="story-meta">
         <span class="badge" id="story-badge"></span>
-        <span class="badge hidden" id="story-gap-badge"></span>
         <span class="muted text-sm" id="story-time"></span>
         <span class="muted text-sm" id="story-model"></span>
         <button class="btn-sm btn-outline btn-share" id="btn-share" style="margin-left:auto"
@@ -1331,13 +1367,13 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
                 title="이야기 닫기" aria-label="이야기 닫기">✕</button>
       </div>
 
-      <!-- 격차 알림 (medium 이상일 때 표시) -->
-      <div class="gap-alert hidden" id="gap-alert">
-        <span class="gap-alert-icon" id="gap-alert-icon" aria-hidden="true">🔍</span>
-        <div class="gap-alert-body">
-          <strong id="gap-alert-title">언론 보도 격차</strong>
-          <span id="gap-alert-detail"></span>
-          <div class="gap-alert-stats" id="gap-alert-stats"></div>
+      <!-- 캡처→승격 기원 (from_capture 글 전용): 삭제된 원본을 살아있을 때 캡처해 복원 -->
+      <div class="capture-alert hidden" id="capture-alert">
+        <span class="capture-alert-icon">🪦</span>
+        <div class="capture-alert-body">
+          <strong>사라진 원본을 복원한 글</strong>
+          <span id="capture-alert-detail"></span>
+          <div class="capture-alert-value hidden" id="capture-alert-value"></div>
         </div>
       </div>
 
@@ -1389,7 +1425,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <details class="verify-card hidden" id="verify-card">
         <summary class="verify-summary">🔐 박제 무결성 검증</summary>
         <div class="verify-body">
-          <p class="verify-intro">Arweave에서 원본을 받아 ECDSA-secp256k1 서명을 브라우저에서 직접 검증합니다. 서버를 신뢰할 필요 없이 누구나 검증 가능.</p>
+          <p class="verify-intro">Arweave에서 원본을 받아 ECDSA-secp256k1 서명을 브라우저에서 직접 검증하고, 박제본과 지금 화면의 본문을 대조해 박제 이후 변경 여부까지 확인합니다. 서버를 신뢰할 필요 없이 누구나 재현할 수 있습니다 — <a href="https://github.com/tomeido/HeartCritiqueEAS/blob/main/docs/TRANSPARENCY.md" target="_blank" rel="noopener">신뢰 모델·재현 절차 문서</a></p>
           <div class="verify-rows" id="verify-rows"></div>
           <button class="btn-sm btn-primary" id="btn-verify">🔍 검증 실행</button>
           <div class="verify-steps" id="verify-steps"></div>
@@ -1409,6 +1445,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
           <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
         </div>
         <button class="btn-vote btn-sm" id="btn-vote" disabled>로그인 후 투표</button>
+        <p class="vote-explain" id="vote-explain"></p>
         <div class="status" id="vote-status" role="status" aria-live="polite"></div>
       </div>
     </div>
@@ -1424,6 +1461,8 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         <button class="chip" data-filter="critique">비판</button>
         <button class="chip" data-filter="deleted">🚨 삭제된 출처</button>
         <button class="chip" data-filter="archived">🗄 박제됨</button>
+        <button class="chip hidden" data-filter="mine" id="chip-mine"
+                title="로그인 계정으로 투표한 글 — 내 결단의 기록">🗳 내 투표</button>
       </div>
       <div class="list-search">
         <span class="list-search-icon" aria-hidden="true">🔍</span>
@@ -1506,7 +1545,18 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <!-- 투명성: 지금 적용 중인 정책·가중치·게이트 실시간 공개 (우릴 믿지 말고 검증하라) -->
       <div class="feed-links">
         <span class="feed-label">🔍 투명성:</span>
-        <a href="/api/transparency" target="_blank" rel="noopener">방법론·정책 실시간 스냅샷</a>
+        <a href="/api/transparency" target="_blank" rel="noopener">방법론·정책 실시간 스냅샷 (JSON)</a>
+      </div>
+    </div>
+  </details>
+
+  <!-- 투명성 패널 — /api/transparency 스냅샷을 사람이 읽는 형태로.
+       문서(TRANSPARENCY.md)가 '약속'이라면 이 패널은 '지금 서버의 실제 상태'다. -->
+  <details class="dash-collapse" id="tp-collapse">
+    <summary>🔍 투명성 · 지금 적용 중인 정책과 한계</summary>
+    <div class="dash-card">
+      <div id="tp-body">
+        <div class="empty"><div class="empty-text">여는 순간 서버의 현재 정책을 불러옵니다…</div></div>
       </div>
     </div>
   </details>
@@ -1548,6 +1598,7 @@ let allStories = [];
 let currentFilter = 'all';
 let displayLimit = 10;
 let searchQuery = '';          // 서버 검색어(본문·시적 사유 부분일치). 비면 일반 목록.
+let myVotedIds = null;         // 내가 투표한 story id Set(비로그인/미로드=null). '내 투표' 필터용.
 let archivePollTimer = null;
 
 // ── 테마 관리 (LocalStorage + 3Way Toggle) ──────────────────────────────────
@@ -1832,6 +1883,14 @@ function fmtReceiptDate(iso) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// 본문 sha256(hex). 비보안 컨텍스트(http)에는 crypto.subtle 이 없으므로 null → 지문 행 생략.
+async function sha256Hex(text) {
+  try {
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text ?? '')));
+    return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch { return null; }
+}
+
 function dataUrlToBlob(dataUrl) {
   const bin = atob(dataUrl.split(',')[1]);
   const arr = new Uint8Array(bin.length);
@@ -2046,6 +2105,7 @@ async function makeReceipt() {
   try {
     const id = s.id || s.story_id;
     const origin = window.location.origin;
+    // /s/<id> 는 OG 미리보기가 붙는 서버 렌더 영속링크(내부에서 /#story= 로 보냄).
     const permalink = origin + '/s/' + id;
     const archived = !!s.arweave_tx_id;
     const qrTarget = archived ? (gatewayUrl(s.arweave_tx_id) || permalink) : permalink;
@@ -2074,6 +2134,13 @@ async function makeReceipt() {
       const net = isPermanent() ? 'mainnet · 영구' : 'devnet · 임시';
       meta.push(['박제 / SEALED', `${txShort}`]);
       meta.push(['체인 / CHAIN', `Arweave (${net})`]);
+      // 무결성 지문·검증 경로 — 영수증만 들고도 본문 변조 여부를 대조할 수 있게
+      // (verify 카드의 본문 대조와 같은 감사를 오프라인 사본에 연결).
+      const bodyHash = await sha256Hex(s.body || '');
+      if (bodyHash) {
+        meta.push(['지문 / SHA-256', bodyHash.slice(0, 12) + '…' + bodyHash.slice(-6)]);
+      }
+      meta.push(['검증 / VERIFY', origin + '/api/verify/' + String(id).slice(0, 8) + '…']);
     } else {
       meta.push(['투표 / VOTES', `${s.vote_count || 0} / ${threshold} 표`]);
       meta.push(['박제 / SEALED', '미박제 — 투표 진행 중']);
@@ -2128,6 +2195,16 @@ async function loadStats() {
       `<span>총 <b>${d.votes.total}</b>표</span>`,
       `<span>출처 추적 <b>${ct.total || 0}</b>개 (살아있음 ${ct.live || 0} · 삭제 ${ct.deleted || 0} · 차단 ${ct.blocked || 0})</span>`,
     ];
+    // 선제 수집·승격·Wayback 은 선택 모듈 — 데이터가 있을 때만 노출(미설정 환경 소음 방지).
+    // 미션의 핵심 경로(살아있을 때 캡처 → 삭제 감시 → 승격)가 실제로 도는지 한눈에 보인다.
+    const cap = d.captured || {};
+    if (cap.total) {
+      detail.push(`<span>🪦 선제 캡처 <b>${cap.total}</b>건 (원본 삭제 ${cap.hard_deleted || 0} · 복원 공개 ${cap.promoted || 0})</span>`);
+    }
+    const wb = d.wayback || {};
+    if (wb.success) {
+      detail.push(`<span>📦 Wayback 스냅샷 <b>${wb.success}</b>건</span>`);
+    }
     document.getElementById('dash-detail').innerHTML = detail.join('');
 
     // 동적 임계값 정보 + 사냥꾼 상태
@@ -2174,6 +2251,146 @@ async function loadStats() {
   } catch (e) {
     console.error('[stats] load failed', e);
   }
+}
+
+// ── 투명성 패널: 정책 스냅샷(/api/transparency)을 사람이 읽는 형태로 ─────────
+// 문서(TRANSPARENCY.md)가 '약속'이라면 이 패널은 '지금 서버의 실제 상태'다.
+// 처음 여는 순간 1회만 불러온다(정책은 자주 안 바뀌므로 대시보드 폴링과 분리).
+let _tpLoaded = false;
+document.getElementById('tp-collapse').addEventListener('toggle', (e) => {
+  if (e.target.open && !_tpLoaded) { _tpLoaded = true; loadTransparency(); }
+});
+
+async function loadTransparency() {
+  const el = document.getElementById('tp-body');
+  try {
+    const r = await fetch('/api/transparency');
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    renderTransparency(await r.json());
+  } catch (e) {
+    console.error('[transparency] load failed', e);
+    _tpLoaded = false;   // 다음에 다시 열면 재시도
+    el.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">⚠️</div>
+        <div class="empty-text">정책 스냅샷을 불러오지 못했습니다. 패널을 닫았다 다시 열면 재시도합니다.</div>
+      </div>`;
+  }
+}
+
+function renderTransparency(snap) {
+  const el = document.getElementById('tp-body');
+  const e_ = escHtml;
+  const dp = snap.data_policy || {};
+  const th = snap.threshold_policy || {};
+  const gg = snap.generation_gates || {};
+  const pg = snap.promotion_gates || {};
+  const lim = snap.known_limits || {};
+  const ar = snap.archive || {};
+  const mods = snap.modules || {};
+
+  const li = (arr) => (arr || []).map((t) => `<li>${e_(t)}</li>`).join('');
+  const modNames = {
+    tracker: '출처 삭제 추적', hunter: '자동 사냥꾼', collector: '선제 수집기',
+    promoter: '캡처→공개 승격', wayback: 'Wayback 위임', proxy_observation: '프록시 관측',
+  };
+  const modCards = Object.entries(mods).map(([k, m]) => {
+    const on = !!(m && m.enabled);
+    return `<div class="tp-mod ${on ? 'on' : ''}">
+      <span class="dot"></span>
+      <span><span class="nm">${e_(modNames[k] || k)}</span> — <span class="role">${e_((m && m.role) || '')}</span>
+      <b style="color:${on ? 'var(--ok)' : 'var(--muted)'}"> ${on ? '켜짐' : '꺼짐'}</b></span>
+    </div>`;
+  }).join('');
+
+  const wrows = (obj) => Object.entries(obj || {})
+    .map(([k, v]) => `<div class="tp-wrow"><span>${e_(k)}</span><b>${e_(String(v))}</b></div>`).join('');
+  const pubKey = ar.agent_public_key
+    ? e_(String(ar.agent_public_key).slice(0, 18)) + '…' + e_(String(ar.agent_public_key).slice(-8))
+    : '(미설정 — 임시 키)';
+
+  el.innerHTML = `
+    <div class="tp-section">
+      <div class="tp-mission">${e_(snap.mission || '')}</div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">✋ 절대 하지 않는 것</div>
+      <div class="tp-never"><ul>${li(dp.never_done)}</ul></div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">⚖️ 박제는 이렇게 결정됩니다</div>
+      <div class="tp-note" style="margin-top:0">${e_(th.description || '')}</div>
+      <div class="tp-kv" style="margin-top:8px">
+        <span>기본 임계값 <b>${e_(String(th.default ?? '-'))}표</b></span>
+        <span>지금 적용 <b>${e_(String(th.current_base ?? th.default ?? '-'))}표</b></span>
+        <span>동적 조정 <b>${th.dynamic ? '켜짐' : '꺼짐'}</b></span>
+        ${th.active_voters != null ? `<span>활성 투표자 <b>${e_(String(th.active_voters))}명</b></span>` : ''}
+      </div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🧩 지금 돌고 있는 모듈</div>
+      <div class="tp-modules">${modCards}</div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🧪 무엇을 쓸지 거르는 게이트 (콘텐츠 질)</div>
+      <div class="tp-kv">
+        <span>적합성 게이트 <b>${gg.relevance_gate ? '켜짐' : '꺼짐'}</b></span>
+        <span>최소 본문 길이 <b>${e_(String(gg.min_source_content_chars ?? '-'))}자</b></span>
+        <span>중복 출처 제외 <b>${(gg.dedup && gg.dedup.enabled) ? '켜짐' : '꺼짐'}</b></span>
+      </div>
+      <div class="tp-note">${e_(gg.note || '')}</div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🪦 삭제된 원본의 복원 공개 게이트</div>
+      <ul class="tp-list">
+        <li>트리거: ${e_(pg.trigger || '-')}</li>
+        <li>개인정보 검사 ${Array.isArray(pg.pii_gate) ? `<b>${pg.pii_gate.length}종</b> (${e_(pg.pii_gate.join(', '))})` : '-'}</li>
+        <li>기업 비위(critique) 승격: ${e_(pg.critique_policy || '-')}</li>
+        <li>${e_(pg.anonymization || '')}</li>
+      </ul>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🔓 공개 / 🔒 비공개 경계</div>
+      <ul class="tp-list">${li(dp.public)}</ul>
+      <div class="tp-note">비공개(절대 노출 안 함): ${e_((dp.private || []).join(' · '))}</div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🩹 정직한 한계</div>
+      <div class="tp-note" style="margin-top:0">${e_(lim.note || '')}</div>
+      ${Array.isArray(lim.untrackable_domains) && lim.untrackable_domains.length
+        ? `<div class="tp-note">추적 불가 도메인: ${e_(lim.untrackable_domains.join(', '))}</div>` : ''}
+      <div class="tp-note">박제 영속성: <b>${e_(ar.permanence || '-')}</b></div>
+    </div>
+
+    <div class="tp-section">
+      <div class="tp-title">🔏 서명과 검증</div>
+      <div class="tp-kv">
+        <span>알고리즘 <b>${e_(ar.signature_algorithm || '-')}</b></span>
+        <span>네트워크 <b>${e_(ar.network || '-')}</b></span>
+      </div>
+      <div class="tp-note">에이전트 공개키: <span style="font-family:var(--font-mono)">${pubKey}</span>
+        · 글마다 <span style="font-family:var(--font-mono)">/api/verify/{id}</span> 로 서버 교차검증,
+        박제된 글 상세의 '🔐 박제 무결성 검증'으로 브라우저 독립 검증이 가능합니다.</div>
+      <details class="tp-weights">
+        <summary>점수 가중치 전체 보기 (우선순위·표시 전용 — 박제 결정에 미주입)</summary>
+        <div class="tp-note">${e_((snap.scoring || {}).note || '')}</div>
+        <div class="tp-wgrid">${wrows((snap.scoring || {}).volatility_weights)}${wrows((snap.scoring || {}).value_weights)}</div>
+      </details>
+    </div>
+
+    <div class="feed-links tp-links">
+      <span class="feed-label">🔍 검증:</span>
+      <a href="/api/transparency" target="_blank" rel="noopener">원본 JSON</a>
+      <a href="https://github.com/tomeido/HeartCritiqueEAS/blob/main/docs/TRANSPARENCY.md" target="_blank" rel="noopener">신뢰 모델 문서</a>
+      <a href="https://github.com/tomeido/HeartCritiqueEAS/blob/main/docs/ARCHIVAL_CRITERIA.md" target="_blank" rel="noopener">박제 기준 연구</a>
+    </div>`;
 }
 
 // ── 박제 비용 · 지갑 잔액 · 후원 주소 (실시간, network-aware) ─────────────────
@@ -2423,12 +2640,46 @@ function renderAuth() {
       </span>
       <button class="btn-sm btn-outline" id="btn-logout">로그아웃</button>`;
     document.getElementById('btn-logout').onclick = () => sb.auth.signOut();
+    updateMineChip(true);
   } else {
     // 우측 상단 원버튼: 클릭 즉시 Google OAuth (아래로 펼쳐지는 카드 없음)
     area.innerHTML = `<button class="btn-sm btn-login-google" id="btn-login-header" aria-label="Google로 로그인">`
       + `<svg width="15" height="15" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.2l6.7-6.7C35.7 2.5 30.2 0 24 0 14.6 0 6.6 5.5 2.7 13.6l7.8 6c1.9-5.7 7.1-10.1 13.5-10.1z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3.1-2.3 5.7-4.8 7.5l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.3z"/><path fill="#FBBC05" d="M10.5 28.6A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.8-6A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.7 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.7 2.2-7.7 2.2-6.3 0-11.7-4.3-13.6-10l-7.8 6c4 8 11.9 13.1 21.4 13.1z"/></svg>`
       + `<span>로그인</span></button>`;
     document.getElementById('btn-login-header').onclick = signInWithGoogle;
+    updateMineChip(false);
+  }
+}
+
+// '🗳 내 투표' 칩: 로그인 시에만 노출하고 투표 이력을 로드한다. 로그아웃하면 숨기고,
+// 그 필터를 보던 중이면 전체로 복귀시켜 빈 화면에 갇히지 않게 한다.
+function updateMineChip(loggedIn) {
+  const chip = document.getElementById('chip-mine');
+  if (!chip) return;
+  chip.classList.toggle('hidden', !loggedIn);
+  if (loggedIn) {
+    if (myVotedIds === null) loadMyVotes();
+  } else {
+    myVotedIds = null;
+    if (currentFilter === 'mine') {
+      document.querySelector('.chip[data-filter="all"]')?.click();
+    }
+  }
+}
+
+async function loadMyVotes() {
+  if (!session?.access_token) return;
+  try {
+    const r = await fetch('/api/my/votes', {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    myVotedIds = new Set(d.story_ids || []);
+    if (currentFilter === 'mine') renderStoryList();
+  } catch (e) {
+    console.error('[my votes]', e);
+    myVotedIds = myVotedIds || new Set();   // 실패해도 필터가 죽지 않게 빈 Set
   }
 }
 
@@ -2638,7 +2889,7 @@ function showStory(s) {
     document.getElementById('volatility-bar').setAttribute('aria-valuenow', '0');
   }
 
-  renderGapSignal(s.gap_score, s.community_count, s.news_count);
+  renderCaptureOrigin(s);
 
   // 출처
   const citSection = document.getElementById('citations-section');
@@ -2667,6 +2918,40 @@ function showStory(s) {
   scrollFocus(card);
 }
 
+// 캡처→승격 기원 표시: 살아있을 때 캡처한 원본이 실제로 삭제(404/410 확정)된 뒤
+// PII 게이트·익명 재작성을 거쳐 공개된 글(미션의 핵심 경로)임을 알린다.
+// 원본 raw 본문은 비공개 원칙(TRANSPARENCY.md) — 여기선 도메인·삭제 시점만 노출.
+function renderCaptureOrigin(s) {
+  const box = document.getElementById('capture-alert');
+  if (!box) return;
+  if (!s?.from_capture) { box.classList.add('hidden'); return; }
+  const when = s.captured_hard_deleted_at
+    ? formatAbsolute(s.captured_hard_deleted_at) + ' 원본 삭제 확인 · ' : '';
+  const dom = s.origin_captured_url ? extractDomain(s.origin_captured_url) : '';
+  document.getElementById('capture-alert-detail').textContent =
+    `${when}${dom ? dom + '에 ' : ''}올라왔던 원본이 사라지기 전에 미리 캡처해 두었다가, ` +
+    '삭제가 확인된 뒤 개인정보 검사를 거쳐 익명 재작성으로 복원했습니다. ' +
+    "검색만으로는 잡을 수 없는 '이미 사라진 글'입니다.";
+  // 아카이브 가치(캡처 시 잰 결정적 점수, 012 승계) — '왜 이 글이 남을 가치가 있는가'.
+  // 표시 전용(박제 결정·임계값 미주입). 점수 없는 글(012 미적용·구 캡처)은 줄 자체를 숨긴다.
+  const valEl = document.getElementById('capture-alert-value');
+  if (valEl) {
+    const v = s.value_score;
+    if (typeof v === 'number' && v >= 0) {
+      const pct = Math.min(100, Math.max(0, v * 10));
+      valEl.innerHTML =
+        `<span title="캡처 시점에 잰 결정적 아카이브 가치(0~10) — 1인칭 직접 경험·물증·공익 제보 가산, 광고·펌글 감산. 표시 전용이며 박제 결정에는 쓰이지 않습니다. 기준: docs/ARCHIVAL_CRITERIA.md">아카이브 가치</span>` +
+        `<span class="val-bar" aria-hidden="true"><i style="width:${pct}%"></i></span>` +
+        `<b>${escHtml(String(v))}/10</b>`;
+      valEl.classList.remove('hidden');
+    } else {
+      valEl.classList.add('hidden');
+      valEl.innerHTML = '';
+    }
+  }
+  box.classList.remove('hidden');
+}
+
 function makeCitation(c) {
   const wrapper = document.createElement('div');
   wrapper.className = 'cit-wrapper';
@@ -2679,6 +2964,12 @@ function makeCitation(c) {
     
   const deletedCls = (status === 'deleted' && !c.track_untrackable) ? ' is-deleted' : '';
   const panelId = 'cit-panel-' + Math.random().toString(36).substring(2, 11);
+
+  // 콘텐츠 지문(투명성): 첫 생존 확인 시점 본문의 sha256. 원문을 재공개하지 않고도
+  // '그 시각에 이 내용이 존재했음'을 제3자가 대조할 수 있다(전체 해시는 title 로 노출).
+  const fpRows = c.content_fingerprint ? `
+        <div class="cit-log-row"><span class="cit-log-label" title="첫 생존 확인 시점 본문(가시 텍스트)의 sha256 지문 — 원문을 재공개하지 않고도 그 시각에 그 내용이 존재했음을 대조할 수 있습니다">콘텐츠 지문 🛈</span><span class="cit-log-val" title="${escHtml(c.content_fingerprint)}">${escHtml(String(c.content_fingerprint).slice(0, 16))}…</span></div>
+        <div class="cit-log-row"><span class="cit-log-label">지문 채취</span><span class="cit-log-val">${c.fingerprint_at ? formatAbsolute(c.fingerprint_at) : '-'}</span></div>` : '';
   
   wrapper.innerHTML = `
     <div class="cit-item">
@@ -2701,7 +2992,7 @@ function makeCitation(c) {
         <div class="cit-log-row"><span class="cit-log-label">검사 횟수</span><span class="cit-log-val">${c.track_check_count || 0}회</span></div>
         <div class="cit-log-row"><span class="cit-log-label">오류 누적</span><span class="cit-log-val">${c.track_error_count || 0}회</span></div>
         <div class="cit-log-row"><span class="cit-log-label">상태 코드</span><span class="cit-log-val">${c.track_http_code || '-'}</span></div>
-        <div class="cit-log-row"><span class="cit-log-label">다음 검사</span><span class="cit-log-val">${c.track_next_check_at ? formatFutureRelative(c.track_next_check_at) : '⏳'}</span></div>
+        <div class="cit-log-row"><span class="cit-log-label">다음 검사</span><span class="cit-log-val">${c.track_next_check_at ? formatFutureRelative(c.track_next_check_at) : '⏳'}</span></div>${fpRows}
       </div>
     </div>
   `;
@@ -2829,19 +3120,6 @@ function extractDomain(url) {
   catch { return ''; }
 }
 
-// ── 격차 신호 렌더링 ──────────────────────────────────────────────────────
-function renderGapSignal(score, communityCount, newsCount) {
-  const badge = document.getElementById('story-gap-badge');
-  const alert = document.getElementById('gap-alert');
-
-  // 배지/알림 둘 다 항상 숨김
-  if (badge) badge.classList.add('hidden');
-  if (alert) {
-    alert.classList.add('hidden', 'gap-extreme');
-    alert.classList.remove('gap-extreme');
-  }
-}
-
 // ── 투표 ───────────────────────────────────────────────────────────────────
 async function refreshVoteStatus(storyId) {
   if (!storyId) return;
@@ -2893,6 +3171,16 @@ function renderVoteArea(storyId, data) {
     banner.classList.add('hidden');
   }
 
+  // 이 투표가 무엇을 하는지(박제의 의미)와 투표 기록 공개(투명성 문서 5장)를
+  // 결단 전에 알린다 — devnet 은 영구가 아님을 숨기지 않는다.
+  const explain = document.getElementById('vote-explain');
+  if (explain) {
+    explain.innerHTML = (isPermanent()
+      ? `투표가 <strong>${data.threshold}표</strong>에 도달하면 본문·투표 기록·출처 생존 증거가 함께 서명되어 Arweave에 <strong>영구 박제</strong>됩니다. 원본이 삭제되어도 이 기록은 남습니다.`
+      : `투표가 <strong>${data.threshold}표</strong>에 도달하면 본문·투표 기록·출처 생존 증거가 함께 서명되어 Arweave 테스트넷(devnet)에 박제됩니다. 테스트 모드라 약 60일 뒤 삭제됩니다.`)
+      + ' 투표 기록(계정 ID)은 박제 번들에 공개 포함됩니다.';
+  }
+
   if (currentStory?.arweave_tx_id) {
     document.getElementById('vote-section').classList.add('hidden');
     return;
@@ -2939,6 +3227,7 @@ async function castVote(storyId) {
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
 
     toast(`👍 투표 완료 · ${data.vote_count}/${data.threshold}`, 'success');
+    if (myVotedIds) myVotedIds.add(storyId);   // '내 투표' 필터 즉시 반영
 
     if (data.vote_count >= data.threshold) {
       toast('🗄 임계값 도달! Arweave 박제 진행 중...', 'archive');
@@ -3053,6 +3342,10 @@ function showVerifyCard(txId, arweaveUrl) {
     <div class="verify-row"><span class="vlabel">Arweave Tx</span><span class="vval">${escHtml(txId)}</span></div>
     <div class="verify-row"><span class="vlabel">원본 URL</span><span class="vval"><a href="${escHtml(arweaveUrl)}" target="_blank" rel="noopener">${escHtml(arweaveUrl)}</a></span></div>
     <div class="verify-row"><span class="vlabel">프로젝트 공개키</span><span class="vval" id="vf-project-key" title="${escHtml(projectKey)}">${escHtml(projectKey.slice(0, 24))}…${escHtml(projectKey.slice(-12))}</span></div>
+    ${(currentStory?.id || currentStory?.story_id) ? (() => {
+      const vid = currentStory.id || currentStory.story_id;
+      return `<div class="verify-row"><span class="vlabel">서버 교차검증</span><span class="vval"><a href="/api/verify/${escHtml(vid)}" target="_blank" rel="noopener" title="서버가 독립적으로 같은 검증을 수행하고 DB 본문 변조 여부(body_matches_db)까지 대조한 JSON">GET /api/verify/${escHtml(String(vid).slice(0, 8))}… (JSON)</a></span></div>`;
+    })() : ''}
   `;
 
   document.getElementById('btn-verify').onclick = () => runVerification(txId, arweaveUrl);
@@ -3219,6 +3512,23 @@ async function runVerification(txId, arweaveUrl) {
     }
   }
 
+  // Step 7: 박제본 본문 ↔ 지금 화면의 본문 대조 — 서명은 '박제물이 안 바뀌었음'만
+  // 증명하므로, 박제 이후 서버 DB 본문이 몰래 바뀌지 않았는지는 이 대조로 잡는다
+  // (서버측 /api/verify 의 body_matches_db 와 같은 감사를 브라우저에서 독립 수행).
+  if (ok && signed) {
+    const s7 = appendStep('박제본과 현재 화면 본문 대조 중...', 'busy');
+    const bundleBody = signed?.payload?.story?.body;
+    const dbBody = currentStory?.body;
+    if (typeof bundleBody !== 'string' || typeof dbBody !== 'string') {
+      updateStep(s7, '본문 대조 생략 (구버전 번들 — 비교할 본문 없음)', 'busy');
+    } else if (bundleBody === dbBody) {
+      updateStep(s7, '일치 — 박제 이후 본문이 변경되지 않았습니다', 'ok');
+    } else {
+      updateStep(s7, '불일치 — 지금 표시된 본문이 박제 시점과 다릅니다 (변경 흔적)', 'err');
+      ok = false;
+    }
+  }
+
   // 최종 결과
   if (ok) {
     finalEl.className = 'verify-final ok';
@@ -3293,7 +3603,6 @@ function updateBadges() {
     kindness: s => s.category === 'kindness' && newerThan(s.created_at, lastSeen),
     critique: s => s.category === 'critique' && newerThan(s.created_at, lastSeen),
     archived: s => newerThan(s.archived_at, lastSeen),
-    gap:      s => ['high','extreme'].includes(s.gap_score) && newerThan(s.created_at, lastSeen),
     deleted:  s => (s.deleted_count || 0) > 0 && newerThan(s.created_at, lastSeen),
   };
   for (const [f, predicate] of Object.entries(chipFilters)) {
@@ -3343,6 +3652,7 @@ function renderStoryList() {
   else if (currentFilter === 'critique') stories = stories.filter(s => s.category === 'critique');
   else if (currentFilter === 'archived') stories = stories.filter(s => s.arweave_tx_id);
   else if (currentFilter === 'deleted')  stories = stories.filter(s => (s.deleted_count || 0) > 0);
+  else if (currentFilter === 'mine')     stories = stories.filter(s => myVotedIds?.has(s.id));
 
   const totalFiltered = stories.length;
   const loadMoreContainer = document.getElementById('load-more-container');
@@ -3358,7 +3668,15 @@ function renderStoryList() {
         <div class="empty-text">‘${escHtml(searchQuery)}’에 대한 검색 결과가 없습니다.</div>
         <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.getElementById('story-search-clear').click()">검색 지우기</button></div>
       </div>`
-      : `
+      : currentFilter === 'mine'
+        ? `
+      <div class="empty">
+        <div class="empty-icon" aria-hidden="true">🗳</div>
+        <div class="empty-text">아직 투표한 글이 없습니다.</div>
+        <p class="muted text-sm" style="margin-top:8px">투표는 글을 Arweave 에 영구 박제할지 결정하는 인간의 결단입니다 — 여기에 당신의 기록이 쌓입니다.</p>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector('.chip[data-filter=all]').click()">전체 보기로 돌아가기</button></div>
+      </div>`
+        : `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
@@ -3392,7 +3710,10 @@ function renderStoryList() {
         : bC > 0
           ? `<div style="color:var(--warn-fg);font-weight:600;font-size:11px">⛔ ${bC}개 차단됨</div>`
           : '';
-    const gapLine = '';
+    // 캡처→승격 글: 원본이 실제로 삭제된 뒤 복원된 글(미션의 핵심)을 목록에서도 드러낸다
+    const captureLine = s.from_capture
+      ? `<div style="color:var(--seal-wax);font-weight:600;font-size:11px" title="원본이 사라지기 전에 캡처해 두었다가 삭제 확인 후 익명 재작성으로 복원한 글">🪦 사라진 원본 복원</div>`
+      : '';
     const thresholdLabel = urgent
       ? `<span style="color:var(--err);font-weight:700">${s.vote_count}/${threshold}표 ⚡</span>`
       : `${s.vote_count}/${threshold}표`;
@@ -3405,7 +3726,7 @@ function renderStoryList() {
       // 1면 단독 — 큰 피처 카드
       div.className = `list-item feature ${catCls}${isArchived ? ' is-sealed' : ''}${isGhost ? ' story-ghost' : ''}${isDeletedWarning ? ' story-flash-deleted' : ''}`;
       const label = s.category === 'kindness' ? '🌸 따뜻한 미담' : '🔥 대기업 비위 · 폭로';
-      const gapTag = '';
+      const capTag = s.from_capture ? ' · 🪦 사라진 원본 복원' : '';
       const delTag = dC > 0 ? ` · 🚨 출처 ${dC}개 삭제` : (bC > 0 ? ` · ⛔ ${bC}개 차단` : '');
       const sealEl = isArchived ? `<span class="feat-seal">SEALED</span>` : '';
       const foot = isArchived
@@ -3414,7 +3735,7 @@ function renderStoryList() {
              <span class="mini-bar"><span class="mini-bar-fill" style="width:${pct}%"></span></span></span>`;
       div.innerHTML = `
         ${sealEl}
-        <div class="feat-kicker">${newMark}<span class="feat-label">${label}${gapTag}${delTag}</span></div>
+        <div class="feat-kicker">${newMark}<span class="feat-label">${label}${capTag}${delTag}</span></div>
         <div class="feat-body">${featBodyHtml(s.body)}</div>
         <div class="feat-foot">
           <span>${formatRelative(s.created_at)}</span>${foot}
@@ -3434,7 +3755,7 @@ function renderStoryList() {
               : `${thresholdLabel}
                  <span class="mini-bar"><span class="mini-bar-fill" style="width:${pct}%"></span></span>`}
           </div>
-          ${gapLine}
+          ${captureLine}
           ${deletedLine}
         </div>`;
     }
@@ -3457,6 +3778,32 @@ async function loadAndShowStory(storyId) {
     toast('이야기를 불러오지 못했습니다: ' + e.message, 'error');
   }
 }
+
+// ── 이야기 검색 (디바운스 → 서버 검색) ───────────────────────────────────────
+(() => {
+  const input = document.getElementById('story-search');
+  const clearBtn = document.getElementById('story-search-clear');
+  if (!input) return;
+  let debounce = null;
+  const run = () => {
+    const v = input.value.trim();
+    if (v === searchQuery) return;   // 변화 없으면 재요청 생략
+    searchQuery = v;
+    displayLimit = 10;
+    loadStoryList();
+  };
+  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(run, 300); });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(debounce); run(); } });
+  if (clearBtn) clearBtn.onclick = () => {
+    clearTimeout(debounce);
+    input.value = '';
+    input.focus();
+    if (!searchQuery) return;
+    searchQuery = '';
+    displayLimit = 10;
+    loadStoryList();
+  };
+})();
 
 document.querySelectorAll('.chip').forEach(chip => {
   chip.setAttribute('aria-pressed', chip.classList.contains('active') ? 'true' : 'false');

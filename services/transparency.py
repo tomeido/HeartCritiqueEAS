@@ -76,7 +76,9 @@ def build_snapshot() -> dict:
     import 는 함수 안에서 — 앱 기동 순서·순환 의존을 피하고 항상 현재 값을 읽는다."""
     from services import pii, proxyfetch, value, volatility, wayback
     from services.collector import COLLECTOR_ENABLED, COMMUNITY_FEEDS
+    from services.dedup import DEDUP_ENABLED
     from services.hunter import HUNTER_ENABLED
+    from services.llm import MIN_SOURCE_CONTENT, RELEVANCE_GATE_ENABLED
     from services.promoter import (
         PROMOTER_AUTO_CRITIQUE,
         PROMOTER_ENABLED,
@@ -152,6 +154,26 @@ def build_snapshot() -> dict:
                 "role": "IA Save Page Now 위임 스냅샷(중립 제3자 증거)"},
             "proxy_observation": proxyfetch.get_status() | {
                 "role": "봇차단(추적 불가) 출처의 프록시 2차 관측 — soft 신호 전용"},
+        },
+        "generation_gates": {
+            "note": (
+                "검색→생성 단계의 후보 선별 게이트(콘텐츠 질). 박제 결정·투표 임계값과는 "
+                "무관하다 — 무엇을 '쓸지'만 거르고, 무엇을 '박제할지'는 인간 투표가 정한다."
+            ),
+            "relevance_gate": RELEVANCE_GATE_ENABLED,
+            "min_source_content_chars": MIN_SOURCE_CONTENT,
+            "category_fit": {
+                "kindness": "비미담 부정필터(사기·괴담·돈분쟁 컷 + 선행 신호 화이트리스트)",
+                "critique": ("기업/노동/소비자/제도 부조리 신호 필수(positive gate) — "
+                             "스포츠·게임·연예·진영정치 글의 '비위 둔갑' 차단, 3차 폴백에서도 유지"),
+            },
+            "dedup": {
+                "enabled": DEDUP_ENABLED,
+                "role": (
+                    "이미 스토리로 만든 출처 URL(citation_checks 기지 목록)을 검색 후보에서 "
+                    "제외 — 같은 글의 근사 중복 스토리(투표 분산·이중 박제) 방지"
+                ),
+            },
         },
         "promotion_gates": {
             "trigger": "hard 삭제(HTTP 404/410)만 자동 승격 — soft 는 절대 자동화하지 않음",

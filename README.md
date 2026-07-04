@@ -164,6 +164,12 @@ Docker
 - `GET /api/transparency`: 서버가 **지금 실제로 적용 중인** 정책·가중치·게이트·활성 모듈·에이전트 공개키의 실시간 스냅샷. 문서(`docs/TRANSPARENCY.md`)의 '약속'과 대조하면 약속 위반이 드러나는 구조입니다.
 - `GET /api/verify/{story_id}`: 박제된 글의 Arweave 번들을 허용 게이트웨이에서 직접 받아 ECDSA(secp256k1-SHA256) 서명을 검증하고, **박제 이후 DB 본문이 몰래 바뀌지 않았는지**까지 대조합니다(`body_matches_db`). 서버 없이 재현하는 절차는 `docs/TRANSPARENCY.md` 참고.
 - 출처 citation에 `content_fingerprint`(첫 생존 확인 시점 본문의 sha256)가 노출되어, 원문 재공개 없이 "그 시각에 그 내용이 존재했음"을 제3자가 대조할 수 있습니다.
+- 프론트 하단의 접이식 **투명성 패널**이 같은 스냅샷을 사람이 읽는 9섹션 형태로 렌더하고, 박제된 글 상세의 "🔐 박제 무결성 검증" 카드는 브라우저에서 서명 검증 + 박제본↔화면 본문 대조를 독립 수행합니다.
+- **'목격한 삭제'만 임계값 인하**: 살아있는 원본을 직접 확인(기준선 캡처)한 뒤의 hard 404/410/403 만 박제 임계값을 낮춥니다 — 첫 접촉부터 죽어 있던 링크(오탐 구분 불가)는 배지 전용. 승격 글의 죽은 원본은 collector 의 생전 목격 기록을 기준선으로 승계합니다.
+
+### 12) 개인 아카이브 & 생성 중복 방지
+- **🗳 내 투표(`GET /api/my/votes`)**: 로그인 계정으로 투표한 글만 모아 보는 개인 아카이브 필터 — 내 결단이 박제로 남는 과정을 추적할 수 있습니다.
+- **중복 스토리 방지(`services/dedup.py`)**: 이미 스토리로 만든 출처 URL 을 검색 후보에서 선제 제외해 같은 글의 근사 중복(투표 분산·이중 박제)을 막습니다(`STORY_DEDUP_ENABLED`, 기본 켜짐). 적용 상태는 `/api/transparency` 의 `generation_gates` 로 공개됩니다.
 
 ---
 
@@ -192,6 +198,9 @@ Docker
 | `PROMOTER_AUTO_CRITIQUE` | 선택 | `false` | `critique`(기업 비위) 캡처도 자동 승격할지. 기본은 수동 검토(`pending_review`, 명예훼손 노출 최소화) |
 | `PROMOTER_MIN_VOLATILITY` | 선택 | `0` | 승격 최소 삭제확률(0~10). 높일수록 저가치 잡담을 걸러내고 고위험 글만 공개 (hard 삭제가 이미 강한 게이트) |
 | `ADMIN_TOKEN` | 선택 | - | 설정 시 `POST /api/admin/promote`(수동 승격) 활성화. `X-Admin-Token` 헤더로 인증. 미설정이면 엔드포인트 비활성(404) |
+| `STORY_DEDUP_ENABLED` | 선택 | `true` | 이미 스토리로 만든 출처 URL 을 검색 후보에서 제외(중복 스토리 방지). DB 조회 실패 시 필터 없이 통과 |
+| `GEMINI_MAX_ATTEMPTS` / `GEMINI_RETRY_BASE` | 선택 | `5` / `1.5` | Gemini 일시 오류(5xx/429/네트워크) 지수백오프 재시도 — Groq 한도 소진 시 단일 경로 보호 |
+| `STORY_CLEANUP_MAX_VOTES` | 선택 | 임계값-1 | 이 표 수 이하의 오래된 미박제 글만 정리. 캡처 승격글(`from_capture`)은 항상 보존 (`migrations/011` 권장) |
 | `WAYBACK_ENABLED` | 선택 | `false` | Internet Archive Wayback Machine 백업 위임 활성화 여부 (`migrations/007` 필요) |
 | `IA_ACCESS_KEY` | Wayback 사용 시 | - | Internet Archive S3 Access Key |
 | `IA_SECRET_KEY` | Wayback 사용 시 | - | Internet Archive S3 Secret Key |
@@ -214,12 +223,14 @@ cp .env.example .env
 
 # 2. Supabase SQL Editor 에서 아래 스키마 스크립트들을 순서대로 실행 (멱등성 보장)
 # - supabase_schema.sql
+# - supabase_migration_2026-06.sql                  (원자적 cleanup RPC 등 2026-06 갱신)
 # - migrations/006_captured_posts_and_adaptive.sql  (선제 수집/적응형 추적)
 # - migrations/007_wayback_snapshots.sql            (선택: Wayback 위임)
 # - migrations/008_poetic_reason_and_volatility.sql (박제 사유/휘발성 점수)
 # - migrations/009_capture_promotion_bridge.sql     (★ 캡처→공개 승격: Promoter)
 # - migrations/010_cleanup_preserve_captures.sql     (미박제 글 정리 시 캡처 승격글 보존)
 # - migrations/011_value_score.sql                   (아카이브 가치 점수 저장 — 승격 우선순위)
+# - migrations/012_story_value_score.sql             (선택: 승격 글에 아카이브 가치 점수 승계·표시)
 
 # 3. Docker 컨테이너 빌드 및 실행
 docker compose up -d
@@ -281,10 +292,11 @@ pytest
   ```bash
   curl http://localhost:8000/api/stats
   ```
-- **투명성 스냅샷 / 박제물 서명 검증** — 지금 적용 중인 정책·가중치 공개, Arweave 번들 ECDSA 검증
+- **투명성 스냅샷 / 박제 검증 / 글 공유 링크**
   ```bash
-  curl http://localhost:8000/api/transparency
-  curl http://localhost:8000/api/verify/<story_id>   # /api/recheck 와 per-IP 레이트리밋 공유
+  curl http://localhost:8000/api/transparency          # 지금 적용 중인 정책·가중치·게이트
+  curl http://localhost:8000/api/verify/<story_id>     # 서명 검증 + DB 본문 대조 (/api/recheck 와 per-IP 레이트리밋 공유)
+  curl -i http://localhost:8000/s/<story_id>           # OG 미리보기 + SPA 리다이렉트 (5분 공용 캐시)
   ```
 - **수동 승격 (어드민, `ADMIN_TOKEN` 설정 시)** — 캡처글을 검토 후 직접 공개 박제
   ```bash

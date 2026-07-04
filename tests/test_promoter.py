@@ -80,7 +80,7 @@ def _patch_clean(monkeypatch, *, gen_no_fit=False):
     """LLM·PII·citation 등록을 결정적 stub 으로 격리."""
     monkeypatch.setattr(promoter, "pii_scan",
                         lambda text: {"hit": False, "kinds": [], "samples": []})
-    monkeypatch.setattr(promoter, "register_citations", lambda sid, cites: None)
+    monkeypatch.setattr(promoter, "register_citations", lambda sid, cites, **kw: None)
 
     def fake_gen(body, title, category):
         if gen_no_fit:
@@ -130,16 +130,39 @@ def test_critique_auto_hold(monkeypatch):
     assert not db.stories
 
 
+def test_value_score_copied_when_column_supported(monkeypatch):
+    """캡처의 아카이브 가치(value_score)가 승격 스토리에 승계된다(012).
+    컬럼 미지원 환경에선 INSERT 에서 빠져 400 을 내지 않는다."""
+    _patch_clean(monkeypatch)
+    db = FakeDB()
+    row = {"id": "cv", "url": "https://theqoo.net/v1", "title": "훈훈한 미담",
+           "body_text": "한 시민이 자리를 양보했다는 사연. " * 5, "volatility_score": 3,
+           "hard_deleted_at": "2026-06-20T00:00:00+00:00", "value_score": 8}
+    monkeypatch.setattr(promoter, "_story_value_col_supported", True)
+    sid = promoter.promote_one(db, row, auto=True)
+    assert sid is not None
+    assert db.stories[0]["value_score"] == 8
+
+    # 미지원(012 미적용) 환경: value_score 를 INSERT 에 넣지 않는다.
+    monkeypatch.setattr(promoter, "_story_value_col_supported", False)
+    db2 = FakeDB()
+    row2 = dict(row, id="cv2", url="https://theqoo.net/v2")
+    sid2 = promoter.promote_one(db2, row2, auto=True)
+    assert sid2 is not None
+    assert "value_score" not in db2.stories[0]
+
+
 def test_kindness_promotes_and_registers(monkeypatch):
     _patch_clean(monkeypatch)
     registered = {}
     monkeypatch.setattr(promoter, "register_citations",
-                        lambda sid, cites: registered.update({"sid": sid, "cites": cites}))
+                        lambda sid, cites, **kw: registered.update({"sid": sid, "cites": cites, **kw}))
     db = FakeDB()
     url = "https://www.ppomppu.co.kr/zboard/view.php?id=freeboard&no=5"
     row = {"id": "c3", "url": url, "title": "훈훈한 미담",
            "body_text": "한 시민이 자리를 양보했다는 사연. " * 5, "volatility_score": 4,
-           "hard_deleted_at": "2026-06-20T01:02:03+00:00"}
+           "hard_deleted_at": "2026-06-20T01:02:03+00:00",
+           "captured_at": "2026-06-19T12:00:00+00:00", "content_hash": "abc123"}
     sid = promoter.promote_one(db, row, auto=True)
     assert sid is not None
     assert len(db.stories) == 1
@@ -151,6 +174,10 @@ def test_kindness_promotes_and_registers(monkeypatch):
     assert s["volatility_score"] == 4
     assert s["citations"] == [{"title": "훈훈한 미담", "uri": url}]
     assert registered["sid"] == sid
+    # collector 목격(captured_at·content_hash)이 citation 기준선으로 승계돼야
+    # '목격한 삭제만 임계값 인하' 게이트를 통과한다.
+    assert registered["witnessed_at"] == "2026-06-19T12:00:00+00:00"
+    assert registered["witnessed_hash"] == "abc123"
     assert db.captured_updates[-1]["promotion_status"] == "promoted"
     assert db.captured_updates[-1]["promoted_story_id"] == sid
 

@@ -91,6 +91,33 @@ async def vote(
     }
 
 
+@router.get("/my/votes")
+async def my_votes(authorization: str | None = Header(default=None)):
+    """로그인 사용자가 투표한 스토리 id 목록 — '🗳 내 투표' 개인 아카이브 뷰용.
+    투표는 박제 번들에 공개 포함되는 결단(TRANSPARENCY.md 5장)이므로 본인 조회는
+    당연히 허용된다. 최신 투표순, 상한 500(목록 화면 필터용으로 충분)."""
+    user_id = _verify_token(authorization)
+
+    # get_db() 포함 전체를 보호 — 클라이언트 생성 실패도 503 으로 매핑(500 스택 노출 방지).
+    def _query():
+        return (
+            get_db().table("votes")
+            .select("story_id,created_at")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+
+    try:
+        resp = await asyncio.to_thread(_query)
+    except Exception as e:
+        logger.warning(f"[my_votes] 조회 실패 user={user_id[:8]}…: {e}")
+        raise HTTPException(503, "투표 이력 조회에 실패했습니다. 잠시 후 다시 시도하세요.")
+    rows = resp.data or []
+    return {"story_ids": [r["story_id"] for r in rows], "total": len(rows)}
+
+
 @router.get("/vote/{story_id}/status")
 async def vote_status(
     story_id: str,

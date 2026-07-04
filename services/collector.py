@@ -20,6 +20,7 @@ tracker 의 감지 엔진을 그대로 재사용해 주기적으로 삭제를 �
 """
 
 import asyncio
+import html as html_mod
 import os
 import random
 import re
@@ -125,10 +126,10 @@ MAX_FEED_BYTES = 2_000_000   # 피드 본문 상한 2MB
 _JITTER_LO = float(os.environ.get("COLLECTOR_JITTER_LO", "1.5"))
 _JITTER_HI = float(os.environ.get("COLLECTOR_JITTER_HI", "4.0"))
 
-# 실측 확인된 공식 RSS (source_domain, feed_url). 전 피드 가동 재확인: 2026-06-11.
+# 실측 확인된 공식 RSS + HTML 목록 (source_domain, feed_url). 전 피드 가동 재확인: 2026-06-11.
+# (더쿠 HOT HTML 접근성 재확인: 2026-07-04 — 챌린지 없음, 목록 정상 파싱)
 # 제외:
-#   · 더쿠(theqoo): 2026-06-11 기준 RSS 를 잠금('피드 기능이 잠겨 있습니다' 빈 응답) → HTML 폴링(2차) 필요.
-#   · 디시인사이드·클리앙·보배드림: 공식 RSS 없음 → HTML 목록 폴링(2차 과제) 보류.
+#   · 디시인사이드: 공식 RSS 없음 → HTML 목록 폴링(2차 과제) 보류.
 #   · FM코리아: 안티봇 챌린지(430) → tracker.UNTRACKABLE_DOMAINS 와 일관되게 제외.
 COMMUNITY_FEEDS = [
     ("ppomppu.co.kr",      "http://www.ppomppu.co.kr/rss.php?id=ppomppu"),
@@ -138,6 +139,12 @@ COMMUNITY_FEEDS = [
     ("inven.co.kr",        "https://www.inven.co.kr/webzine/news/rss.php"),
     ("clien.net",          "https://www.clien.net/service/board/park"),
     ("bobaedream.co.kr",    "https://bobaedream.co.kr/list?code=freeb"),
+    # 더쿠: RSS 는 잠겼지만(2026-06-11 '피드 기능이 잠겨 있습니다') HOT 목록 HTML 은 열려
+    # 있다. 미담(여초 미담 활발)·비위(사회 이슈) 양쪽의 핵심 소스(llm.DOMAINS_* 참고).
+    ("theqoo.net",         "https://theqoo.net/hot"),
+    # 네이트판: 일반인 익명 사연의 메카(llm.DOMAINS_KINDNESS 1순위). RSS 없음 → 일간
+    # 랭킹(톡커들의 선택) HTML 폴링. 목록이 본문 미리보기(dd.txt)까지 줘 예비 점수가 정확.
+    ("pann.nate.com",      "https://pann.nate.com/talk/ranking"),
 ]
 
 # 모듈 상태 (대시보드/stats 용)
@@ -252,6 +259,87 @@ def _parse_bobaedream_html(raw: bytes) -> list[dict]:
             "url": url,
             "guid": url,
             "summary": None
+        })
+    return out
+
+
+def _parse_theqoo_html(raw: bytes) -> list[dict]:
+    """더쿠 HOT 게시판 HTML 목록에서 (title, url, guid, summary) 추출.
+    구조(2026-07-04 실측): 일반 글은 <td class="title"><a href="/hot/<id>">제목</a>,
+    공지는 <tr class="notice ...">, 댓글 수는 별도 앵커(#fragment) — 공지 행을 통째로
+    걷어낸 뒤 td.title 의 첫 앵커만 취해 댓글 링크·장식 태그를 배제한다."""
+    try:
+        text = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    # 운영 공지 행 제거 — 캡처 예산이 공지에 낭비되지 않게.
+    text = re.sub(r'<tr class="notice[^"]*".*?</tr>', '', text, flags=re.DOTALL)
+
+    out = []
+    seen = set()
+    pattern = re.compile(
+        r'<td class="title">\s*<a href="(/hot/(\d+))">(.*?)</a>',
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        path, _no, content = match.groups()
+        # 태그 제거 후 엔티티 디코드(&quot; 등) — 제목은 가치 점수·승격 citation 에 쓰인다.
+        title = html_mod.unescape(re.sub(r'<[^>]+>', '', content)).strip()
+        if not title:
+            continue
+        url = f"https://theqoo.net{path}"
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append({
+            "title": title,
+            "url": url,
+            "guid": url,
+            "summary": None
+        })
+    return out
+
+
+def _parse_pann_html(raw: bytes) -> list[dict]:
+    """네이트판 랭킹/목록 HTML 에서 (title, url, guid, summary) 추출.
+    구조(2026-07-04 실측): 제목은 <dt><h2><a href="/talk/<id>" … title="제목">,
+    본문 미리보기는 <dd class="txt"><a href="/talk/<id>">…</a>. 미리보기를 RSS summary
+    처럼 넘겨 본문 GET 전 예비 가치·삭제확률 점수의 정확도를 높인다."""
+    try:
+        text = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    # 본문 미리보기 맵: /talk/<id> → 요약 텍스트
+    summaries: dict = {}
+    for m in re.finditer(
+            r'<dd class="txt"><a href="(/talk/\d+)"[^>]*>(.*?)</a>', text, re.DOTALL):
+        path, snippet = m.groups()
+        snippet = html_mod.unescape(re.sub(r'<[^>]+>', '', snippet)).strip()
+        if snippet and path not in summaries:
+            summaries[path] = snippet
+
+    out = []
+    seen = set()
+    pattern = re.compile(
+        r'<dt><h2><a href="(/talk/(\d+))"[^>]*title="([^"]*)"[^>]*>',
+        re.DOTALL,
+    )
+    for match in pattern.finditer(text):
+        path, _no, title = match.groups()
+        title = html_mod.unescape(title).strip()
+        if not title:
+            continue
+        url = f"https://pann.nate.com{path}"
+        if url in seen:
+            continue
+        seen.add(url)
+        out.append({
+            "title": title,
+            "url": url,
+            "guid": url,
+            "summary": summaries.get(path)
         })
     return out
 
@@ -397,6 +485,10 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
                 items = _parse_clien_html(raw)[:COLLECTOR_FEED_ITEMS]
             elif source == "bobaedream.co.kr":
                 items = _parse_bobaedream_html(raw)[:COLLECTOR_FEED_ITEMS]
+            elif source == "theqoo.net":
+                items = _parse_theqoo_html(raw)[:COLLECTOR_FEED_ITEMS]
+            elif source == "pann.nate.com":
+                items = _parse_pann_html(raw)[:COLLECTOR_FEED_ITEMS]
             else:
                 items = _parse_feed(raw)[:COLLECTOR_FEED_ITEMS]
             urls = [it["url"] for it in items]

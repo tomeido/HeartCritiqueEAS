@@ -134,3 +134,12 @@ def test_soft_deleted_never_hard_regardless_of_baseline():
              "baseline_at": "2026-06-20T10:00:00+00:00"}]
     sig = th.count_citation_signals(rows)
     assert sig["deleted"] == 1 and sig["hard_deleted"] == 0
+
+
+def test_witnessed_403_counts_as_hard_blocked():
+    # 차단(403)도 동일 게이트: 목격 전 403(안티봇 상시)은 제외, 목격 후 403 만 hard.
+    unwitnessed = [{"status": "blocked", "http_code": 403, "baseline_at": None}]
+    witnessed = [{"status": "blocked", "http_code": 403,
+                  "baseline_at": "2026-06-20T10:00:00+00:00"}]
+    assert th.count_citation_signals(unwitnessed)["hard_blocked"] == 0
+    assert th.count_citation_signals(witnessed)["hard_blocked"] == 1

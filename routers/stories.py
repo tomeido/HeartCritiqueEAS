@@ -30,14 +30,16 @@ logger = logging.getLogger(__name__)
 # 미박제 글 전역 상한 — 익명 생성이 DB/디스크를 무한 적재하지 못하게 (hunter 와 별개 한도)
 STORY_MAX_PENDING = int(os.environ.get("STORY_MAX_PENDING", "50"))
 
-# 목록(list_stories)용 컬럼. 캡처 승격(009) 컬럼은 미적용 환경에서 400 나므로 한 번 시도 후
-# 실패하면 레거시 컬럼으로 폴백하고 그 결과를 캐시한다(매 요청 이중질의 방지).
+# 목록(list_stories)용 컬럼. 캡처 승격(009)·가치 점수(012) 컬럼은 미적용 환경에서 400
+# 나므로 한 번 시도 후 실패하면 해당 묶음만 빼고 폴백, 그 결과를 캐시한다(매 요청 이중질의 방지).
 _LIST_BASE_COLS = (
     "id,category,body,vote_count,archived_at,arweave_tx_id,arweave_url,"
     "created_at,gap_score,community_count,news_count,poetic_reason,volatility_score"
 )
 _LIST_CAPTURE_COLS = ",from_capture,origin_captured_url,captured_hard_deleted_at"
+_LIST_VALUE_COLS = ",value_score"
 _capture_cols_ok: bool | None = None
+_value_col_ok: bool | None = None
 
 
 def _ensure_uuid(story_id: str) -> None:
@@ -198,28 +200,55 @@ async def list_stories(limit: int = 50, q: str | None = None):
             sel = sel.or_(f"body.ilike.*{term}*,poetic_reason.ilike.*{term}*")
         return sel.order("created_at", desc=True).limit(limit).execute()
 
-    if _capture_cols_ok is False:
-        resp = _query(_LIST_BASE_COLS)
-    else:
+    # tracker._is_missing_column_error 와 달리 '어느 컬럼이 없는가'의 귀속(아래 msg 검사)을
+    # 따로 해야 해서 일반 판별만 하는 로컬 헬퍼를 둔다 — 공용 헬퍼는 generic-OR-특정컬럼
+    # 판정이라 묶음별(009/012) 캐시 귀속에 그대로 쓰면 오귀속된다. 판별 문자열을 바꿀 땐
+    # tracker 쪽과 함께 갱신할 것.
+    def _is_missing_col(e: Exception) -> bool:
+        msg = str(e).lower()
+        return ("42703" in msg or "pgrst204" in msg
+                or "does not exist" in msg or "could not find" in msg)
+
+    # 선택 컬럼 묶음(009 캡처·012 가치)을 각각 시도하고, '컬럼 부재'만 영구 캐시(False)
+    # 한다. 일시적 연결오류를 캐시하면 프로세스 기동 직후 한 번 실패했다는 이유로 배지가
+    # 재시작 전까지 영영 사라진다 → 일시 오류는 캐시하지 말고 이번 요청만 폴백한다.
+    # 묶음별 독립 캐시: 009만 적용된 환경에서 012 부재가 from_capture 배지를 끄지 않게.
+    global _value_col_ok
+    attempts = []
+    if _capture_cols_ok is not False and _value_col_ok is not False:
+        attempts.append((_LIST_BASE_COLS + _LIST_CAPTURE_COLS + _LIST_VALUE_COLS, "both"))
+    if _capture_cols_ok is not False:
+        attempts.append((_LIST_BASE_COLS + _LIST_CAPTURE_COLS, "capture"))
+    if _value_col_ok is not False:
+        attempts.append((_LIST_BASE_COLS + _LIST_VALUE_COLS, "value"))
+    attempts.append((_LIST_BASE_COLS, "base"))
+
+    resp = None
+    last_err: Exception | None = None
+    for cols, tier in attempts:
         try:
-            resp = _query(_LIST_BASE_COLS + _LIST_CAPTURE_COLS)
-            _capture_cols_ok = True
+            resp = _query(cols)
+            if tier in ("both", "capture"):
+                _capture_cols_ok = True
+            if tier in ("both", "value"):
+                _value_col_ok = True
+            break
         except Exception as e:
-            # 컬럼 부재(migrations/009 미적용 — PostgREST 42703/PGRST204, 보통 400)일 때만
-            # 영구 캐시(False)한다. 일시적 연결오류(RemoteProtocolError·타임아웃 등)를 캐시하면
-            # 프로세스 기동 후 첫 호출이 잠깐 실패했다는 이유로 from_capture 배지가 재시작
-            # 전까지 영영 사라진다 → 일시 오류는 캐시하지 말고 이번 요청만 레거시로 폴백한다.
+            last_err = e
+            if not _is_missing_col(e):
+                logger.warning(f"[stories] 선택컬럼 일시 조회 실패(캐시 안 함, tier={tier}): {e!r}")
+                continue   # 일시 오류: 캐시 없이 다음(더 좁은) 조합 시도
             msg = str(e).lower()
-            is_missing_col = (
-                "42703" in msg or "pgrst204" in msg
-                or "does not exist" in msg or "could not find" in msg
-                or ("column" in msg and "from_capture" in msg)
-            )
-            if is_missing_col:
+            if "from_capture" in msg or "origin_captured_url" in msg \
+                    or "captured_hard_deleted_at" in msg:
                 _capture_cols_ok = False
-            else:
-                logger.warning(f"[stories] 캡처컬럼 일시 조회 실패(캐시 안 함): {e!r}")
-            resp = _query(_LIST_BASE_COLS)
+            if "value_score" in msg:
+                _value_col_ok = False
+    if resp is None:
+        # 모든 조합 실패 = base(항상 마지막 시도)까지 이미 실패한 연쇄 일시 오류.
+        # 같은 쿼리를 5번째로 재실행하지 않고(어차피 같은 장애) 503 으로 정직하게 알린다.
+        logger.warning(f"[stories] 목록 조회 전 조합 실패: {last_err!r}")
+        raise HTTPException(503, "목록 조회에 일시적으로 실패했습니다. 잠시 후 다시 시도하세요.")
     stories = resp.data or []
     ids = [s["id"] for s in stories]
     # 출처 추적 상태는 배지/임계값 보조 정보일 뿐 — 조회가 실패해도 목록 자체는

@@ -129,6 +129,29 @@ def _value_col(db) -> bool:
     return _value_col_supported
 
 
+# migrations/012(stories.value_score) 지원 여부 — 승격 시 가치 점수를 스토리에 승계해
+# '왜 이 글이 남을 가치가 있는가'를 공개 화면에 표시한다(미적용이면 INSERT 에서 빼 400 회피).
+_story_value_col_supported: Optional[bool] = None
+
+
+def _story_value_col(db) -> bool:
+    global _story_value_col_supported
+    if _story_value_col_supported is None:
+        try:
+            db.table("stories").select("value_score").limit(1).execute()
+            _story_value_col_supported = True
+        except Exception as e:
+            from services.tracker import _is_missing_column_error
+            if _is_missing_column_error(e, "value_score"):
+                _story_value_col_supported = False
+                logger.info("[promoter] stories.value_score(012) 미설치 — "
+                            "승격 글 가치 점수 승계 생략.")
+            else:
+                logger.warning(f"[promoter] stories.value_score 판별 일시 실패(캐시 안 함): {e!r}")
+                return False
+    return _story_value_col_supported
+
+
 def find_promotable(db, limit: int) -> list:
     """승격 후보: hard 삭제 확정(404/410) + 본문 보유 + 아직 미승격 + 미처리.
     soft 삭제는 절대 포함하지 않는다(hard_deleted_at IS NOT NULL 로 강제).
@@ -137,7 +160,10 @@ def find_promotable(db, limit: int) -> list:
     '박제 가치'다(docs/ARCHIVAL_CRITERIA.md §4). 주기당 배치 상한이 있어 가치 높은
     글부터 승격되도록 value_score(010) 우선, volatility 차선, 오래된 hard 삭제 순."""
     try:
-        cols = "id,url,title,body_text,volatility_score,hard_deleted_at,promotion_status"
+        # captured_at·content_hash: '살아있을 때 목격' 증거 — 승격 시 citation 기준선으로
+        # 승계해 '목격한 삭제만 임계값 인하' 게이트를 정당하게 통과시킨다.
+        cols = ("id,url,title,body_text,volatility_score,hard_deleted_at,promotion_status"
+                ",captured_at,content_hash")
         use_value = _value_col(db)
         if use_value:
             cols += ",value_score"
@@ -252,6 +278,10 @@ def promote_one(db, row: dict, *, auto: bool = True,
         "origin_captured_url": url,
         "captured_hard_deleted_at": row.get("hard_deleted_at"),
     }
+    # 아카이브 가치 점수 승계(012): '왜 이 글이 남을 가치가 있는가'를 공개 화면에 표시.
+    # 표시 전용 — 박제 결정·임계값엔 미주입(volatility 와 동일 원칙).
+    if row.get("value_score") is not None and _story_value_col(db):
+        story_row["value_score"] = row["value_score"]
     try:
         ins = db.table("stories").insert(story_row).execute()
         story_id = ins.data[0]["id"]
@@ -267,8 +297,14 @@ def promote_one(db, row: dict, *, auto: bool = True,
 
     # 7) 출처(죽은 원본) 추적 등록 → tracker 가 'deleted' 로 표시 + hard 신호로 임계값 인하
     #    → 사람 투표가 모이면 '사라지기 전에' 가 아니라 '사라진 뒤' 박제가 빠르게 트리거된다.
+    #    collector 의 목격(captured_at·content_hash)을 기준선으로 승계해야 '목격한 삭제만
+    #    임계값 인하' 게이트를 통과한다 — tracker 첫 접촉은 이미 404 라 스스로 기준선 불가.
     try:
-        register_citations(story_id, story_row["citations"])
+        register_citations(
+            story_id, story_row["citations"],
+            witnessed_at=row.get("captured_at"),
+            witnessed_hash=row.get("content_hash"),
+        )
     except Exception as e:
         logger.warning(f"[promoter] citation 등록 실패 {story_id}: {e}")
 
@@ -302,8 +338,12 @@ async def promote_captured_url(url: str, force_category: Optional[str] = None) -
     if not _columns_ready(db):
         return {"ok": False, "reason": "migrations/009 미적용"}
     try:
+        cols = ("id,url,title,body_text,volatility_score,hard_deleted_at"
+                ",promotion_status,captured_at,content_hash")
+        if _value_col(db):
+            cols += ",value_score"   # 수동 승격도 가치 점수 승계(012) 대상
         resp = (db.table("captured_posts")
-                .select("id,url,title,body_text,volatility_score,hard_deleted_at,promotion_status")
+                .select(cols)
                 .eq("url", url).limit(1).execute())
     except Exception as e:
         return {"ok": False, "reason": f"조회 실패: {e}"}

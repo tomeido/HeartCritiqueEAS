@@ -10,6 +10,8 @@ import re
 import urllib.error
 import urllib.request
 
+from services import dedup
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -909,6 +911,12 @@ def _groq_search(query: str, category: str, domains) -> tuple:
     rich = [r for r in results if len((r.get("content") or "").strip()) >= MIN_SOURCE_CONTENT]
     if rich:
         results = rich
+    # 이미 스토리로 만든 출처는 후보에서 제외(중복 스토리 방지). community_count 산정
+    # 이후에 걸러 격차 신호는 왜곡하지 않는다. 전부 기지 출처면 빈 후보 → 상위가 다음
+    # 쿼리로 넘어가고, 모든 쿼리가 비면 no_fit(이번 주기 스킵)으로 끝난다.
+    results, dropped = dedup.filter_known_sources(results)
+    if dropped:
+        logger.info(f"[llm] dedup: 이미 다룬 출처 {dropped}건 후보 제외 (query={query!r})")
     return results, community_count
 
 
@@ -1137,6 +1145,11 @@ def generate(category: str | None = None) -> dict:
             if RELEVANCE_GATE_ENABLED and category == "kindness" and kindness_output_off_topic(text):
                 logger.info("[llm] kindness(gemini) 출력이 미담 아님(비위/잡담 누수) → no_fit")
                 text = None
+        # grounding 경로는 생성 후에야 출처를 알므로 사후 dedup: 전부 이미 다룬
+        # 출처면 중복 스토리 — no_fit 으로 전환(빈 본문과 동일하게 상위가 스킵).
+        if text and citations and dedup.all_known(citations):
+            logger.info("[llm] dedup: gemini 결과가 전부 기지 출처 → no_fit")
+            text = None
         # 격차 탐지는 provider 무관(Tavily 기반)하게 적용. Tavily 미설정이면
         # measure_news_coverage 가 graceful 하게 None 반환 → gap 없이 진행.
         if text and citations:

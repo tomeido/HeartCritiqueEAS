@@ -603,8 +603,18 @@ def _build_update(res: dict, row: dict, now_iso: str,
     return upd
 
 
-def register_citations(story_id: str, citations: list) -> None:
-    """새 스토리의 citations URL 들을 추적 테이블에 등록 (멱등)."""
+def register_citations(story_id: str, citations: list,
+                       witnessed_at: str | None = None,
+                       witnessed_hash: str | None = None) -> None:
+    """새 스토리의 citations URL 들을 추적 테이블에 등록 (멱등).
+
+    witnessed_at/witnessed_hash: 다른 관측 경로(collector)가 '살아있는 원본'을 직접
+    목격한 증거(captured_at·content_hash)를 기준선으로 승계한다. 승격(promoter) 글의
+    죽은 원본 URL 은 tracker 첫 접촉이 이미 404 라 스스로 기준선을 잡을 수 없는데,
+    목격 없는 404 는 '목격한 삭제만 임계값 인하' 게이트(threshold.count_citation_signals)
+    에서 제외되므로, collector 의 목격을 물려줘야 임계값 인하가 정당하게 작동한다.
+    부분 기준선(len/final_url 없음)은 안전하다 — 404/410 은 기준선 비교 이전에 판정되고,
+    baseline_len 0/NULL 은 본문 급감(collapse) 판정을 발화시키지 못한다."""
     if not citations:
         return
     db = get_db()
@@ -620,6 +630,10 @@ def register_citations(story_id: str, citations: list) -> None:
             "url": uri,
             "status": "unchecked",
         }
+        if witnessed_at:
+            row["baseline_at"] = witnessed_at
+            if adaptive and witnessed_hash:
+                row["baseline_hash"] = witnessed_hash
         if adaptive:
             row["next_check_at"] = now_iso   # 등록 즉시 검사 대상(due)
         rows.append(row)

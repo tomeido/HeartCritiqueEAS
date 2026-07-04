@@ -9,10 +9,12 @@ Heart & Critique - FastAPI 메인 앱 (Docker 홈서버용)
   POST /api/story                     → 스토리 생성 + Supabase 저장
   POST /api/vote/{story_id}           → 공론화 찬성 투표 (JWT 필요)
   GET  /api/vote/{story_id}/status    → 투표 현황
+  GET  /api/my/votes                  → 내가 투표한 스토리 목록 (JWT 필요)
   GET  /api/stories                   → 최근 스토리 목록
   GET  /api/stories/{story_id}        → 스토리 상세
   GET  /api/transparency              → 정책·가중치·게이트 실시간 스냅샷
   GET  /api/verify/{story_id}         → 박제 번들 서명 검증 + DB 본문 대조
+  GET  /s/{story_id}                  → 글 공유 영속링크 (OG 메타 + SPA 리다이렉트)
 """
 
 import asyncio
@@ -370,7 +372,9 @@ async def share_story(story_id: str, request: Request):
         '<body style="font-family:sans-serif;padding:2rem;color:#555">'
         f'이 글로 이동 중… <a href="{target}">바로가기</a></body></html>'
     )
-    return HTMLResponse(page)
+    # 크롤러(카톡·트위터·디스코드)가 링크 미리보기마다 때리는 경로 — 짧은 공용 캐시로
+    # DB 조회를 흡수한다(본문 발췌·박제 상태가 5분 지연 반영되는 정도는 무해).
+    return HTMLResponse(page, headers={"Cache-Control": "public, max-age=300"})
 
 
 # ── 프론트엔드 서빙 ────────────────────────────────────────────────────────
