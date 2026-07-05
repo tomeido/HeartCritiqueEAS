@@ -1761,7 +1761,12 @@ function closeStoryCard() {
   const card = document.getElementById('story-card');
   if (!card || card.classList.contains('hidden')) return;
   card.classList.add('hidden');
+  const closingId = currentStory?.id || currentStory?.story_id;
   currentStory = null;
+  if (closingId) {
+    const el = document.querySelector(`[data-id="${closingId}"]`);
+    if (el) el.focus({ preventScroll: true });
+  }
   // 폴링 가드(pollForArchive)는 currentStory=null 이면 curId falsy 로 계속 돌므로 여기서 반드시 끊는다.
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
   if (/^#story=/.test(window.location.hash)) {
@@ -3761,6 +3766,7 @@ function renderStoryList() {
     }
     // 키보드 접근(div+onclick 보완): Enter/Space로도 열기
     div.tabIndex = 0;
+    div.dataset.id = s.id || s.story_id;
     div.setAttribute('role', 'button');
     div.onclick = () => loadAndShowStory(s.id);
     div.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); loadAndShowStory(s.id); } };
