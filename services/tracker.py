@@ -244,10 +244,14 @@ USER_AGENT = (
 )
 
 # ---- 본문/URL 정규화 헬퍼 (기준선 대비 변화 판정에 사용) -------------------
-_STRIP_BLOCK_RE = re.compile(r"(?is)<(script|style|noscript|template)\b.*?</\1>")
-_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
-_ANY_TAG_RE = re.compile(r"<[^>]+>")
-_WS_RE = re.compile(r"\s+")
+# 텍스트 추출·패턴 매칭은 CPU 핫패스(이벤트 루프 위 실행)라 가능하면 Rust(hc_native)로
+# 가속한다. 탐지 패턴의 단일 출처는 위 re.compile 들 — .pattern 을 그대로 넘겨 컴파일하므로
+# 패턴을 고치면 네이티브에도 자동 반영된다. 미설치/비호환이면 동작 동일한 파이썬 폴백.
+from services.nativetext import make_pipeline as _make_text_pipeline  # noqa: E402
+
+_TEXT_PIPELINE = _make_text_pipeline(
+    DELETION_PATTERNS.pattern, BLOCKED_PATTERNS.pattern, BOT_CHALLENGE_PATTERNS.pattern
+)
 
 # 리다이렉트 비교 시 무시할 추적 파라미터 (광고·유입 추적용; 글 정체성과 무관)
 _TRACKING_PARAMS = {
@@ -287,11 +291,8 @@ def _decode_body(body: bytes, resp_encoding: str | None, content_type: str) -> s
 def _visible_text(html: str) -> str:
     """HTML 에서 스크립트/스타일/태그/주석을 제거한 가시 텍스트만 반환.
     본문 패턴 매칭과 길이 비교를 script 내 JSON 등 비가시 영역과 분리해
-    오탐을 줄인다."""
-    s = _STRIP_BLOCK_RE.sub(" ", html)
-    s = _COMMENT_RE.sub(" ", s)
-    s = _ANY_TAG_RE.sub(" ", s)
-    return _WS_RE.sub(" ", s).strip()
+    오탐을 줄인다. (구현은 nativetext 파이프라인 — Rust 가속 또는 동일 파이썬)"""
+    return _TEXT_PIPELINE.visible_text(html)
 
 
 def _url_key(url: str) -> tuple:
@@ -426,15 +427,15 @@ async def fetch_observation(url: str, client: httpx.AsyncClient,
                     return {"net": "neterr", "http_code": None, "final_url": cur,
                             "reason": f"net:{type(e).__name__}"}
 
-                text = _visible_text(raw)
-                dm = DELETION_PATTERNS.search(text)
-                bm = BLOCKED_PATTERNS.search(text)
+                # 추출+스캔을 한 번에 — Rust 경로면 GIL 을 풀고 돌아 이벤트 루프를
+                # 막지 않는다(파이썬 폴백이면 기존과 동일 계산).
+                text, del_snip, blk_snip, bot = _TEXT_PIPELINE.extract_and_scan(raw)
                 out = {
                     "net": "ok", "http_code": code, "final_url": cur, "text_len": len(text),
-                    "del_match": bool(dm), "blk_match": bool(bm),
-                    "del_snip": (dm.group(0)[:40] if dm else ""),
-                    "blk_snip": (bm.group(0)[:40] if bm else ""),
-                    "bot_challenge": bool(BOT_CHALLENGE_PATTERNS.search(text)),
+                    "del_match": del_snip is not None, "blk_match": blk_snip is not None,
+                    "del_snip": (del_snip or "")[:40],
+                    "blk_snip": (blk_snip or "")[:40],
+                    "bot_challenge": bot,
                     # 가시 텍스트 지문(sha256): 기준선에 1회 저장. (a) 원문 재공개 없이도
                     # 동일성/존재를 증명하고, (b) 비트 동일 시 'live 확정' 단축에 쓴다.
                     # 동적 페이지는 매 방문 해시가 달라지므로 '변화(삭제) 감지'엔 쓰지 않는다.

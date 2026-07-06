@@ -71,6 +71,12 @@ async def lifespan(app: FastAPI):
     # 로컬 모드에서도 백그라운드 루프는 동일하게 동작하므로 게이트는 기능 플래그만 남긴다.
     if is_local_mode():
         logger.info("[lifespan] SUPABASE_* 미설정 → SQLite 로컬 백엔드 + 게스트 인증 모드")
+    # 텍스트 파이프라인 엔진 상태 — nativetext 의 자체 로그는 logging.basicConfig 이전
+    # (모듈 임포트 시점)에 찍혀 유실되므로 여기서 한 번 명시한다.
+    from services.tracker import _TEXT_PIPELINE
+    logger.info("[lifespan] tracker 텍스트 파이프라인: "
+                + ("Rust(hc_native) 가속 — GIL 해제 실행" if _TEXT_PIPELINE.native
+                   else "순수 파이썬 (hc_native 미설치/비활성)"))
     if TRACKER_ENABLED:
         tasks.append(asyncio.create_task(tracker_loop(), name="tracker"))
     if HUNTER_ENABLED:

@@ -179,9 +179,13 @@ Docker
 
 | 변수명 | 필수 여부 | 기본값 | 설명 |
 |---|---|---|---|
-| `SUPABASE_URL` | **필수** | - | Supabase 프로젝트 URL |
-| `SUPABASE_ANON_KEY` | **필수** | - | 클라이언트(프론트엔드)용 Supabase Anon Key |
-| `SUPABASE_SERVICE_ROLE_KEY` | **필수** | - | 서버 사이드 관리자 권한용 Service Role Key |
+| `SUPABASE_URL` | 선택 | - | Supabase 프로젝트 URL. **미설정 시 SQLite 로컬 백엔드 + 게스트 인증으로 자동 폴백** (아래 'Supabase 없이 실행' 참고) |
+| `SUPABASE_ANON_KEY` | Supabase 사용 시 | - | 클라이언트(프론트엔드)용 Supabase Anon Key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 사용 시 | - | 서버 사이드 관리자 권한용 Service Role Key |
+| `DB_BACKEND` | 선택 | 자동 | `local`(SQLite 강제) 또는 `supabase`(강제). 미설정 시 SUPABASE_* 유무로 자동 판별 |
+| `LOCAL_DB_PATH` | 선택 | `data/heartcritique.db` | 로컬 모드 SQLite 파일 경로 (Docker에선 `./data` 볼륨에 영속) |
+| `GUEST_TOKEN_SECRET` | 선택 | 자동 생성 | 게스트 토큰 HMAC 비밀키. 미설정 시 데이터 디렉터리 `guest_secret` 파일에 자동 생성·영속 |
+| `GUEST_RATELIMIT_PER_IP` | 선택 | `10` | 게스트 신원 발급(로컬 모드) IP당 윈도우 내 상한 |
 | `AGENT_PRIVATE_KEY` | **필수** | - | 에이전트 Ethereum 개인키 (서명 및 Irys 가스비 대납용) |
 | `LLM_PROVIDER` | 선택 | `groq` | LLM API 제공자 (`groq` 또는 `gemini`) |
 | `GROQ_API_KEY` | Groq 사용 시 | - | Groq Cloud API Key |
@@ -208,6 +212,7 @@ Docker
 | `PROXY_FETCH_BASE` / `PROXY_FETCH_API_KEY` | 선택 | Jina Reader / - | 렌더링 프록시 교체·인증(키 없이도 동작, 낮은 레이트리밋) |
 | `VALUE_W_*` | 선택 | `value.py` 참고 | 가치 스코어러 가중치(캡처/승격 우선순위 전용, 박제 결정 미주입). 적용값은 `/api/transparency`로 공개 |
 | `VERIFY_CACHE_TTL` | 선택 | `600` | `/api/verify` 결과 캐시(초) — 게이트웨이 GET 남용 방지 |
+| `NATIVE_TEXT_ENABLED` | 선택 | `true` | tracker 텍스트 파이프라인 Rust 가속(`native/`의 `hc_native`, Docker 빌드 포함). 실측 8배 + GIL 해제. 미설치·비호환 시 동작 동일한 파이썬 자동 폴백 |
 
 ---
 
@@ -238,6 +243,25 @@ docker compose up -d
 # 4. 로그 확인
 docker compose logs -f app
 ```
+
+### 1-b) Supabase 없이 실행 (SQLite 로컬 모드)
+
+Supabase 프로젝트가 없어도 전체 기능이 동작합니다. `.env` 에서 `SUPABASE_URL` /
+`SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 를 **비워두면**:
+
+- **DB**: `services/localdb.py` 가 SQLite(`./data/heartcritique.db`, `LOCAL_DB_PATH`로 변경 가능)로
+  동일한 스키마(전체 마이그레이션 적용 상태)를 자동 생성합니다. Supabase SQL Editor 단계가 필요 없습니다.
+- **인증**: Google OAuth 대신 **게스트 인증**이 켜집니다. 브라우저가 `POST /api/auth/guest` 로
+  HMAC 서명 토큰을 받아 투표합니다(UI 우측 상단에 '게스트' 배지 표시).
+  게스트 신원은 브라우저 단위라 OAuth 만큼 중복투표에 강하지 않습니다 — 공개 운영엔 Supabase 모드를 권장합니다.
+- **백그라운드 루프**(tracker/hunter/cleanup 등)와 박제(Irys)·검증(/api/verify)은 그대로 동작합니다.
+
+```bash
+cp .env.example .env      # SUPABASE_* 는 비워둔 채 LLM 키 등만 채우기
+docker compose up -d      # ./data 볼륨에 SQLite 파일 영속
+```
+
+이미 Supabase 를 쓰던 배포는 아무 변화 없습니다(환경변수가 있으면 기존 경로 그대로).
 
 ### 2) 로컬 개발 모드 (Docker 없이)
 
