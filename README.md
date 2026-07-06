@@ -2,6 +2,8 @@
 
 AI 사냥개가 한국 커뮤니티 게시판에서 **삭제 위협받는 익명 글**(따뜻한 미담 또는 대기업 비위)을 길어 올리고, 소셜 로그인한 인간의 **투표**가 임계값에 도달하면 **Arweave에 박제**하는 Web2.5 타임캡슐 아카이브입니다.
 
+> Supabase 없이도 돌아갑니다 — `SUPABASE_*` 를 비워두면 **내장 SQLite + 게스트 인증**으로 자동 폴백됩니다([5-1b 참고](#1-b-supabase-없이-실행-sqlite-로컬-모드)).
+
 ---
 
 ## 1. 프로젝트 철학 & 개요 (Philosophy & Goal)
@@ -18,10 +20,10 @@ AI 사냥개가 한국 커뮤니티 게시판에서 **삭제 위협받는 익명
 유저의 UX는 완벽한 Web2 스타일을 따르고, 백엔드에서 AI 에이전트가 자율적으로 온체인 트랜잭션과 가스비를 처리합니다.
 
 ```text
-[User] OAuth Social Login (Google) ➔ Vote 'Approve' (공론화 찬성)
+[User] OAuth Social Login (Google) — Supabase 미설정 시 게스트 신원(HMAC 토큰) ➔ Vote 'Approve' (공론화 찬성)
    │
    ▼
-[Backend/DB] Supabase 테이블에 투표수 누적 & 중복 체크
+[Backend/DB] Supabase(또는 내장 SQLite 로컬 백엔드) 테이블에 투표수 누적 & 중복 체크
    │
    ▼
 [Trigger] 특정 사건의 'Approve' 투표수가 임계값(Threshold)을 달성하는 순간
@@ -45,7 +47,9 @@ Docker
 │   ├── routers/
 │   │   ├── stories.py        # POST /api/story, GET /api/stories[/{id}]
 │   │   ├── votes.py          # POST /api/vote/{id}, GET /api/vote/{id}/status
+│   │   ├── auth.py           # POST /api/auth/guest — 로컬 모드 게스트 신원 발급(Supabase 모드에선 404)
 │   │   ├── stats.py          # GET /api/stats (대시보드 통계)
+│   │   ├── feed.py           # GET /feed/*.xml (Atom 피드: all/archived/extreme/deleted)
 │   │   └── transparency.py   # GET /api/transparency(정책 스냅샷), GET /api/verify/{id}(서명 검증)
 │   └── services/
 │       ├── llm.py            # Groq/Gemini 스토리 생성 파이프라인
@@ -58,12 +62,18 @@ Docker
 │       ├── wayback.py        # Wayback 위임 박제 — IA Save Page Now 큐(원본 삭제 대비 외부 스냅샷)
 │       ├── proxyfetch.py     # 추적 불가(봇차단) 출처의 프록시 2차 관측 — soft 신호 전용(옵트인)
 │       ├── tracker.py        # 출처/수집글 삭제 추적 + 적응형 재검사 스케줄(compute_next_check)
+│       ├── nativetext.py     # tracker 텍스트 파이프라인 Rust 가속 래퍼 — 미설치 시 동작 동일 파이썬 폴백
 │       ├── transparency.py   # 정책·가중치 실시간 스냅샷 + 박제물 서명 검증(docs/TRANSPARENCY.md)
-│       ├── db.py             # Supabase 클라이언트 싱글톤
+│       ├── db.py             # Supabase 클라이언트 싱글톤 — SUPABASE_* 미설정 시 localdb 로 자동 폴백
+│       ├── localdb.py        # SQLite 로컬 백엔드 (supabase-py 호환 서브셋, 스키마 자동 생성)
+│       ├── localauth.py      # 게스트 인증 — HMAC 서명 토큰 발급·검증 (로컬 모드 전용)
+│       ├── dberrors.py       # APIError 단일 수입 지점 (postgrest 부재 환경 호환)
 │       ├── crypto.py         # EC 키 서명·검증 (secp256k1 ECDSA-SHA256)
 │       └── archive.py        # 스토리+투표 번들 → uploader 서비스 호출
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              # POST /upload → Irys → Arweave Tx ID 반환
+├── native/ (Rust, PyO3)      # hc_native — tracker 가시텍스트 추출+패턴 스캔 가속 (실측 8배, GIL 해제)
+│   └── src/lib.rs            # Dockerfile 멀티스테이지에서 abi3 휠로 빌드·설치
 └── static/
     └── index.html            # 프론트엔드 (Supabase JS + 바닐라 JS UI) — 글 공유(/s/<id>)·🧾영수증 PNG/QR 내보내기 포함
 ```
@@ -81,6 +91,7 @@ Docker
 
 ### 2) 투표 & 동적 임계값 (Threshold)
 - 사용자가 구글 소셜 로그인 후 찬성(Approve) 투표를 누릅니다.
+  - **로컬(SQLite) 모드**에선 로그인 대신 **게스트 신원**이 자동 발급됩니다: 프론트가 `POST /api/auth/guest`로 HMAC 서명 토큰을 받아 localStorage에 보관하고 같은 Bearer 경로로 투표합니다(중복 투표는 동일하게 DB UNIQUE로 차단, 401 시 1회 자동 재발급). 게스트 신원은 브라우저 단위라 OAuth만큼 강하지 않습니다 — 공개 운영엔 Supabase 모드 권장.
 - **박제 임계값(Threshold)**:
   - 기본값은 `VOTE_THRESHOLD` (기본값: **3**). 단일 출처는 [services/threshold.py](file:///home/tomeido/HeartCritiqueEAS/services/threshold.py)의 `DEFAULT_THRESHOLD`입니다.
   - `DYNAMIC_THRESHOLD=true`로 활성화 시 활성 투표자 수에 비례하여 동적으로 조정됩니다.
@@ -167,7 +178,15 @@ Docker
 - 프론트 하단의 접이식 **투명성 패널**이 같은 스냅샷을 사람이 읽는 9섹션 형태로 렌더하고, 박제된 글 상세의 "🔐 박제 무결성 검증" 카드는 브라우저에서 서명 검증 + 박제본↔화면 본문 대조를 독립 수행합니다.
 - **'목격한 삭제'만 임계값 인하**: 살아있는 원본을 직접 확인(기준선 캡처)한 뒤의 hard 404/410/403 만 박제 임계값을 낮춥니다 — 첫 접촉부터 죽어 있던 링크(오탐 구분 불가)는 배지 전용. 승격 글의 죽은 원본은 collector 의 생전 목격 기록을 기준선으로 승계합니다.
 
-### 12) 개인 아카이브 & 생성 중복 방지
+### 12) Supabase 없이 동작 (SQLite 로컬 모드 + 게스트 인증)
+- `SUPABASE_*` 미설정(또는 `DB_BACKEND=local`) 시 `services/db.get_db()`가 `services/localdb.py`(SQLite)로 자동 폴백합니다. supabase-py 쿼리 인터페이스의 사용 서브셋(에러코드 `23505`/`23503`, `or_` 중첩 필터, PostgreSQL식 NULLS 정렬, `count=exact`, RPC 등)을 그대로 재현해 **라우터·tracker·cleanup 코드 무수정**으로 동작하며, 전체 마이그레이션이 적용된 스키마를 자동 생성합니다.
+- 인증은 게스트 토큰(`services/localauth.py`)으로 대체되고, `/api/config`의 `auth_mode: "guest"`를 보고 프론트가 자동 전환합니다. 기존 Supabase 배포는 무변경(env 있으면 기존 경로). 계약은 `tests/test_localdb.py`가 고정합니다. 실행법은 [5-1b](#1-b-supabase-없이-실행-sqlite-로컬-모드) 참고.
+
+### 13) 성능 — tracker 텍스트 파이프라인 Rust 가속 (`native/`)
+- 출처 삭제 감시의 CPU 핫패스(가시텍스트 추출 + 삭제/차단/봇 패턴 매칭)를 Rust(`hc_native`, PyO3 + regex crate)로 가속: 실측 **8배**(80KB 페이지 14.8ms→1.9ms), GIL 해제 실행으로 async 이벤트 루프 스톨 제거.
+- 탐지 패턴의 단일 출처는 여전히 `tracker.py`의 `re.compile` — `.pattern` 문자열을 그대로 전달하므로 패턴 수정이 자동 반영됩니다. `hc_native` 미설치·패턴 비호환·`NATIVE_TEXT_ENABLED=false`면 **동작 동일한 파이썬 폴백**으로 조용히 전환됩니다(패리티는 `tests/test_nativetext.py`의 픽스처+퍼즈 200케이스가 고정).
+
+### 14) 개인 아카이브 & 생성 중복 방지
 - **🗳 내 투표(`GET /api/my/votes`)**: 로그인 계정으로 투표한 글만 모아 보는 개인 아카이브 필터 — 내 결단이 박제로 남는 과정을 추적할 수 있습니다.
 - **중복 스토리 방지(`services/dedup.py`)**: 이미 스토리로 만든 출처 URL 을 검색 후보에서 선제 제외해 같은 글의 근사 중복(투표 분산·이중 박제)을 막습니다(`STORY_DEDUP_ENABLED`, 기본 켜짐). 적용 상태는 `/api/transparency` 의 `generation_gates` 로 공개됩니다.
 
@@ -179,9 +198,13 @@ Docker
 
 | 변수명 | 필수 여부 | 기본값 | 설명 |
 |---|---|---|---|
-| `SUPABASE_URL` | **필수** | - | Supabase 프로젝트 URL |
-| `SUPABASE_ANON_KEY` | **필수** | - | 클라이언트(프론트엔드)용 Supabase Anon Key |
-| `SUPABASE_SERVICE_ROLE_KEY` | **필수** | - | 서버 사이드 관리자 권한용 Service Role Key |
+| `SUPABASE_URL` | 선택 | - | Supabase 프로젝트 URL. **미설정 시 SQLite 로컬 백엔드 + 게스트 인증으로 자동 폴백** (아래 'Supabase 없이 실행' 참고) |
+| `SUPABASE_ANON_KEY` | Supabase 사용 시 | - | 클라이언트(프론트엔드)용 Supabase Anon Key |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 사용 시 | - | 서버 사이드 관리자 권한용 Service Role Key |
+| `DB_BACKEND` | 선택 | 자동 | `local`(SQLite 강제) 또는 `supabase`(강제). 미설정 시 SUPABASE_* 유무로 자동 판별 |
+| `LOCAL_DB_PATH` | 선택 | `data/heartcritique.db` | 로컬 모드 SQLite 파일 경로 (Docker에선 `./data` 볼륨에 영속) |
+| `GUEST_TOKEN_SECRET` | 선택 | 자동 생성 | 게스트 토큰 HMAC 비밀키. 미설정 시 데이터 디렉터리 `guest_secret` 파일에 자동 생성·영속 |
+| `GUEST_RATELIMIT_PER_IP` | 선택 | `10` | 게스트 신원 발급(로컬 모드) IP당 윈도우 내 상한 |
 | `AGENT_PRIVATE_KEY` | **필수** | - | 에이전트 Ethereum 개인키 (서명 및 Irys 가스비 대납용) |
 | `LLM_PROVIDER` | 선택 | `groq` | LLM API 제공자 (`groq` 또는 `gemini`) |
 | `GROQ_API_KEY` | Groq 사용 시 | - | Groq Cloud API Key |
@@ -199,8 +222,7 @@ Docker
 | `PROMOTER_MIN_VOLATILITY` | 선택 | `0` | 승격 최소 삭제확률(0~10). 높일수록 저가치 잡담을 걸러내고 고위험 글만 공개 (hard 삭제가 이미 강한 게이트) |
 | `ADMIN_TOKEN` | 선택 | - | 설정 시 `POST /api/admin/promote`(수동 승격) 활성화. `X-Admin-Token` 헤더로 인증. 미설정이면 엔드포인트 비활성(404) |
 | `STORY_DEDUP_ENABLED` | 선택 | `true` | 이미 스토리로 만든 출처 URL 을 검색 후보에서 제외(중복 스토리 방지). DB 조회 실패 시 필터 없이 통과 |
-| `GEMINI_MAX_ATTEMPTS` / `GEMINI_RETRY_BASE` | 선택 | `5` / `1.5` | Gemini 일시 오류(5xx/429/네트워크) 지수백오프 재시도 — Groq 한도 소진 시 단일 경로 보호 |
-| `STORY_CLEANUP_MAX_VOTES` | 선택 | 임계값-1 | 이 표 수 이하의 오래된 미박제 글만 정리. 캡처 승격글(`from_capture`)은 항상 보존 (`migrations/011` 권장) |
+| `STORY_CLEANUP_MAX_VOTES` | 선택 | 임계값-1 | 이 표 수 이하의 오래된 미박제 글만 정리. 캡처 승격글(`from_capture`)은 항상 보존 (`migrations/010` 권장) |
 | `WAYBACK_ENABLED` | 선택 | `false` | Internet Archive Wayback Machine 백업 위임 활성화 여부 (`migrations/007` 필요) |
 | `IA_ACCESS_KEY` | Wayback 사용 시 | - | Internet Archive S3 Access Key |
 | `IA_SECRET_KEY` | Wayback 사용 시 | - | Internet Archive S3 Secret Key |
@@ -208,6 +230,7 @@ Docker
 | `PROXY_FETCH_BASE` / `PROXY_FETCH_API_KEY` | 선택 | Jina Reader / - | 렌더링 프록시 교체·인증(키 없이도 동작, 낮은 레이트리밋) |
 | `VALUE_W_*` | 선택 | `value.py` 참고 | 가치 스코어러 가중치(캡처/승격 우선순위 전용, 박제 결정 미주입). 적용값은 `/api/transparency`로 공개 |
 | `VERIFY_CACHE_TTL` | 선택 | `600` | `/api/verify` 결과 캐시(초) — 게이트웨이 GET 남용 방지 |
+| `NATIVE_TEXT_ENABLED` | 선택 | `true` | tracker 텍스트 파이프라인 Rust 가속(`native/`의 `hc_native`, Docker 빌드 포함). 실측 8배 + GIL 해제. 미설치·비호환 시 동작 동일한 파이썬 자동 폴백 |
 
 ---
 
@@ -215,7 +238,7 @@ Docker
 
 ### 1) 빠른 시작 (Docker Compose)
 
-가장 간단하게 시스템을 실행하는 방법입니다. FastAPI 백엔드, Node.js 업로더, PostgreSQL(Supabase) 통신이 유기적으로 연결됩니다.
+가장 간단하게 시스템을 실행하는 방법입니다. FastAPI 백엔드, Node.js 업로더, DB(Supabase 또는 내장 SQLite)가 유기적으로 연결됩니다. Supabase 를 쓰지 않을 거라면 2번(스키마 실행) 단계를 건너뛰고 [1-b](#1-b-supabase-없이-실행-sqlite-로컬-모드)를 따르세요.
 
 ```bash
 # 1. 환경변수 파일 생성 및 작성
@@ -239,6 +262,25 @@ docker compose up -d
 docker compose logs -f app
 ```
 
+### 1-b) Supabase 없이 실행 (SQLite 로컬 모드)
+
+Supabase 프로젝트가 없어도 전체 기능이 동작합니다. `.env` 에서 `SUPABASE_URL` /
+`SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 를 **비워두면**:
+
+- **DB**: `services/localdb.py` 가 SQLite(`./data/heartcritique.db`, `LOCAL_DB_PATH`로 변경 가능)로
+  동일한 스키마(전체 마이그레이션 적용 상태)를 자동 생성합니다. Supabase SQL Editor 단계가 필요 없습니다.
+- **인증**: Google OAuth 대신 **게스트 인증**이 켜집니다. 브라우저가 `POST /api/auth/guest` 로
+  HMAC 서명 토큰을 받아 투표합니다(UI 우측 상단에 '게스트' 배지 표시).
+  게스트 신원은 브라우저 단위라 OAuth 만큼 중복투표에 강하지 않습니다 — 공개 운영엔 Supabase 모드를 권장합니다.
+- **백그라운드 루프**(tracker/hunter/cleanup 등)와 박제(Irys)·검증(/api/verify)은 그대로 동작합니다.
+
+```bash
+cp .env.example .env      # SUPABASE_* 는 비워둔 채 LLM 키 등만 채우기
+docker compose up -d      # ./data 볼륨에 SQLite 파일 영속
+```
+
+이미 Supabase 를 쓰던 배포는 아무 변화 없습니다(환경변수가 있으면 기존 경로 그대로).
+
 ### 2) 로컬 개발 모드 (Docker 없이)
 
 백엔드 파이썬 서버나 Node uploader를 개별적으로 수정하며 개발할 때 유용합니다.
@@ -261,19 +303,27 @@ node index.js
 ## 6. 운영 및 모니터링 (Operations)
 
 - **단일 프로세스 실행 권장**: 백그라운드 스케줄러(Hunter, Tracker, Archive Sweeper) 및 인메모리 캐시/레이트리밋 구조로 인해 `--workers 1`로 실행되어야 합니다. 수평 확장이 필요할 경우 백그라운드 루프를 독립된 컨테이너로 분리하십시오.
-- **디재스터 복구 및 DB 초기화**: `supabase_schema.sql`은 멱등하게 설계되어 재실행해도 기존 데이터를 덮어쓰지 않습니다. DB를 완전히 초기화하려면 [supabase_reset.sql](file:///home/tomeido/HeartCritiqueEAS/supabase_reset.sql)을 실행하십시오. (🚨 주의: 데이터 영구 삭제)
+- **디재스터 복구 및 DB 초기화**: `supabase_schema.sql`은 멱등하게 설계되어 재실행해도 기존 데이터를 덮어쓰지 않습니다. DB를 완전히 초기화하려면 [supabase_reset.sql](file:///home/tomeido/HeartCritiqueEAS/supabase_reset.sql)을 실행하십시오. (🚨 주의: 데이터 영구 삭제) **로컬(SQLite) 모드**의 초기화는 컨테이너 중지 후 `./data/heartcritique.db`(및 WAL 파일)를 삭제하면 됩니다 — `data/guest_secret`까지 지우면 기존 게스트 토큰도 무효화됩니다.
 - **API 레이트리밋**: 무인증 API 호출로 인한 LLM 비용 폭탄을 방지하기 위해 `/api/story` 및 A2A `/message/send` 엔드포인트에는 IP당/전역 레이트리밋(`STORY_RATELIMIT_*`)이 적용되어 있습니다.
 
 ---
 
 ## 7. 테스트 (Testing)
 
-로컬에서 단위 테스트를 수행하여 로직(서명 검증, 임계값 계산, Wayback 백오프 등)의 안정성을 검증할 수 있습니다.
+로컬에서 단위 테스트를 수행하여 로직(서명 검증, 임계값 계산, Wayback 백오프, 로컬 DB 계약, Rust 패리티 등)의 안정성을 검증할 수 있습니다.
 
 ```bash
 pip install -r requirements-dev.txt
 pytest
 ```
+
+- `tests/test_localdb.py` — SQLite 로컬 백엔드의 supabase-py 호환 계약(에러코드·필터·정렬·RPC) 고정
+- `tests/test_nativetext.py` — Rust 텍스트 파이프라인과 파이썬 폴백의 결과 완전 일치(픽스처+퍼즈 200케이스). 로컬에 `hc_native`가 없으면 Rust 쪽 패리티는 자동 건너뛰므로, 완전 검증은 휠이 설치된 Docker 이미지 안에서 실행합니다:
+  ```bash
+  docker compose build app
+  docker run --rm -v ./tests:/app/tests:ro heartcritiqueeas-app \
+    sh -c "pip install -q pytest && python -m pytest -q tests/test_nativetext.py"
+  ```
 
 ---
 
@@ -291,6 +341,11 @@ pytest
 - **대시보드 통계 집계**
   ```bash
   curl http://localhost:8000/api/stats
+  ```
+- **게스트 신원 발급 + 투표 (로컬 모드 전용 — Supabase 모드에선 404)**
+  ```bash
+  TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/guest | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+  curl -X POST http://localhost:8000/api/vote/<story_id> -H "Authorization: Bearer $TOKEN"
   ```
 - **투명성 스냅샷 / 박제 검증 / 글 공유 링크**
   ```bash

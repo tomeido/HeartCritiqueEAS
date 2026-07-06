@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Heart & Critique (EAS-free Web2.5 Edition)** — AI 사냥개가 실시간 뉴스를 검색해 따뜻한 선행 또는 대기업 비위 사건을 전달하고, 소셜 로그인한 인간의 투표로 Arweave에 영구 박제하는 Web2.5 타임캡슐 아카이브.
 
 - **LLM**: Groq(Llama+Tavily) 또는 Gemini(Google Search grounding)
-- **DB/Auth**: Supabase (OAuth: Google) — Discord 로그인은 제거됨
+- **DB/Auth**: Supabase (OAuth: Google) — Discord 로그인은 제거됨. **SUPABASE_* 미설정 시
+  SQLite 로컬 백엔드(`services/localdb.py`) + 게스트 인증(`services/localauth.py`)으로 자동 폴백**
 - **박제**: Irys(Node.js) → Arweave
 - **배포**: Docker 홈서버 (FastAPI + uvicorn)
 
@@ -59,12 +60,20 @@ Docker
 │       ├── wayback.py        Wayback 위임 박제 — IA Save Page Now 큐(원본 삭제 대비 외부 스냅샷)
 │       ├── proxyfetch.py     추적 불가(봇차단) 출처의 프록시 2차 관측 — soft 신호 전용(옵트인)
 │       ├── tracker.py        출처/수집글 삭제 추적 + 적응형 재검사 스케줄(compute_next_check)
+│       ├── nativetext.py     tracker 텍스트 파이프라인의 Rust 가속 래퍼(hc_native) — 미설치 시 동일 동작 파이썬 폴백
 │       ├── transparency.py   정책·가중치 실시간 스냅샷 + 박제물 서명 검증(docs/TRANSPARENCY.md)
 │       ├── db.py             Supabase 클라이언트 싱글톤
 │       ├── crypto.py         EC 키 서명·검증 (secp256k1 ECDSA-SHA256)
 │       └── archive.py        스토리+투표 번들 → uploader 서비스 호출
 ├── uploader (Node.js/Irys :3000)
 │   └── index.js              POST /upload → Irys → Arweave Tx ID 반환
+├── native/ (Rust, PyO3)      hc_native — tracker 가시텍스트 추출+삭제/차단/봇 패턴 스캔 가속
+│   └── src/lib.rs            Dockerfile 멀티스테이지에서 abi3 휠로 빌드·설치. 실측 8배(80KB 페이지
+│                             14.8ms→1.9ms) + GIL 해제(이벤트 루프 스톨 제거). 탐지 패턴의 단일 출처는
+│                             tracker.py re.compile — .pattern 문자열을 그대로 전달(드리프트 없음).
+│                             ⚠️ 큰 알터네이션+case_insensitive 는 rust regex 프리필터가 포기됨 →
+│                             최상위 대안 분리 컴파일 + (시작위치,대안순서) 타이브레이크로 leftmost-first
+│                             재현(패리티는 tests/test_nativetext.py 픽스처+퍼즈 200케이스가 고정)
 └── static/index.html         프론트엔드 (Supabase JS + 바닐라 JS)
 ```
 
@@ -84,19 +93,31 @@ Docker
 
 `POST /` 에서 `message/send` 메서드를 JSON-RPC 2.0으로 처리. 기존 A2A 에이전트와 호환.
 
-## Supabase 설정
+## Supabase 설정 (선택)
 
 1. `supabase_schema.sql` 을 Supabase SQL Editor에서 실행
 2. Authentication > Providers 에서 Google OAuth 활성화
 3. Authentication > URL Configuration 에서 `http://your-server:8000` 추가
 
+**Supabase 없이(SQLite 로컬 모드)**: `SUPABASE_*` 셋 다 비워두면 `services/db.get_db()` 가
+`services/localdb.py`(SQLite, 전체 마이그레이션 적용 스키마 자동 생성, `LOCAL_DB_PATH` 기본
+`data/heartcritique.db`)로 폴백하고, 인증은 게스트 토큰(`services/localauth.py`,
+`POST /api/auth/guest`, HMAC 서명)으로 대체된다. `/api/config` 의 `auth_mode: "guest"` 를 보고
+프론트가 게스트 모드로 전환. votes 라우터는 `get_anon_db().auth.get_user()` 인터페이스가
+로컬에서도 동일해 무변경. 로컬 모드 계약(에러코드 23505/23503, or_ 필터 문법, PG NULLS 정렬,
+count/head, RPC `delete_orphan_pending_stories`)은 `tests/test_localdb.py` 가 고정한다.
+
 ## Environment Variables
 
 | 변수 | 필수 | 설명 |
 |---|---|---|
-| `SUPABASE_URL` | ✓ | Supabase 프로젝트 URL |
-| `SUPABASE_ANON_KEY` | ✓ | 프론트엔드용 anon 키 |
-| `SUPABASE_SERVICE_ROLE_KEY` | ✓ | 서버용 서비스 롤 키 |
+| `SUPABASE_URL` | 선택 | Supabase 프로젝트 URL. **미설정 시 SQLite 로컬 백엔드로 자동 폴백** |
+| `SUPABASE_ANON_KEY` | Supabase 모드 | 프론트엔드용 anon 키 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase 모드 | 서버용 서비스 롤 키 |
+| `DB_BACKEND` | | `local`/`supabase` 강제 오버라이드(미설정 시 자동 판별) |
+| `LOCAL_DB_PATH` | | 로컬 모드 SQLite 경로(기본 `data/heartcritique.db`, compose는 `./data` 볼륨) |
+| `GUEST_TOKEN_SECRET` | | 게스트 토큰 HMAC 키(미설정 시 `data/guest_secret` 자동 생성·영속) |
+| `NATIVE_TEXT_ENABLED` | | tracker 텍스트 파이프라인 Rust 가속(`hc_native`) 사용 여부. **기본 `true`** — 미설치·비호환 패턴이면 자동으로 동작 동일한 파이썬 폴백. `false`로 강제 폴백 가능 |
 | `AGENT_PRIVATE_KEY` | ✓ | 에이전트 ETH 개인키 (서명 + Irys 수수료) |
 | `GROQ_API_KEY` | Groq 모드 | |
 | `TAVILY_API_KEY` | Groq 모드 | |

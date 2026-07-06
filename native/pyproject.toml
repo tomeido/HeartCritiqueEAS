@@ -1,0 +1,12 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "hc-native"
+version = "0.1.0"
+description = "Heart & Critique — tracker 텍스트 파이프라인 네이티브 가속 (visible_text + 삭제/차단/봇 패턴 스캔)"
+requires-python = ">=3.10"
+
+[tool.maturin]
+module-name = "hc_native"

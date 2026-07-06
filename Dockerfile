@@ -1,9 +1,26 @@
+# ── 네이티브 가속 빌더: native/(Rust, PyO3) → hc_native abi3 휠 ───────────────
+# tracker 텍스트 파이프라인(가시텍스트 추출+삭제/차단/봇 패턴 매칭)의 CPU 가속.
+# 이 스테이지가 없어도(휠 미설치) 앱은 services/nativetext.py 의 파이썬 폴백으로
+# 동일하게 동작한다 — 빌드 실패 시 이 스테이지만 걷어내면 됨.
+FROM python:3.12-slim AS native-builder
+RUN apt-get update && apt-get install -y --no-install-recommends curl build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+ENV PATH="/root/.cargo/bin:${PATH}"
+RUN pip install --no-cache-dir maturin
+COPY native/ native/
+RUN cd native && maturin build --release --out /wheels
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# hc_native(abi3-py310 휠): 파이썬 버전과 무관하게 설치 가능
+COPY --from=native-builder /wheels /tmp/wheels
+RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 COPY routers/   routers/
 COPY services/  services/

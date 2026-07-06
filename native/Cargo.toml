@@ -1,0 +1,17 @@
+[package]
+name = "hc_native"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "hc_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+# abi3-py310: 파이썬 3.10+ 어디서든 도는 단일 휠 (빌더 파이썬 버전과 무관)
+pyo3 = { version = "0.22", features = ["extension-module", "abi3-py310"] }
+regex = "1"
+
+[profile.release]
+lto = true
+codegen-units = 1
