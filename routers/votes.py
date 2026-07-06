@@ -3,9 +3,9 @@ import logging
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
-from postgrest.exceptions import APIError
 
 from services.archive import archive_story
+from services.dberrors import APIError
 from services.db import get_anon_db, get_db
 from services.threshold import (
     DEFAULT_THRESHOLD,

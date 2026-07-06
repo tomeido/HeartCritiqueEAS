@@ -8,6 +8,8 @@ services:
       - UPLOADER_URL=http://uploader:3000
     volumes:
       - ./static:/app/static:ro
+      # SQLite 로컬 모드(SUPABASE_* 미설정) 데이터 영속: DB 파일 + 게스트 토큰 비밀키
+      - ./data:/app/data
     depends_on:
       uploader:
         condition: service_healthy

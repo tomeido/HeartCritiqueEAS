@@ -20,8 +20,7 @@ import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
-from postgrest.exceptions import APIError
-
+from services.dberrors import APIError
 from services.db import get_db
 from services.threshold import DEFAULT_THRESHOLD
 

@@ -24,3 +24,9 @@ Thumbs.db
 # 로컬 빌드/캐시
 *.log
 .cache/
+
+# SQLite 로컬 모드 데이터 (DB 파일 + 게스트 토큰 비밀키 - 절대 커밋 금지)
+data/
+
+# Rust 네이티브 모듈 빌드 산출물
+native/target/

@@ -94,6 +94,11 @@ _global_limiter = SlidingWindowLimiter(_GLOBAL, _WINDOW)
 _RECHECK_PER_IP = _env_int("RECHECK_RATELIMIT_PER_IP", 20)
 _recheck_limiter = SlidingWindowLimiter(_RECHECK_PER_IP, _WINDOW)
 
+# 게스트 신원 발급(/api/auth/guest, 로컬 모드 전용) — 신원 대량 발급으로 중복투표
+# 우회하는 걸 IP당 상한으로 완화. 정상 사용자는 브라우저당 1회 발급 후 재사용한다.
+_GUEST_PER_IP = _env_int("GUEST_RATELIMIT_PER_IP", 10)
+_guest_limiter = SlidingWindowLimiter(_GUEST_PER_IP, _WINDOW)
+
 
 def client_ip(request: Request) -> str:
     """리버스 프록시 뒤 실제 클라이언트 IP 추정."""
@@ -133,4 +138,14 @@ def check_recheck_ratelimit(request: Request) -> tuple[bool, int, str]:
     ok, retry = _recheck_limiter.hit(f"recheck:{client_ip(request)}")
     if not ok:
         return False, retry, f"재검사 한도 초과 ({_RECHECK_PER_IP}회 / {_WINDOW // 60}분)"
+    return True, 0, ""
+
+
+def check_guest_ratelimit(request: Request) -> tuple[bool, int, str]:
+    """게스트 신원 발급 레이트리밋(로컬 모드). (allowed, retry_after, reason)."""
+    if not RATELIMIT_ENABLED:
+        return True, 0, ""
+    ok, retry = _guest_limiter.hit(f"guest:{client_ip(request)}")
+    if not ok:
+        return False, retry, f"게스트 발급 한도 초과 ({_GUEST_PER_IP}회 / {_WINDOW // 60}분)"
     return True, 0, ""

@@ -36,7 +36,8 @@ from fastapi.responses import (
 
 load_dotenv()
 
-from routers import feed, stats, stories, transparency, votes  # noqa: E402
+from routers import auth, feed, stats, stories, transparency, votes  # noqa: E402
+from services.db import is_local_mode  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
 from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
 from services.tracker import TRACKER_ENABLED, background_loop as tracker_loop  # noqa: E402
@@ -66,16 +67,19 @@ def _on_task_done(task: asyncio.Task) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tasks: list[asyncio.Task] = []
-    has_supabase = bool(os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
-    if has_supabase and TRACKER_ENABLED:
+    # DB 는 Supabase(env 설정 시) 또는 SQLite 로컬 폴백으로 항상 존재한다.
+    # 로컬 모드에서도 백그라운드 루프는 동일하게 동작하므로 게이트는 기능 플래그만 남긴다.
+    if is_local_mode():
+        logger.info("[lifespan] SUPABASE_* 미설정 → SQLite 로컬 백엔드 + 게스트 인증 모드")
+    if TRACKER_ENABLED:
         tasks.append(asyncio.create_task(tracker_loop(), name="tracker"))
-    if has_supabase and HUNTER_ENABLED:
+    if HUNTER_ENABLED:
         tasks.append(asyncio.create_task(hunter_loop(), name="hunter"))
-    if has_supabase and CLEANUP_ENABLED:
+    if CLEANUP_ENABLED:
         tasks.append(asyncio.create_task(cleanup_loop(), name="cleanup"))
-    if has_supabase and COLLECTOR_ENABLED:
+    if COLLECTOR_ENABLED:
         tasks.append(asyncio.create_task(collector_loop(), name="collector"))
-    if has_supabase and PROMOTER_ENABLED:
+    if PROMOTER_ENABLED:
         tasks.append(asyncio.create_task(promoter_loop(), name="promoter"))
     for t in tasks:
         t.add_done_callback(_on_task_done)
@@ -107,6 +111,7 @@ app.include_router(votes.router)
 app.include_router(stats.router)
 app.include_router(feed.router)
 app.include_router(transparency.router)
+app.include_router(auth.router)
 
 
 @app.get("/health")
@@ -137,9 +142,13 @@ async def get_config():
         pubkey = get_public_key_hex()
     except Exception:
         pubkey = ""
+    local = is_local_mode()
     return {
-        "supabase_url": os.environ.get("SUPABASE_URL", ""),
-        "supabase_anon_key": os.environ.get("SUPABASE_ANON_KEY", ""),
+        "supabase_url": "" if local else os.environ.get("SUPABASE_URL", ""),
+        "supabase_anon_key": "" if local else os.environ.get("SUPABASE_ANON_KEY", ""),
+        # guest = Supabase 미설정: 프론트가 /api/auth/guest 로 신원을 만들어 투표
+        "auth_mode": "guest" if local else "supabase",
+        "db_backend": "sqlite-local" if local else "supabase",
         "vote_threshold": DEFAULT_THRESHOLD,
         "llm_provider": LLM_PROVIDER,
         "agent_public_key": pubkey,

@@ -5,6 +5,18 @@ from supabase import create_client, Client
 
 _client: Client | None = None
 
+
+def is_local_mode() -> bool:
+    """Supabase 미설정이면 SQLite 로컬 백엔드로 폴백한다.
+    DB_BACKEND=local|supabase 로 명시 오버라이드 가능(미설정 시 env 유무로 자동 판별)."""
+    backend = os.environ.get("DB_BACKEND", "").strip().lower()
+    if backend == "local":
+        return True
+    if backend == "supabase":
+        return False
+    return not (os.environ.get("SUPABASE_URL")
+                and os.environ.get("SUPABASE_SERVICE_ROLE_KEY"))
+
 # postgrest 의 기본 httpx 세션은 http2=True 라, Supabase(Cloudflare)가 유휴 keepalive
 # 연결에 GOAWAY 를 보내면 다음 요청이 RemoteProtocolError(ConnectionTerminated)로 죽었다.
 # 증상: 첫 접속/유휴 후 /api/stories 가 500(목록 공백 → "새로고침해야 보임"), /api/stats 의
@@ -77,16 +89,25 @@ def _harden(client: Client) -> Client:
 def get_db() -> Client:
     global _client
     if _client is None:
-        _client = _harden(create_client(
-            os.environ["SUPABASE_URL"],
-            os.environ["SUPABASE_SERVICE_ROLE_KEY"],
-        ))
+        if is_local_mode():
+            # Supabase 미설정 → SQLite 로컬 백엔드 (동일 쿼리 인터페이스 서브셋)
+            from services.localdb import get_local_db
+            _client = get_local_db()  # type: ignore[assignment]
+        else:
+            _client = _harden(create_client(
+                os.environ["SUPABASE_URL"],
+                os.environ["SUPABASE_SERVICE_ROLE_KEY"],
+            ))
     return _client
 
 
 def get_anon_db() -> Client:
     """유저 토큰 검증용 anon 클라이언트. auth(GoTrue)만 쓰고 postgrest 쿼리는 하지
-    않으므로 세션 교체가 불필요하다(게다가 매 호출 새 클라이언트라 idle GOAWAY 와도 무관)."""
+    않으므로 세션 교체가 불필요하다(게다가 매 호출 새 클라이언트라 idle GOAWAY 와도 무관).
+    로컬 모드에선 게스트 토큰(HMAC)을 검증하는 로컬 클라이언트의 .auth 를 쓴다."""
+    if is_local_mode():
+        from services.localdb import get_local_db
+        return get_local_db()  # type: ignore[return-value]
     return create_client(
         os.environ["SUPABASE_URL"],
         os.environ["SUPABASE_ANON_KEY"],

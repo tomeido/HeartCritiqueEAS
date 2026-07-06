@@ -1593,6 +1593,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
 <script>
 // ── 전역 상태 ──────────────────────────────────────────────────────────────
 let sb, cfg, session;
+let guestMode = false;         // Supabase 미설정(로컬 SQLite 모드): 게스트 신원으로 투표
 let currentStory = null;       // 현재 표시 중인 스토리 (arweave 필드 포함 가능)
 let allStories = [];
 let currentFilter = 'all';
@@ -1677,8 +1678,12 @@ async function init() {
   loadWallet();
   try {
     cfg = await fetch('/api/config').then(r => r.json());
-    if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
-    if (cfg.supabase_url && cfg.supabase_anon_key) {
+    if (cfg.auth_mode === 'guest' || !(cfg.supabase_url && cfg.supabase_anon_key)) {
+      // Supabase 미설정(서버는 SQLite 로컬 백엔드): 게스트 신원으로 투표.
+      // Supabase JS CDN 이 없어도 동작해야 하므로 CDN 체크보다 먼저 분기한다.
+      await initGuestSession();
+    } else {
+      if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
       sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
         auth: { detectSessionInUrl: true, persistSession: true },
       });
@@ -2623,8 +2628,54 @@ document.getElementById('dash-collapse')?.addEventListener('toggle', (e) => {
 });
 
 // ── 인증 ───────────────────────────────────────────────────────────────────
+// 게스트 신원(로컬 모드): 서버가 HMAC 서명한 토큰을 localStorage 에 보관·재사용한다.
+// Supabase 세션과 같은 모양(access_token/user)으로 만들어 기존 투표 경로를 그대로 탄다.
+const GUEST_TOKEN_KEY = 'hc_guest_token_v1';
+async function initGuestSession() {
+  guestMode = true;
+  let token = null;
+  try { token = localStorage.getItem(GUEST_TOKEN_KEY); } catch (_) {}
+  const parts = (token || '').split('.');
+  if (!token || parts.length !== 3) {
+    const r = await fetch('/api/auth/guest', { method: 'POST' });
+    if (!r.ok) throw new Error(`게스트 신원 발급 실패 (HTTP ${r.status})`);
+    const d = await r.json();
+    token = d.token;
+    try { localStorage.setItem(GUEST_TOKEN_KEY, token); } catch (_) {}
+  }
+  const uid = token.split('.')[1] || '';
+  session = {
+    access_token: token,
+    user: {
+      id: uid,
+      email: '',
+      user_metadata: { full_name: '게스트 ' + uid.slice(0, 4) },
+    },
+  };
+}
+// 서버 비밀키 교체 등으로 보관 토큰이 401 되면 새 신원으로 1회 재발급한다.
+async function renewGuestSession() {
+  try { localStorage.removeItem(GUEST_TOKEN_KEY); } catch (_) {}
+  myVotedIds = null;   // 새 신원 = 투표 이력도 새로
+  await initGuestSession();
+}
+
 function renderAuth() {
   const area = document.getElementById('auth-area');
+  if (guestMode) {
+    if (session?.user) {
+      const gname = session.user.user_metadata?.full_name || '게스트';
+      area.innerHTML = `
+        <span class="user-chip" title="로컬 모드 · 이 브라우저의 게스트 신원으로 투표합니다">
+          <span class="dot"></span>${escHtml(gname)}
+        </span>`;
+      updateMineChip(true);
+    } else {
+      area.innerHTML = '<span class="muted text-sm">게스트 모드</span>';
+      updateMineChip(false);
+    }
+    return;
+  }
   if (!sb) {
     area.innerHTML = '<span class="muted text-sm">Supabase 미설정</span>';
     return;
@@ -2670,9 +2721,16 @@ function updateMineChip(loggedIn) {
 async function loadMyVotes() {
   if (!session?.access_token) return;
   try {
-    const r = await fetch('/api/my/votes', {
+    let r = await fetch('/api/my/votes', {
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
+    if (guestMode && r.status === 401) {
+      await renewGuestSession();
+      renderAuth();
+      r = await fetch('/api/my/votes', {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const d = await r.json();
     myVotedIds = new Set(d.story_ids || []);
@@ -2687,6 +2745,18 @@ async function loadMyVotes() {
 // 로그인 직전 글 id 를 sessionStorage 에 저장했다가 복귀 시 그 글을 다시 연다.
 const RETURN_STORY_KEY = 'hc_return_story_v1';
 async function signInWithGoogle() {
+  if (guestMode) {
+    // 게스트 모드에서 이 버튼이 보이는 경우 = 초기 신원 발급 실패. 재시도 경로 제공.
+    try {
+      await initGuestSession();
+      renderAuth();
+      if (currentStory?.id) refreshVoteStatus(currentStory.id);
+      toast('게스트 신원이 준비되었습니다. 이제 투표할 수 있어요.');
+    } catch (e) {
+      toast('게스트 신원 발급 실패: ' + e.message, 'error');
+    }
+    return;
+  }
   if (!sb) { toast('로그인을 사용할 수 없습니다 (Supabase 미설정)', 'error'); return; }
   const sid = currentStory?.id
     || (window.location.hash.match(/^#story=([\w-]+)/) || [])[1]
@@ -3197,7 +3267,7 @@ function renderVoteArea(storyId, data) {
     btn.className = 'btn-voted btn-sm';
     btn.disabled = true;
   } else if (!session) {
-    btn.textContent = '🔑 로그인하고 투표하기';
+    btn.textContent = guestMode ? '↻ 게스트 신원 준비하고 투표하기' : '🔑 로그인하고 투표하기';
     btn.className = 'btn-vote btn-sm';
     btn.disabled = false;
     btn.onclick = () => signInWithGoogle();
@@ -3219,10 +3289,19 @@ async function castVote(storyId) {
   setStatus('vote-status', '');
 
   try {
-    const resp = await fetch(`/api/vote/${storyId}`, {
+    let resp = await fetch(`/api/vote/${storyId}`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${session.access_token}` },
     });
+    if (guestMode && resp.status === 401) {
+      // 보관된 게스트 토큰 만료(서버 비밀키 교체 등) → 새 신원으로 1회 재시도
+      await renewGuestSession();
+      renderAuth();
+      resp = await fetch(`/api/vote/${storyId}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+    }
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || `HTTP ${resp.status}`);
 
