@@ -1364,7 +1364,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         <button class="btn-sm btn-outline btn-receipt" id="btn-receipt" style="margin-left:6px"
                 title="이 글을 QR 영수증 이미지로 저장" aria-label="이 글을 QR 영수증 이미지로 저장">🧾 영수증</button>
         <button class="btn-sm btn-outline btn-close-story" id="btn-close-story" style="margin-left:6px"
-                title="이야기 닫기" aria-label="이야기 닫기">✕</button>
+                title="이야기 닫기 (Esc)" aria-label="이야기 닫기 (Esc)">✕</button>
       </div>
 
       <!-- 캡처→승격 기원 (from_capture 글 전용): 삭제된 원본을 살아있을 때 캡처해 복원 -->
@@ -1467,7 +1467,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <div class="list-search">
         <span class="list-search-icon" aria-hidden="true">🔍</span>
         <input type="search" id="story-search" class="list-search-input" autocomplete="off"
-               enterkeyhint="search" placeholder="이야기 검색 — 본문 키워드" aria-label="이야기 검색">
+               enterkeyhint="search" placeholder="이야기 검색 — 본문 키워드 (/)" aria-label="이야기 검색 (/)">
         <button class="list-search-clear" id="story-search-clear" type="button" hidden aria-label="검색어 지우기">✕</button>
       </div>
       <p class="search-status" id="search-status" role="status" aria-live="polite" hidden></p>
@@ -1752,8 +1752,15 @@ function handleHashRoute() {
   if (hash.indexOf('access_token') !== -1) return;
   // 열려 있던 글 카드를 닫아 주소창(홈)과 화면 상태를 일치시킨다(stale 카드 방지).
   if (currentStory) {
+    const closingId = currentStory.id || currentStory.story_id;
     currentStory = null;
     document.getElementById('story-card')?.classList.add('hidden');
+    if (closingId) {
+      const listEl = document.querySelector(`.list-item[data-id="${closingId}"]`);
+      if (listEl) {
+        listEl.focus({ preventScroll: true });
+      }
+    }
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
@@ -1766,6 +1773,7 @@ function closeStoryCard() {
   const card = document.getElementById('story-card');
   if (!card || card.classList.contains('hidden')) return;
   card.classList.add('hidden');
+  const closingId = currentStory?.id || currentStory?.story_id;
   currentStory = null;
   // 폴링 가드(pollForArchive)는 currentStory=null 이면 curId falsy 로 계속 돌므로 여기서 반드시 끊는다.
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
@@ -1773,12 +1781,29 @@ function closeStoryCard() {
     try { history.replaceState(null, '', window.location.pathname + window.location.search); }
     catch (_) { window.location.hash = ''; }
   }
+
+  if (closingId) {
+    const listEl = document.querySelector(`.list-item[data-id="${closingId}"]`);
+    if (listEl) {
+      listEl.focus({ preventScroll: true });
+    }
+  }
 }
 document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
   const t = e.target;  // 검색창 등 입력 중엔 네이티브 Escape(입력 지우기)와 충돌하지 않게 양보
-  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-  closeStoryCard();
+  const isInput = t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
+
+  if (e.key === 'Escape') {
+    if (isInput) return;
+    closeStoryCard();
+  } else if (e.key === '/' && !isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    const searchInput = document.getElementById('story-search');
+    if (searchInput) {
+      searchInput.focus();
+      searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
 });
 
 // 글을 열 때 주소창을 #story=<id> 로 맞춰 '현재 글' 자체가 공유 가능한 링크가 되게 한다.
@@ -3623,7 +3648,14 @@ async function runVerification(txId, arweaveUrl) {
 }
 
 // ── 목록 ───────────────────────────────────────────────────────────────────
+let storyListRequest = 0;
 async function loadStoryList() {
+  const requestId = ++storyListRequest;
+  const searchIcon = document.querySelector('.list-search-icon');
+  if (searchIcon) {
+    searchIcon.classList.add('spin');
+    searchIcon.textContent = '';
+  }
   try {
     // 검색 중이면 q 를 붙여 전체 아카이브를 서버에서 검색(부분일치). 더 넓은 limit 으로 매칭 확보.
     const url = searchQuery
@@ -3631,12 +3663,15 @@ async function loadStoryList() {
       : '/api/stories?limit=100';
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    allStories = await resp.json();
+    const stories = await resp.json();
+    if (requestId !== storyListRequest) return;
+    allStories = stories;
     displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
     updateSearchStatus();
   } catch (e) {
+    if (requestId !== storyListRequest) return;
     console.error('[stories] load failed', e);
     // 빈 상태(=없음)와 실패(=에러)를 구분해서 사용자에게 알린다.
     const el = document.getElementById('story-list');
@@ -3647,6 +3682,11 @@ async function loadStoryList() {
           <div class="empty-text">목록을 불러오지 못했습니다.</div>
           <button class="btn-sm" onclick="loadStoryList()" style="margin-top:10px">다시 시도</button>
         </div>`;
+    }
+  } finally {
+    if (requestId === storyListRequest && searchIcon) {
+      searchIcon.classList.remove('spin');
+      searchIcon.textContent = '🔍';
     }
   }
 }
@@ -3798,6 +3838,7 @@ function renderStoryList() {
       : `${s.vote_count}/${threshold}표`;
 
     const div = document.createElement('div');
+    div.dataset.id = s.id || s.story_id;
     const isGhost = !isArchived && dC === 0;
     const isDeletedWarning = dC > 0 && !isArchived;
 
@@ -3895,32 +3936,6 @@ document.querySelectorAll('.chip').forEach(chip => {
     renderStoryList();
   };
 });
-
-// ── 이야기 검색 (디바운스 → 서버 검색) ───────────────────────────────────────
-(() => {
-  const input = document.getElementById('story-search');
-  const clearBtn = document.getElementById('story-search-clear');
-  if (!input) return;
-  let debounce = null;
-  const run = () => {
-    const v = input.value.trim();
-    if (v === searchQuery) return;   // 변화 없으면 재요청 생략
-    searchQuery = v;
-    displayLimit = 10;
-    loadStoryList();
-  };
-  input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(run, 300); });
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(debounce); run(); } });
-  if (clearBtn) clearBtn.onclick = () => {
-    clearTimeout(debounce);
-    input.value = '';
-    input.focus();
-    if (!searchQuery) return;
-    searchQuery = '';
-    displayLimit = 10;
-    loadStoryList();
-  };
-})();
 
 // ── Toast ──────────────────────────────────────────────────────────────────
 function toast(msg, kind = 'info') {
