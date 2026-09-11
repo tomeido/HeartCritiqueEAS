@@ -2,7 +2,16 @@
 
 AI 사냥개가 한국 커뮤니티 게시판에서 **삭제 위협받는 익명 글**(따뜻한 미담 또는 대기업 비위)을 길어 올리고, 소셜 로그인한 인간의 **투표**가 임계값에 도달하면 **Arweave에 박제**하는 Web2.5 타임캡슐 아카이브입니다.
 
-> Supabase 없이도 돌아갑니다 — `SUPABASE_*` 를 비워두면 **내장 SQLite + 게스트 인증**으로 자동 폴백됩니다([5-1b 참고](#1-b-supabase-없이-실행-sqlite-로컬-모드)).
+> Supabase 없이도 돌아갑니다 — `SUPABASE_*` 를 비워두면 **내장 로컬 DB(기본 엔진: Rust 재작성 SQLite 인 [Turso Database](https://github.com/tursodatabase/turso)) + 게스트 인증**으로 자동 폴백됩니다([5-1b 참고](#1-b-supabase-없이-실행-로컬-모드--rust-db-엔진)). 기존 Supabase 데이터는 `scripts/migrate_supabase_to_local.py` 로 통째로 이전할 수 있습니다.
+
+## TheWitness v0.1
+
+AINSpace 주민형 archivist로의 전환을 위한 첫 vertical slice가 함께 제공됩니다. 현재
+`/.well-known/agent.json`은 A2A v1 Agent Card를, `/a2a`는 TheWitness JSON-RPC endpoint를
+제공합니다. Event/Memory 분리, deterministic significance, Recall, daily Chronicle과
+5개 SQLite 테이블이 구현되어 있으며 기존 Heart & Critique API는 그대로 보존됩니다.
+
+실행 및 메시지 예시는 [`docs/THEWITNESS.md`](docs/THEWITNESS.md)를 참고하세요.
 
 ---
 
@@ -65,7 +74,8 @@ Docker
 │       ├── nativetext.py     # tracker 텍스트 파이프라인 Rust 가속 래퍼 — 미설치 시 동작 동일 파이썬 폴백
 │       ├── transparency.py   # 정책·가중치 실시간 스냅샷 + 박제물 서명 검증(docs/TRANSPARENCY.md)
 │       ├── db.py             # Supabase 클라이언트 싱글톤 — SUPABASE_* 미설정 시 localdb 로 자동 폴백
-│       ├── localdb.py        # SQLite 로컬 백엔드 (supabase-py 호환 서브셋, 스키마 자동 생성)
+│       ├── localdb.py        # 로컬 백엔드 (supabase-py 호환 서브셋, 스키마 자동 생성) — 기본 엔진
+│       │                     #   pyturso(Rust 재작성 SQLite, 파일 포맷 호환), 미설치 시 sqlite3 폴백
 │       ├── localauth.py      # 게스트 인증 — HMAC 서명 토큰 발급·검증 (로컬 모드 전용)
 │       ├── dberrors.py       # APIError 단일 수입 지점 (postgrest 부재 환경 호환)
 │       ├── crypto.py         # EC 키 서명·검증 (secp256k1 ECDSA-SHA256)
@@ -178,9 +188,11 @@ Docker
 - 프론트 하단의 접이식 **투명성 패널**이 같은 스냅샷을 사람이 읽는 9섹션 형태로 렌더하고, 박제된 글 상세의 "🔐 박제 무결성 검증" 카드는 브라우저에서 서명 검증 + 박제본↔화면 본문 대조를 독립 수행합니다.
 - **'목격한 삭제'만 임계값 인하**: 살아있는 원본을 직접 확인(기준선 캡처)한 뒤의 hard 404/410/403 만 박제 임계값을 낮춥니다 — 첫 접촉부터 죽어 있던 링크(오탐 구분 불가)는 배지 전용. 승격 글의 죽은 원본은 collector 의 생전 목격 기록을 기준선으로 승계합니다.
 
-### 12) Supabase 없이 동작 (SQLite 로컬 모드 + 게스트 인증)
-- `SUPABASE_*` 미설정(또는 `DB_BACKEND=local`) 시 `services/db.get_db()`가 `services/localdb.py`(SQLite)로 자동 폴백합니다. supabase-py 쿼리 인터페이스의 사용 서브셋(에러코드 `23505`/`23503`, `or_` 중첩 필터, PostgreSQL식 NULLS 정렬, `count=exact`, RPC 등)을 그대로 재현해 **라우터·tracker·cleanup 코드 무수정**으로 동작하며, 전체 마이그레이션이 적용된 스키마를 자동 생성합니다.
-- 인증은 게스트 토큰(`services/localauth.py`)으로 대체되고, `/api/config`의 `auth_mode: "guest"`를 보고 프론트가 자동 전환합니다. 기존 Supabase 배포는 무변경(env 있으면 기존 경로). 계약은 `tests/test_localdb.py`가 고정합니다. 실행법은 [5-1b](#1-b-supabase-없이-실행-sqlite-로컬-모드) 참고.
+### 12) Supabase 없이 동작 (로컬 모드: Rust DB 엔진 + 게스트 인증)
+- `SUPABASE_*` 미설정(또는 `DB_BACKEND=local`) 시 `services/db.get_db()`가 `services/localdb.py`로 자동 폴백합니다. supabase-py 쿼리 인터페이스의 사용 서브셋(에러코드 `23505`/`23503`, `or_` 중첩 필터, PostgreSQL식 NULLS 정렬, `count=exact`, RPC 등)을 그대로 재현해 **라우터·tracker·cleanup 코드 무수정**으로 동작하며, 전체 마이그레이션이 적용된 스키마를 자동 생성합니다.
+- 저장 엔진은 기본이 **pyturso**(Turso Database — SQLite 를 Rust 로 재작성한 인프로세스 DB, SQLite 파일 포맷·핫 WAL 양방향 호환)이고, 미설치 환경은 stdlib `sqlite3`(C)로 자동 폴백합니다(`LOCAL_DB_ENGINE`으로 강제 가능). 같은 DB 파일을 두 엔진이 그대로 공유하므로 엔진 전환에 변환이 필요 없습니다.
+- 인증은 게스트 토큰(`services/localauth.py`)으로 대체되고, `/api/config`의 `auth_mode: "guest"`를 보고 프론트가 자동 전환합니다. 기존 Supabase 배포는 무변경(env 있으면 기존 경로). 계약은 `tests/test_localdb.py`가 **두 엔진 파라미터라이즈**로 고정합니다. 실행법은 [5-1b](#1-b-supabase-없이-실행-로컬-모드--rust-db-엔진) 참고.
+- 기존 Supabase 데이터 이전: `docker compose build app && docker compose run --rm --no-deps app python scripts/migrate_supabase_to_local.py` (읽기 전용 export → 자연키 upsert, 재실행 안전, 행 수 대조 리포트).
 
 ### 13) 성능 — tracker 텍스트 파이프라인 Rust 가속 (`native/`)
 - 출처 삭제 감시의 CPU 핫패스(가시텍스트 추출 + 삭제/차단/봇 패턴 매칭)를 Rust(`hc_native`, PyO3 + regex crate)로 가속: 실측 **8배**(80KB 페이지 14.8ms→1.9ms), GIL 해제 실행으로 async 이벤트 루프 스톨 제거.
@@ -201,8 +213,9 @@ Docker
 | `SUPABASE_URL` | 선택 | - | Supabase 프로젝트 URL. **미설정 시 SQLite 로컬 백엔드 + 게스트 인증으로 자동 폴백** (아래 'Supabase 없이 실행' 참고) |
 | `SUPABASE_ANON_KEY` | Supabase 사용 시 | - | 클라이언트(프론트엔드)용 Supabase Anon Key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase 사용 시 | - | 서버 사이드 관리자 권한용 Service Role Key |
-| `DB_BACKEND` | 선택 | 자동 | `local`(SQLite 강제) 또는 `supabase`(강제). 미설정 시 SUPABASE_* 유무로 자동 판별 |
-| `LOCAL_DB_PATH` | 선택 | `data/heartcritique.db` | 로컬 모드 SQLite 파일 경로 (Docker에선 `./data` 볼륨에 영속) |
+| `DB_BACKEND` | 선택 | 자동 | `local`(로컬 강제) 또는 `supabase`(강제). 미설정 시 SUPABASE_* 유무로 자동 판별 |
+| `LOCAL_DB_PATH` | 선택 | `data/heartcritique.db` | 로컬 모드 DB 파일 경로 (Docker에선 `./data` 볼륨에 영속) |
+| `LOCAL_DB_ENGINE` | 선택 | 자동(`turso`) | 로컬 모드 저장 엔진: `turso`(Rust, pyturso) 또는 `sqlite`(C stdlib). pyturso 미설치 시 자동 `sqlite` 폴백 — 파일 포맷이 같아 두 엔진이 한 파일을 공유 |
 | `GUEST_TOKEN_SECRET` | 선택 | 자동 생성 | 게스트 토큰 HMAC 비밀키. 미설정 시 데이터 디렉터리 `guest_secret` 파일에 자동 생성·영속 |
 | `GUEST_RATELIMIT_PER_IP` | 선택 | `10` | 게스트 신원 발급(로컬 모드) IP당 윈도우 내 상한 |
 | `AGENT_PRIVATE_KEY` | **필수** | - | 에이전트 Ethereum 개인키 (서명 및 Irys 가스비 대납용) |
@@ -238,7 +251,7 @@ Docker
 
 ### 1) 빠른 시작 (Docker Compose)
 
-가장 간단하게 시스템을 실행하는 방법입니다. FastAPI 백엔드, Node.js 업로더, DB(Supabase 또는 내장 SQLite)가 유기적으로 연결됩니다. Supabase 를 쓰지 않을 거라면 2번(스키마 실행) 단계를 건너뛰고 [1-b](#1-b-supabase-없이-실행-sqlite-로컬-모드)를 따르세요.
+가장 간단하게 시스템을 실행하는 방법입니다. FastAPI 백엔드, Node.js 업로더, DB(Supabase 또는 내장 로컬 DB — 기본 Rust 엔진)가 유기적으로 연결됩니다. Supabase 를 쓰지 않을 거라면 2번(스키마 실행) 단계를 건너뛰고 [1-b](#1-b-supabase-없이-실행-로컬-모드--rust-db-엔진)를 따르세요.
 
 ```bash
 # 1. 환경변수 파일 생성 및 작성
@@ -262,24 +275,45 @@ docker compose up -d
 docker compose logs -f app
 ```
 
-### 1-b) Supabase 없이 실행 (SQLite 로컬 모드)
+### 1-b) Supabase 없이 실행 (로컬 모드 — Rust DB 엔진)
 
 Supabase 프로젝트가 없어도 전체 기능이 동작합니다. `.env` 에서 `SUPABASE_URL` /
 `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` 를 **비워두면**:
 
-- **DB**: `services/localdb.py` 가 SQLite(`./data/heartcritique.db`, `LOCAL_DB_PATH`로 변경 가능)로
+- **DB**: `services/localdb.py` 가 로컬 파일(`./data/heartcritique.db`, `LOCAL_DB_PATH`로 변경 가능)에
   동일한 스키마(전체 마이그레이션 적용 상태)를 자동 생성합니다. Supabase SQL Editor 단계가 필요 없습니다.
+  저장 엔진은 기본이 **pyturso(Turso Database)** — SQLite 를 Rust 로 재작성한 인프로세스 DB 로,
+  SQLite 파일 포맷과 완전 호환이라 기존 SQLite 파일도 변환 없이 그대로 씁니다
+  (미설치 시 stdlib `sqlite3` 자동 폴백, `LOCAL_DB_ENGINE`으로 강제 선택 가능).
+  참고: turso 엔진은 DB 파일을 프로세스 단위로 독점 잠금하므로 앱 가동 중에는 다른 프로세스가
+  같은 파일을 열 수 없습니다 — 가동 중 점검은 파일 사본을 떠서 하세요(사본은 stdlib sqlite3 로도 열림).
 - **인증**: Google OAuth 대신 **게스트 인증**이 켜집니다. 브라우저가 `POST /api/auth/guest` 로
   HMAC 서명 토큰을 받아 투표합니다(UI 우측 상단에 '게스트' 배지 표시).
-  게스트 신원은 브라우저 단위라 OAuth 만큼 중복투표에 강하지 않습니다 — 공개 운영엔 Supabase 모드를 권장합니다.
+  게스트 신원은 브라우저 단위라 OAuth 만큼 중복투표에 강하지 않습니다.
 - **백그라운드 루프**(tracker/hunter/cleanup 등)와 박제(Irys)·검증(/api/verify)은 그대로 동작합니다.
 
 ```bash
 cp .env.example .env      # SUPABASE_* 는 비워둔 채 LLM 키 등만 채우기
-docker compose up -d      # ./data 볼륨에 SQLite 파일 영속
+docker compose up -d      # ./data 볼륨에 DB 파일 영속
 ```
 
-이미 Supabase 를 쓰던 배포는 아무 변화 없습니다(환경변수가 있으면 기존 경로 그대로).
+**기존 Supabase 배포에서 갈아타기** — 데이터 전체(스토리·투표·수집글·Wayback 큐)를
+로컬 DB 로 이전한 뒤 `DB_BACKEND=local` 로 전환합니다(원본 Supabase 는 읽기만 하므로 무변경):
+
+```bash
+docker compose build app               # 마이그레이션 스크립트가 든 최신 이미지 먼저 빌드
+docker compose stop app                # 이전 중 델타 쓰기 방지
+docker compose run --rm --no-deps app python scripts/migrate_supabase_to_local.py
+echo 'DB_BACKEND=local' >> .env        # SUPABASE_* 는 남겨둬도 됨(local 이 우선)
+docker compose up -d app
+```
+
+알아둘 것: ① 스크립트 재실행(델타 흡수)은 원본의 *추가/수정*만 반영하고 *삭제*는
+미러링하지 않으므로(유령 행 잔존 가능) 앱을 멈춘 상태의 1회 실행이 정석입니다.
+② 이전된 투표의 user_id 는 기존 Google OAuth 신원 그대로라, 게스트 인증 전환 후
+같은 사람이 새 게스트 신원으로 다시 투표하는 것까지 막지는 못합니다.
+
+이미 Supabase 를 쓰던 배포는 전환 전까지 아무 변화 없습니다(환경변수가 있으면 기존 경로 그대로).
 
 ### 2) 로컬 개발 모드 (Docker 없이)
 
@@ -380,5 +414,4 @@ pytest
 
 
 https://github.com/user-attachments/assets/5bb99954-6c67-4204-9ff4-72f7c41a9db4
-
 

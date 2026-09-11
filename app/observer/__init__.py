@@ -1,0 +1,2 @@
+"""Event ingestion and normalization."""
+

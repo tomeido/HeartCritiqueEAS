@@ -37,6 +37,7 @@ from fastapi.responses import (
 load_dotenv()
 
 from routers import auth, feed, stats, stories, transparency, votes  # noqa: E402
+from app.a2a.server import router as witness_router  # noqa: E402
 from services.db import is_local_mode  # noqa: E402
 from services.llm import LLM_PROVIDER, GEMINI_MODEL, GROQ_MODEL, generate  # noqa: E402
 from services.threshold import DEFAULT_THRESHOLD  # noqa: E402
@@ -70,7 +71,12 @@ async def lifespan(app: FastAPI):
     # DB 는 Supabase(env 설정 시) 또는 SQLite 로컬 폴백으로 항상 존재한다.
     # 로컬 모드에서도 백그라운드 루프는 동일하게 동작하므로 게이트는 기능 플래그만 남긴다.
     if is_local_mode():
-        logger.info("[lifespan] SUPABASE_* 미설정 → SQLite 로컬 백엔드 + 게스트 인증 모드")
+        from services.localdb import get_local_db
+        reason = ("DB_BACKEND=local"
+                  if os.environ.get("DB_BACKEND", "").strip().lower() == "local"
+                  else "SUPABASE_* 미설정")
+        logger.info(f"[lifespan] {reason} → 로컬 백엔드"
+                    f"(engine={get_local_db().engine}) + 게스트 인증 모드")
     # 텍스트 파이프라인 엔진 상태 — nativetext 의 자체 로그는 logging.basicConfig 이전
     # (모듈 임포트 시점)에 찍혀 유실되므로 여기서 한 번 명시한다.
     from services.tracker import _TEXT_PIPELINE
@@ -118,6 +124,7 @@ app.include_router(stats.router)
 app.include_router(feed.router)
 app.include_router(transparency.router)
 app.include_router(auth.router)
+app.include_router(witness_router)
 
 
 @app.get("/health")
@@ -149,12 +156,17 @@ async def get_config():
     except Exception:
         pubkey = ""
     local = is_local_mode()
+    if local:
+        from services.localdb import get_local_db
+        db_backend = f"local-{get_local_db().engine}"  # local-turso(Rust) | local-sqlite
+    else:
+        db_backend = "supabase"
     return {
         "supabase_url": "" if local else os.environ.get("SUPABASE_URL", ""),
         "supabase_anon_key": "" if local else os.environ.get("SUPABASE_ANON_KEY", ""),
         # guest = Supabase 미설정: 프론트가 /api/auth/guest 로 신원을 만들어 투표
         "auth_mode": "guest" if local else "supabase",
-        "db_backend": "sqlite-local" if local else "supabase",
+        "db_backend": db_backend,
         "vote_threshold": DEFAULT_THRESHOLD,
         "llm_provider": LLM_PROVIDER,
         "agent_public_key": pubkey,
@@ -216,7 +228,6 @@ def _build_agent_card(public_url: str) -> dict:
 
 
 @app.get("/.well-known/agent-card.json")
-@app.get("/.well-known/agent.json")
 async def agent_card(request: Request):
     return _build_agent_card(_public_url(request))
 

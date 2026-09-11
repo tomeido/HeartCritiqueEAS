@@ -1,4 +1,10 @@
-"""SQLite 로컬 백엔드 — Supabase(PostgREST) 없이도 앱 전체가 동작하게 하는 호환 클라이언트.
+"""로컬 백엔드 — Supabase(PostgREST) 없이도 앱 전체가 동작하게 하는 호환 클라이언트.
+
+엔진은 기본이 **pyturso(Turso Database)** — SQLite 를 Rust 로 재작성한 인프로세스 DB 로,
+SQLite 파일 포맷(핫 WAL 포함)과 양방향 호환이라 기존 DB 파일을 변환 없이 그대로 연다.
+미설치 환경은 stdlib sqlite3(C) 으로 자동 폴백하며 동작은 동일하다(hc_native 와 같은 철학).
+LOCAL_DB_ENGINE=turso|sqlite 로 강제 가능. 두 엔진의 계약 패리티는
+tests/test_localdb.py 가 양쪽 파라미터라이즈로 고정한다.
 
 SUPABASE_* 환경변수가 없을 때 services/db.get_db() 가 이 모듈의 클라이언트를 반환한다.
 supabase-py 의 fluent 쿼리 인터페이스 중 이 코드베이스가 실제로 쓰는 서브셋만 구현한다:
@@ -39,6 +45,95 @@ from services.dberrors import APIError
 logger = logging.getLogger(__name__)
 
 DEFAULT_DB_PATH = os.path.join("data", "heartcritique.db")
+
+# ── DB 엔진: pyturso(Rust) 기본, stdlib sqlite3(C) 자동 폴백 ─────────────────
+# Turso 의 제약 위반 메시지는 sqlite3 과 같은 문구('UNIQUE constraint failed' 등)를
+# 포함하므로 _integrity_to_apierror 의 substring 매칭이 두 엔진에서 같은 코드로 떨어진다.
+# 단 byte-동일은 아니다(UNIQUE/NOT NULL/CHECK 는 ' (19)' 접미가 붙고 CHECK 는 표현식이
+# 재포맷됨, FK 만 완전 동일) — APIError.message 전문(정확 일치) 비교·단언에 기대지 말 것.
+try:
+    import turso as _turso  # pyturso — Rust 재작성 SQLite (파일 포맷 호환)
+except Exception:  # ImportError 외 바인딩 로드 실패도 폴백으로 흡수
+    _turso = None
+
+_INTEGRITY_ERRORS: tuple = (
+    (sqlite3.IntegrityError, _turso.IntegrityError) if _turso is not None
+    else (sqlite3.IntegrityError,))
+
+
+def resolve_engine(pref: str | None = None) -> str:
+    """'turso' | 'sqlite' 결정. 우선순위: 인자 > LOCAL_DB_ENGINE env > 자동(설치 여부)."""
+    p = (pref if pref is not None else os.environ.get("LOCAL_DB_ENGINE", ""))
+    p = p.strip().lower()
+    if p in ("sqlite", "sqlite3", "python", "c"):
+        return "sqlite"
+    if p in ("turso", "pyturso", "rust"):
+        if _turso is None:
+            logger.warning(
+                "[localdb] LOCAL_DB_ENGINE=%s 지정됐지만 pyturso 미설치 — sqlite3 폴백", p)
+            return "sqlite"
+        return "turso"
+    if p:
+        logger.warning("[localdb] LOCAL_DB_ENGINE=%r 미인식 — 자동 선택", p)
+    return "turso" if _turso is not None else "sqlite"
+
+
+class _TursoRow:
+    """sqlite3.Row 호환 서브셋 — 이름/인덱스 양쪽 접근."""
+
+    __slots__ = ("_vals", "_idx")
+
+    def __init__(self, vals, idx: dict):
+        self._vals = vals
+        self._idx = idx
+
+    def __getitem__(self, key):
+        if isinstance(key, str):
+            return self._vals[self._idx[key]]
+        return self._vals[key]
+
+
+class _TursoCursor:
+    """turso Cursor → 이 모듈이 쓰는 sqlite3 커서 서브셋(fetch*/rowcount) 어댑터."""
+
+    __slots__ = ("_cur", "_map")
+
+    def __init__(self, cur):
+        self._cur = cur
+        # description 은 SELECT/RETURNING 에서만 존재 — 이름 접근용 매핑을 1회 계산
+        self._map = {d[0]: i for i, d in enumerate(cur.description or ())}
+
+    @property
+    def rowcount(self):
+        return self._cur.rowcount
+
+    def fetchone(self):
+        row = self._cur.fetchone()
+        return None if row is None else _TursoRow(row, self._map)
+
+    def fetchall(self):
+        return [_TursoRow(r, self._map) for r in self._cur.fetchall()]
+
+
+class _TursoConn:
+    """turso.Connection → 이 모듈이 쓰는 sqlite3 인터페이스 서브셋 어댑터."""
+
+    __slots__ = ("_conn",)
+
+    def __init__(self, path: str):
+        self._conn = _turso.connect(path)
+
+    def execute(self, sql: str, params=()) -> _TursoCursor:
+        return _TursoCursor(self._conn.execute(sql, tuple(params)))
+
+    def executescript(self, script: str):
+        self._conn.executescript(script)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
 
 # ── 스키마 (supabase_schema.sql + migrations 001~012 통합본의 SQLite 번역) ────
 _DDL = """
@@ -266,7 +361,7 @@ def _missing_col_error(table: str, col: str, payload: bool = False) -> APIError:
     })
 
 
-def _integrity_to_apierror(e: sqlite3.IntegrityError) -> APIError:
+def _integrity_to_apierror(e: Exception) -> APIError:
     msg = str(e)
     if "UNIQUE constraint failed" in msg:
         code = "23505"
@@ -324,6 +419,15 @@ class _LocalQuery:
         kind = self._kind(col, payload=payload)
         if v is None:
             return None
+        if kind == "uuid":
+            # PG uuid 타입은 대소문자·표기 변형(braces/urn)을 흡수해 canonical(소문자)로
+            # 저장·비교하지만 로컬은 TEXT 정확일치 — 여기서 동일하게 정규화해 의미를 맞춘다.
+            if isinstance(v, str):
+                try:
+                    return str(uuid.UUID(v.strip()))
+                except ValueError:
+                    return v
+            return v
         if kind == "json":
             if isinstance(v, (dict, list)):
                 return json.dumps(v, ensure_ascii=False)
@@ -569,12 +673,26 @@ class _LocalQuery:
                 row[col] = _now_iso()
         return row
 
+    def _rollback_quietly(self) -> None:
+        try:
+            self._c._conn.rollback()
+        except Exception:
+            pass
+
     def execute(self) -> APIResponse:
         with self._c._lock:
             try:
                 return self._execute_locked()
-            except sqlite3.IntegrityError as e:
+            except _INTEGRITY_ERRORS as e:
+                # PostgREST 의 배치 삽입은 원자적 — 부분 삽입 잔여가 열린 트랜잭션에
+                # 남아 다음 commit 에 편승하지 않도록 즉시 롤백해 의미를 맞춘다.
+                self._rollback_quietly()
                 raise _integrity_to_apierror(e) from e
+            except BaseException:
+                # IntegrityError 외 실패(_cv 의 APIError, OperationalError 등)도 동일하게
+                # 잔여를 롤백한다. 트랜잭션이 없을 때의 rollback 은 양쪽 엔진 모두 no-op.
+                self._rollback_quietly()
+                raise
 
     def _execute_locked(self) -> APIResponse:
         conn = self._c._conn
@@ -696,16 +814,20 @@ class _LocalAuth:
 
 
 class LocalClient:
-    """supabase Client 호환(사용 서브셋) SQLite 클라이언트."""
+    """supabase Client 호환(사용 서브셋) 로컬 클라이언트 — turso(Rust)/sqlite3 겸용."""
 
-    def __init__(self, path: str | None = None):
+    def __init__(self, path: str | None = None, engine: str | None = None):
         self.path = path or os.environ.get("LOCAL_DB_PATH", DEFAULT_DB_PATH)
         if self.path != ":memory:":
             parent = os.path.dirname(os.path.abspath(self.path))
             os.makedirs(parent, exist_ok=True)
         self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        self.engine = resolve_engine(engine)
+        if self.engine == "turso":
+            self._conn = _TursoConn(self.path)
+        else:
+            self._conn = sqlite3.connect(self.path, check_same_thread=False)
+            self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(_DDL)
@@ -729,7 +851,9 @@ def get_local_db() -> LocalClient:
         with _local_lock:
             if _local is None:
                 _local = LocalClient()
+                note = ("Rust 엔진(pyturso)" if _local.engine == "turso"
+                        else "sqlite3 폴백(pyturso 미설치)")
                 logger.info(
-                    f"[localdb] SQLite 로컬 백엔드 사용 (path={_local.path}) — "
-                    "SUPABASE_* 미설정, Supabase 없이 동작")
+                    f"[localdb] 로컬 백엔드 사용 (engine={_local.engine}, "
+                    f"path={_local.path}) — {note}, Supabase 없이 동작")
     return _local

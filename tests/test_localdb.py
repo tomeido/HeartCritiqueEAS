@@ -1,24 +1,38 @@
-"""services/localdb.py — SQLite 로컬 백엔드(supabase-py 호환 서브셋) 단위 테스트.
+"""services/localdb.py — 로컬 백엔드(supabase-py 호환 서브셋) 단위 테스트.
 
 외부 의존성 없이(:memory:) 실제 코드베이스가 쓰는 쿼리 패턴을 그대로 재현해 검증한다:
 representation 반환, APIError 코드(23505/23503/42703/PGRST204/PGRST202),
 or_ 중첩 and()/not.in 파싱, PG NULLS 정렬 기본값, count/head, upsert, RPC, 게스트 인증.
+
+두 엔진 — sqlite3(C stdlib)와 pyturso(Rust, 설치된 경우) — 를 파라미터라이즈로 돌려
+계약 패리티를 고정한다. pyturso 미설치 환경에선 sqlite3 만 검증한다.
 """
 
 import os
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 os.environ.setdefault("GUEST_TOKEN_SECRET", "test-secret-for-localdb")
 
+from services import localdb  # noqa: E402
 from services.dberrors import APIError  # noqa: E402
 from services.localdb import LocalClient  # noqa: E402
 
+ENGINES = ["sqlite"]
+if localdb.resolve_engine("turso") == "turso":  # pyturso 설치 시에만 추가
+    ENGINES.append("turso")
 
-def _db() -> LocalClient:
-    return LocalClient(":memory:")
+
+@pytest.fixture(params=ENGINES)
+def db(request) -> LocalClient:
+    client = LocalClient(":memory:", engine=request.param)
+    # 요청한 엔진이 조용히 폴백으로 뭉개지면 패리티 검증이 무의미해진다
+    assert client.engine == request.param
+    return client
 
 
 def _mk_story(db, **over):
@@ -33,8 +47,7 @@ def _mk_story(db, **over):
     return db.table("stories").insert(row).execute().data[0]
 
 
-def test_insert_returns_representation_and_json_roundtrip():
-    db = _db()
+def test_insert_returns_representation_and_json_roundtrip(db):
     s = _mk_story(db)
     assert s["id"] and len(s["id"]) == 36           # 앱 생성 uuid4
     assert s["created_at"].endswith("+00:00")       # 캐노니컬 timestamptz TEXT
@@ -46,8 +59,7 @@ def test_insert_returns_representation_and_json_roundtrip():
     assert got.data[0]["from_capture"] is False      # bool 역변환
 
 
-def test_vote_unique_and_fk_error_codes():
-    db = _db()
+def test_vote_unique_and_fk_error_codes(db):
     s = _mk_story(db)
     uid = "11111111-1111-4111-8111-111111111111"
     db.table("votes").insert({"story_id": s["id"], "user_id": uid}).execute()
@@ -63,10 +75,12 @@ def test_vote_unique_and_fk_error_codes():
         assert False, "FK 위반이 통과됨"
     except APIError as e:
         assert e.code == "23503"
+    # 무결성 오류 후에도 커넥션은 계속 사용 가능해야 한다(롤백 후 재쓰기)
+    s2 = _mk_story(db)
+    db.table("votes").insert({"story_id": s2["id"], "user_id": uid}).execute()
 
 
-def test_conditional_update_and_returning():
-    db = _db()
+def test_conditional_update_and_returning(db):
     s = _mk_story(db)
     # votes 라우터의 단조증가 가드: eq + lt
     r = (db.table("stories").update({"vote_count": 3})
@@ -85,8 +99,7 @@ def test_conditional_update_and_returning():
     assert r4.data == []  # 두 번째 claim 은 실패(단일 승자)
 
 
-def test_count_exact_head_and_with_rows():
-    db = _db()
+def test_count_exact_head_and_with_rows(db):
     for _ in range(3):
         _mk_story(db)
     _mk_story(db, category="critique")
@@ -100,8 +113,7 @@ def test_count_exact_head_and_with_rows():
     assert lim.count == 4 and len(lim.data) == 1
 
 
-def test_or_filter_nested_and_not_in():
-    db = _db()
+def test_or_filter_nested_and_not_in(db):
     s = _mk_story(db)
     rows = [
         {"story_id": s["id"], "url": "https://a", "status": "live", "http_code": 200},
@@ -123,8 +135,7 @@ def test_or_filter_nested_and_not_in():
     assert {row["url"] for row in r2.data} == {"https://a", "https://c", "https://d"}
 
 
-def test_hunter_or_pending_filter():
-    db = _db()
+def test_hunter_or_pending_filter(db):
     _mk_story(db)                                     # arweave_tx_id NULL
     _mk_story(db, arweave_tx_id="__pending__")
     _mk_story(db, arweave_tx_id="realtx", archived_at="2026-07-01T00:00:00+00:00")
@@ -134,8 +145,7 @@ def test_hunter_or_pending_filter():
     assert r.count == 2
 
 
-def test_not_property_is_not_null_and_neq():
-    db = _db()
+def test_not_property_is_not_null_and_neq(db):
     _mk_story(db, arweave_tx_id="tx1", archived_at="2026-07-01T00:00:00+00:00")
     _mk_story(db, arweave_tx_id="__pending__")
     _mk_story(db)
@@ -148,8 +158,7 @@ def test_not_property_is_not_null_and_neq():
     assert c.count == 1
 
 
-def test_order_pg_null_defaults_and_nullsfirst():
-    db = _db()
+def test_order_pg_null_defaults_and_nullsfirst(db):
     a = _mk_story(db, archived_at=None, arweave_tx_id="t1")
     b = _mk_story(db, archived_at="2026-07-02T00:00:00+00:00", arweave_tx_id="t2")
     c = _mk_story(db, archived_at="2026-07-03T00:00:00+00:00", arweave_tx_id="t3")
@@ -166,8 +175,7 @@ def test_order_pg_null_defaults_and_nullsfirst():
     assert [x["id"] for x in r3.data] == [a["id"], b["id"], c["id"]]
 
 
-def test_search_or_ilike_and_in():
-    db = _db()
+def test_search_or_ilike_and_in(db):
     _mk_story(db, body="따뜻한 어묵 국물 한 그릇", poetic_reason=None)
     _mk_story(db, body="다른 이야기", poetic_reason="어묵의 온기")
     _mk_story(db, body="무관한 글", poetic_reason=None)
@@ -183,8 +191,7 @@ def test_search_or_ilike_and_in():
     assert r3.data == []
 
 
-def test_bool_eq_and_ts_normalization():
-    db = _db()
+def test_bool_eq_and_ts_normalization(db):
     _mk_story(db, from_capture=True, origin_captured_url="https://dead/1")
     _mk_story(db)
     r = (db.table("stories").select("*", count="exact", head=True)
@@ -199,8 +206,7 @@ def test_bool_eq_and_ts_normalization():
     assert s["archived_at"] == "2026-07-01T12:00:00+00:00"
 
 
-def test_upsert_on_conflict_and_ignore_duplicates():
-    db = _db()
+def test_upsert_on_conflict_and_ignore_duplicates(db):
     s = _mk_story(db)
     db.table("citation_checks").upsert(
         [{"story_id": s["id"], "url": "https://a", "status": "unchecked"}],
@@ -221,8 +227,7 @@ def test_upsert_on_conflict_and_ignore_duplicates():
     assert w.data[0]["status"] == "queued"
 
 
-def test_delete_returns_rows_and_fk_cascade():
-    db = _db()
+def test_delete_returns_rows_and_fk_cascade(db):
     s = _mk_story(db, created_at="2020-01-01T00:00:00+00:00")
     db.table("votes").insert({
         "story_id": s["id"], "user_id": "11111111-1111-4111-8111-111111111111",
@@ -237,8 +242,7 @@ def test_delete_returns_rows_and_fk_cascade():
     assert db.table("citation_checks").select("id").execute().data == []
 
 
-def test_rpc_cleanup_preserves_captures_and_counts_real_votes():
-    db = _db()
+def test_rpc_cleanup_preserves_captures_and_counts_real_votes(db):
     old = "2020-01-01T00:00:00+00:00"
     orphan = _mk_story(db, created_at=old)
     capture = _mk_story(db, created_at=old, from_capture=True,
@@ -264,8 +268,7 @@ def test_rpc_cleanup_preserves_captures_and_counts_real_votes():
         assert e.code == "PGRST202"
 
 
-def test_missing_column_error_codes():
-    db = _db()
+def test_missing_column_error_codes(db):
     try:
         db.table("stories").select("no_such_col").limit(1).execute()
         assert False
@@ -279,14 +282,13 @@ def test_missing_column_error_codes():
         assert e.code == "PGRST204" and "bogus_col" in str(e)
 
 
-def test_guest_auth_roundtrip():
+def test_guest_auth_roundtrip(db):
     from services.localauth import issue_guest_token, verify_guest_token
     token, uid = issue_guest_token()
     assert verify_guest_token(token) == uid
     assert verify_guest_token(token + "x") is None
     assert verify_guest_token("guest." + uid + ".deadbeef") is None
     assert verify_guest_token("") is None
-    db = _db()
     user = db.auth.get_user(token)
     assert user.user.id == uid
     try:
@@ -296,9 +298,85 @@ def test_guest_auth_roundtrip():
         pass
 
 
-def test_votes_flow_like_router():
+def test_ilike_ascii_case_insensitive(db):
+    """검색(q=samsung ↔ 'Samsung') ASCII 대소문자 무시 — 엔진 간 패리티 고정."""
+    _mk_story(db, body="Samsung Electronics 대규모 리콜")
+    r = db.table("stories").select("id").ilike("body", "*samsung*").execute()
+    assert len(r.data) == 1
+    r2 = (db.table("stories").select("id")
+          .or_("body.ilike.*SAMSUNG*,poetic_reason.ilike.*SAMSUNG*").execute())
+    assert len(r2.data) == 1
+
+
+def test_uuid_case_and_format_normalization(db):
+    """PG uuid 타입은 대소문자를 흡수 — 로컬 TEXT 도 canonical 로 정규화돼야 한다."""
+    s = _mk_story(db)
+    got = db.table("stories").select("id").eq("id", s["id"].upper()).execute()
+    assert [r["id"] for r in got.data] == [s["id"]]
+    uid = "11111111-1111-4111-8111-111111111111"
+    v = (db.table("votes")
+         .insert({"story_id": s["id"].upper(), "user_id": uid.upper()})
+         .execute().data[0])
+    assert v["story_id"] == s["id"] and v["user_id"] == uid  # 쓰기+FK 매칭도 canonical
+
+
+def test_batch_partial_failure_leaves_no_residue(db):
+    """PostgREST 배치 원자성: 실패한 배치의 선행 행이 이후 무관한 commit 에
+    편승해 저장되면 안 된다(무결성/비무결성 실패 모두)."""
+    s = _mk_story(db)
+    # (a) 비무결성 실패(PGRST204): 2행째 미지 컬럼 → 1행째도 남지 않아야
+    try:
+        db.table("citation_checks").insert([
+            {"story_id": s["id"], "url": "https://ok", "status": "unchecked"},
+            {"story_id": s["id"], "url": "https://bad", "bogus_col": 1},
+        ]).execute()
+        assert False
+    except APIError as e:
+        assert e.code == "PGRST204"
+    db.table("citation_checks").insert(
+        {"story_id": s["id"], "url": "https://later", "status": "unchecked"}).execute()
+    urls = {r["url"] for r in db.table("citation_checks").select("url").execute().data}
+    assert urls == {"https://later"}
+    # (b) 무결성 실패(23505) 배치도 동일
+    try:
+        db.table("citation_checks").insert([
+            {"story_id": s["id"], "url": "https://two", "status": "unchecked"},
+            {"story_id": s["id"], "url": "https://later", "status": "unchecked"},
+        ]).execute()
+        assert False
+    except APIError as e:
+        assert e.code == "23505"
+    db.table("stories").update({"vote_count": 1}).eq("id", s["id"]).execute()
+    urls = {r["url"] for r in db.table("citation_checks").select("url").execute().data}
+    assert urls == {"https://later"}
+
+
+def test_multithread_shared_client(db):
+    """앱은 이벤트루프 + asyncio.to_thread 풀 여러 스레드에서 단일 커넥션을
+    RLock 직렬화로 공유한다 — 두 엔진 모두에서 스레드 간 공유가 성립해야 한다."""
+    import threading
+    errs: list = []
+
+    def work(i: int):
+        try:
+            st = _mk_story(db, body=f"스레드 {i}")
+            got = db.table("stories").select("id").eq("id", st["id"]).execute()
+            assert len(got.data) == 1
+        except Exception as e:  # noqa: BLE001
+            errs.append(repr(e))
+
+    threads = [threading.Thread(target=work, args=(i,)) for i in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errs == []
+    n = db.table("stories").select("*", count="exact", head=True).execute().count
+    assert n == 8
+
+
+def test_votes_flow_like_router(db):
     """routers/votes.py 의 실제 시퀀스를 로컬 백엔드로 재현."""
-    db = _db()
     s = _mk_story(db)
     from services.localauth import issue_guest_token
     token, uid = issue_guest_token()

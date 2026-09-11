@@ -24,6 +24,8 @@ RUN pip install --no-cache-dir /tmp/wheels/*.whl && rm -rf /tmp/wheels
 
 COPY routers/   routers/
 COPY services/  services/
+COPY app/       app/
+COPY scripts/   scripts/
 COPY static/    static/
 COPY main.py .
 

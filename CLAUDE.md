@@ -7,8 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Heart & Critique (EAS-free Web2.5 Edition)** — AI 사냥개가 실시간 뉴스를 검색해 따뜻한 선행 또는 대기업 비위 사건을 전달하고, 소셜 로그인한 인간의 투표로 Arweave에 영구 박제하는 Web2.5 타임캡슐 아카이브.
 
 - **LLM**: Groq(Llama+Tavily) 또는 Gemini(Google Search grounding)
-- **DB/Auth**: Supabase (OAuth: Google) — Discord 로그인은 제거됨. **SUPABASE_* 미설정 시
-  SQLite 로컬 백엔드(`services/localdb.py`) + 게스트 인증(`services/localauth.py`)으로 자동 폴백**
+- **DB/Auth**: Supabase (OAuth: Google) — Discord 로그인은 제거됨. **SUPABASE_* 미설정(또는
+  `DB_BACKEND=local`) 시 로컬 백엔드(`services/localdb.py`) + 게스트 인증(`services/localauth.py`)으로
+  자동 폴백**. 로컬 저장 엔진은 기본이 **pyturso(Turso Database — SQLite 의 Rust 재작성,
+  파일 포맷·핫 WAL 양방향 호환)**, 미설치 시 stdlib sqlite3 폴백(`LOCAL_DB_ENGINE`으로 강제).
+  기존 Supabase 데이터 이전: `scripts/migrate_supabase_to_local.py`
 - **박제**: Irys(Node.js) → Arweave
 - **배포**: Docker 홈서버 (FastAPI + uvicorn)
 
@@ -99,13 +102,34 @@ Docker
 2. Authentication > Providers 에서 Google OAuth 활성화
 3. Authentication > URL Configuration 에서 `http://your-server:8000` 추가
 
-**Supabase 없이(SQLite 로컬 모드)**: `SUPABASE_*` 셋 다 비워두면 `services/db.get_db()` 가
-`services/localdb.py`(SQLite, 전체 마이그레이션 적용 스키마 자동 생성, `LOCAL_DB_PATH` 기본
-`data/heartcritique.db`)로 폴백하고, 인증은 게스트 토큰(`services/localauth.py`,
-`POST /api/auth/guest`, HMAC 서명)으로 대체된다. `/api/config` 의 `auth_mode: "guest"` 를 보고
-프론트가 게스트 모드로 전환. votes 라우터는 `get_anon_db().auth.get_user()` 인터페이스가
-로컬에서도 동일해 무변경. 로컬 모드 계약(에러코드 23505/23503, or_ 필터 문법, PG NULLS 정렬,
-count/head, RPC `delete_orphan_pending_stories`)은 `tests/test_localdb.py` 가 고정한다.
+**Supabase 없이(로컬 모드)**: `SUPABASE_*` 셋 다 비워두면(또는 `DB_BACKEND=local`)
+`services/db.get_db()` 가 `services/localdb.py`(전체 마이그레이션 적용 스키마 자동 생성,
+`LOCAL_DB_PATH` 기본 `data/heartcritique.db`)로 폴백하고, 인증은 게스트 토큰
+(`services/localauth.py`, `POST /api/auth/guest`, HMAC 서명)으로 대체된다. `/api/config` 의
+`auth_mode: "guest"` 를 보고 프론트가 게스트 모드로 전환. votes 라우터는
+`get_anon_db().auth.get_user()` 인터페이스가 로컬에서도 동일해 무변경.
+
+로컬 저장 엔진은 **pyturso(Turso Database — SQLite 를 Rust 로 재작성한 인프로세스 DB)가 기본**이고
+미설치 시 stdlib sqlite3(C) 자동 폴백(`LOCAL_DB_ENGINE=turso|sqlite` 강제 가능). 두 엔진은 SQLite
+파일 포맷(핫 WAL 포함)이 양방향 호환이라 같은 DB 파일을 변환 없이 공유한다(실측 검증). 제약 위반
+메시지는 같은 문구를 포함해(turso 는 ' (19)' 접미) APIError 코드 매핑이 양쪽에서 같다. 로컬 모드
+계약(에러코드 23505/23503, or_ 필터 문법, PG NULLS 정렬, count/head, RPC
+`delete_orphan_pending_stories`)은 `tests/test_localdb.py` 가 **두 엔진 파라미터라이즈**로 고정한다.
+
+⚠️ **turso 는 DB 파일을 프로세스 단위로 독점 잠금**한다(실측: 앱 가동 중 두 번째 프로세스의
+`turso.connect` 는 즉시 `Locking error`) — 동시 접근 사고를 원천 차단하는 대신, 앱 가동 중
+점검 스크립트·마이그레이션 재실행이 같은 파일을 못 연다. 가동 중 점검은 파일 사본으로:
+`docker compose exec app bash -c 'cp data/heartcritique.db* /tmp/' 후 사본을 stdlib sqlite3
+(read-only) 로 오픈`. sqlite 엔진은 다중 프로세스 접근 가능(기존 SQLite 의미론).
+
+**Supabase → 로컬 마이그레이션**: `docker compose build app && docker compose run --rm
+--no-deps app python scripts/migrate_supabase_to_local.py` — PostgREST 를 읽기 전용으로
+id 키셋 페이지네이션 export → LocalClient **자연키 upsert**(votes=story_id,user_id /
+citation_checks=story_id,url / captured·wayback=url, stories 만 id + origin URL 사전 스킵;
+재실행 안전) → 테이블별 행 수 대조. 이전 중 델타 쓰기를 막으려면 `docker compose stop app`
+후 실행하고, `.env` 에 `DB_BACKEND=local` 추가 뒤 재기동한다. 한계: 델타 재실행은 원본
+삭제를 미러링하지 않고, 이전된 OAuth 투표 신원과 게스트 신원은 매핑되지 않는다(이중투표
+가능 — 임계값 여유로 흡수).
 
 ## Environment Variables
 
@@ -115,7 +139,8 @@ count/head, RPC `delete_orphan_pending_stories`)은 `tests/test_localdb.py` 가 
 | `SUPABASE_ANON_KEY` | Supabase 모드 | 프론트엔드용 anon 키 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase 모드 | 서버용 서비스 롤 키 |
 | `DB_BACKEND` | | `local`/`supabase` 강제 오버라이드(미설정 시 자동 판별) |
-| `LOCAL_DB_PATH` | | 로컬 모드 SQLite 경로(기본 `data/heartcritique.db`, compose는 `./data` 볼륨) |
+| `LOCAL_DB_PATH` | | 로컬 모드 DB 파일 경로(기본 `data/heartcritique.db`, compose는 `./data` 볼륨) |
+| `LOCAL_DB_ENGINE` | | 로컬 모드 저장 엔진 `turso`(Rust, **기본**)/`sqlite`(C stdlib). pyturso 미설치 시 자동 sqlite 폴백. 파일 포맷 호환이라 한 파일을 두 엔진이 공유 |
 | `GUEST_TOKEN_SECRET` | | 게스트 토큰 HMAC 키(미설정 시 `data/guest_secret` 자동 생성·영속) |
 | `NATIVE_TEXT_ENABLED` | | tracker 텍스트 파이프라인 Rust 가속(`hc_native`) 사용 여부. **기본 `true`** — 미설치·비호환 패턴이면 자동으로 동작 동일한 파이썬 폴백. `false`로 강제 폴백 가능 |
 | `AGENT_PRIVATE_KEY` | ✓ | 에이전트 ETH 개인키 (서명 + Irys 수수료) |
