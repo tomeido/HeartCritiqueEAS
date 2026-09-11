@@ -1752,8 +1752,15 @@ function handleHashRoute() {
   if (hash.indexOf('access_token') !== -1) return;
   // 열려 있던 글 카드를 닫아 주소창(홈)과 화면 상태를 일치시킨다(stale 카드 방지).
   if (currentStory) {
+    const closingId = currentStory.id || currentStory.story_id;
     currentStory = null;
     document.getElementById('story-card')?.classList.add('hidden');
+    if (closingId) {
+      const listEl = document.querySelector(`.list-item[data-id="${closingId}"]`);
+      if (listEl) {
+        listEl.focus({ preventScroll: true });
+      }
+    }
   }
 }
 window.addEventListener('hashchange', handleHashRoute);
@@ -1766,12 +1773,20 @@ function closeStoryCard() {
   const card = document.getElementById('story-card');
   if (!card || card.classList.contains('hidden')) return;
   card.classList.add('hidden');
+  const closingId = currentStory?.id || currentStory?.story_id;
   currentStory = null;
   // 폴링 가드(pollForArchive)는 currentStory=null 이면 curId falsy 로 계속 돌므로 여기서 반드시 끊는다.
   if (archivePollTimer) { clearTimeout(archivePollTimer); archivePollTimer = null; }
   if (/^#story=/.test(window.location.hash)) {
     try { history.replaceState(null, '', window.location.pathname + window.location.search); }
     catch (_) { window.location.hash = ''; }
+  }
+
+  if (closingId) {
+    const listEl = document.querySelector(`.list-item[data-id="${closingId}"]`);
+    if (listEl) {
+      listEl.focus({ preventScroll: true });
+    }
   }
 }
 document.addEventListener('keydown', (e) => {
@@ -3823,6 +3838,7 @@ function renderStoryList() {
       : `${s.vote_count}/${threshold}표`;
 
     const div = document.createElement('div');
+    div.dataset.id = s.id || s.story_id;
     const isGhost = !isArchived && dC === 0;
     const isDeletedWarning = dC > 0 && !isArchived;
 
