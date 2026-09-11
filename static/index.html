@@ -1781,7 +1781,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (isInput) return;
     closeStoryCard();
-  } else if (e.key === '/' && !isInput) {
+  } else if (e.key === '/' && !isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
     e.preventDefault();
     const searchInput = document.getElementById('story-search');
     if (searchInput) {
@@ -3633,7 +3633,14 @@ async function runVerification(txId, arweaveUrl) {
 }
 
 // ── 목록 ───────────────────────────────────────────────────────────────────
+let storyListRequest = 0;
 async function loadStoryList() {
+  const requestId = ++storyListRequest;
+  const searchIcon = document.querySelector('.list-search-icon');
+  if (searchIcon) {
+    searchIcon.classList.add('spin');
+    searchIcon.textContent = '';
+  }
   try {
     // 검색 중이면 q 를 붙여 전체 아카이브를 서버에서 검색(부분일치). 더 넓은 limit 으로 매칭 확보.
     const url = searchQuery
@@ -3641,12 +3648,15 @@ async function loadStoryList() {
       : '/api/stories?limit=100';
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    allStories = await resp.json();
+    const stories = await resp.json();
+    if (requestId !== storyListRequest) return;
+    allStories = stories;
     displayLimit = 10; // 목록 새로 조회 시 노출 개수 초기화
     renderStoryList();
     updateBadges();
     updateSearchStatus();
   } catch (e) {
+    if (requestId !== storyListRequest) return;
     console.error('[stories] load failed', e);
     // 빈 상태(=없음)와 실패(=에러)를 구분해서 사용자에게 알린다.
     const el = document.getElementById('story-list');
@@ -3657,6 +3667,11 @@ async function loadStoryList() {
           <div class="empty-text">목록을 불러오지 못했습니다.</div>
           <button class="btn-sm" onclick="loadStoryList()" style="margin-top:10px">다시 시도</button>
         </div>`;
+    }
+  } finally {
+    if (requestId === storyListRequest && searchIcon) {
+      searchIcon.classList.remove('spin');
+      searchIcon.textContent = '🔍';
     }
   }
 }
@@ -3872,48 +3887,25 @@ async function loadAndShowStory(storyId) {
 (() => {
   const input = document.getElementById('story-search');
   const clearBtn = document.getElementById('story-search-clear');
-  const searchIcon = document.querySelector('.list-search-icon');
   if (!input) return;
   let debounce = null;
-  const run = async () => {
+  const run = () => {
     const v = input.value.trim();
     if (v === searchQuery) return;   // 변화 없으면 재요청 생략
     searchQuery = v;
     displayLimit = 10;
-    if (searchIcon) {
-      searchIcon.className = 'list-search-icon spin';
-      searchIcon.innerHTML = '';
-    }
-    try {
-      await loadStoryList();
-    } finally {
-      if (searchIcon) {
-        searchIcon.className = 'list-search-icon';
-        searchIcon.innerHTML = '🔍';
-      }
-    }
+    loadStoryList();
   };
   input.addEventListener('input', () => { clearTimeout(debounce); debounce = setTimeout(run, 300); });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { clearTimeout(debounce); run(); } });
-  if (clearBtn) clearBtn.onclick = async () => {
+  if (clearBtn) clearBtn.onclick = () => {
     clearTimeout(debounce);
     input.value = '';
     input.focus();
     if (!searchQuery) return;
     searchQuery = '';
     displayLimit = 10;
-    if (searchIcon) {
-      searchIcon.className = 'list-search-icon spin';
-      searchIcon.innerHTML = '';
-    }
-    try {
-      await loadStoryList();
-    } finally {
-      if (searchIcon) {
-        searchIcon.className = 'list-search-icon';
-        searchIcon.innerHTML = '🔍';
-      }
-    }
+    loadStoryList();
   };
 })();
 
