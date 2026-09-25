@@ -14,10 +14,9 @@
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 박제된 이야기" href="/feed/archived.xml"/>
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 언론 격차 큰 이야기" href="/feed/extreme.xml"/>
 <link rel="alternate" type="application/atom+xml" title="Heart & Critique — 사라진 출처" href="/feed/deleted.xml"/>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700;900&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@500;600;700;900&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 /* ── 변수 ─────────────────────────────────────────────────────────────────── */
 :root {
@@ -1189,28 +1188,6 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
   }
 }
 
-/* 텍스트 타이핑 커서 효과 */
-.story-body {
-  position: relative;
-}
-.story-body::after {
-  content: '▋';
-  display: inline-block;
-  color: var(--accent-1);
-  animation: blink 0.8s infinite;
-  font-size: 0.85em;
-  margin-left: 3px;
-  vertical-align: middle;
-}
-.story-body.typing-done::after {
-  display: none;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
 /* AI의 재해석: 이중 레이어 시적 각색 스타일 */
 .poetic-overlay {
   position: relative;
@@ -1473,10 +1450,9 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <p class="search-status" id="search-status" role="status" aria-live="polite" hidden></p>
     </div>
     <div id="story-list">
-      <div class="empty">
-        <div class="empty-icon" aria-hidden="true">📜</div>
-        <div class="empty-text">아직 이야기가 없습니다.</div>
-        <p class="muted text-sm" style="margin-top:8px">위의 <strong>AI 사냥개 호출</strong> 버튼을 눌러 첫 이야기를 찾아보세요.</p>
+      <div class="empty" role="status">
+        <div class="empty-icon" aria-hidden="true"><span class="spin"></span></div>
+        <div class="empty-text">이야기를 불러오는 중입니다…</div>
       </div>
     </div>
     <div class="load-more-container" id="load-more-container" style="display: none; text-align: center; margin: var(--sp-6) 0 var(--sp-4);">
@@ -1671,19 +1647,30 @@ function newerThan(iso, ref) {
 // ── 초기화 ─────────────────────────────────────────────────────────────────
 async function init() {
   initTheme();
-  // 공개 데이터(목록·통계)는 인증/Supabase CDN 초기화와 무관하다. 먼저 즉시 로드해
-  // 첫 화면 공백을 없앤다 — 아래 auth 초기화가 느리거나 실패해도 데이터는 보인다.
-  loadStoryList();
-  loadStats();
-  loadWallet();
+  // 재방문 목록은 먼저 표시하고 항상 최신 데이터를 다시 조회한다.
+  restoreStoryList();
+  // 로그인·외부 폰트·통계보다 목록이 우선. 지갑 조회는 목록 응답 뒤에 시작한다.
+  loadStoryList().finally(() => loadWallet());
+  initNavigation();
+  handleHashRoute();
   try {
     cfg = await fetch('/api/config').then(r => r.json());
+    document.getElementById('vote-threshold').textContent = cfg?.vote_threshold || 3;
+    // 설정보다 먼저 연 딥링크에도 실제 네트워크·검증 공개키를 반영한다.
+    if (currentStory?.arweave_tx_id) {
+      showArchiveHero(currentStory.arweave_url, currentStory.arweave_tx_id, currentStory.archived_at);
+    }
+    // devnet(테스트넷)이면 실제 영속성과 카피를 일치시킨다.
+    if (!isPermanent()) {
+      const tl = document.querySelector('.tagline');
+      if (tl) tl.textContent = 'AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 박제 (현재 devnet 테스트넷 · 임시 보관)';
+    }
     if (cfg.auth_mode === 'guest' || !(cfg.supabase_url && cfg.supabase_anon_key)) {
       // Supabase 미설정(서버는 SQLite 로컬 백엔드): 게스트 신원으로 투표.
       // Supabase JS CDN 이 없어도 동작해야 하므로 CDN 체크보다 먼저 분기한다.
       await initGuestSession();
     } else {
-      if (!window.supabase) throw new Error('Supabase JS CDN 로드 실패');
+      await ensureSupabase();
       sb = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key, {
         auth: { detectSessionInUrl: true, persistSession: true },
       });
@@ -1695,44 +1682,31 @@ async function init() {
       const { data } = await sb.auth.getSession();
       session = data.session;
     }
-    document.getElementById('vote-threshold').textContent = cfg?.vote_threshold || 3;
-    // devnet(테스트넷)이면 '영구' 약속을 톤다운해 실제 영속성과 카피를 일치시킨다.
-    if (!isPermanent()) {
-      const tl = document.querySelector('.tagline');
-      if (tl) tl.textContent = 'AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 박제 (현재 devnet 테스트넷 · 임시 보관)';
-    }
   } catch (e) {
     console.error('[init 오류]', e);
     toast('초기화 실패: ' + e.message, 'error');
   } finally {
     renderAuth();
-    handleHashRoute();
-    
-    // 상단 이동 버튼 리스너
-    const scrollTopBtn = document.getElementById('scroll-top-btn');
-    if (scrollTopBtn) {
-      window.addEventListener('scroll', () => {
-        if (window.scrollY > 300) {
-          scrollTopBtn.classList.add('shown');
-        } else {
-          scrollTopBtn.classList.remove('shown');
-        }
-      });
-      scrollTopBtn.onclick = () => {
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      };
-    }
-    
-    // 더 보기 버튼 리스너
-    const loadMoreBtn = document.getElementById('load-more-btn');
-    if (loadMoreBtn) {
-      loadMoreBtn.onclick = () => {
-        displayLimit += 15;
-        renderStoryList();
-      };
-    }
-    
+    if (currentStory?.id) refreshVoteStatus(currentStory.id);
     restoreReturnStory();
+  }
+}
+
+// 목록 탐색과 딥링크는 느린 인증 초기화가 끝나기 전에도 사용할 수 있다.
+function initNavigation() {
+  const scrollTopBtn = document.getElementById('scroll-top-btn');
+  if (scrollTopBtn) {
+    window.addEventListener('scroll', () => {
+      scrollTopBtn.classList.toggle('shown', window.scrollY > 300);
+    });
+    scrollTopBtn.onclick = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  const loadMoreBtn = document.getElementById('load-more-btn');
+  if (loadMoreBtn) {
+    loadMoreBtn.onclick = () => {
+      displayLimit += 15;
+      renderStoryList();
+    };
   }
 }
 
@@ -2204,6 +2178,8 @@ async function makeReceipt() {
 
 // ── 대시보드 ───────────────────────────────────────────────────────────────
 async function loadStats() {
+  // 닫힌 통계 패널의 집계·차트 요청은 첫 화면의 글 조회와 경쟁하지 않는다.
+  if (!document.getElementById('dash-collapse')?.open) return;
   try {
     const r = await fetch('/api/stats');
     if (!r.ok) return;
@@ -2647,12 +2623,40 @@ document.querySelectorAll('.stat-tile').forEach(tile => {
   };
 });
 
-// 발행소 기록(접이식)을 펼칠 때 차트 재그리기 — 닫힌 채 렌더된 SVG 폭 0 대비 안전망
+// 발행소 기록을 펼칠 때만 통계와 차트를 조회한다.
 document.getElementById('dash-collapse')?.addEventListener('toggle', (e) => {
-  if (e.target.open) loadTimeseries();
+  if (e.target.open) loadStats();
 });
 
 // ── 인증 ───────────────────────────────────────────────────────────────────
+let supabasePromise = null;
+function ensureSupabase() {
+  if (window.supabase) return Promise.resolve();
+  if (supabasePromise) return supabasePromise;
+  // 로컬 모드에는 필요 없는 SDK. 원격 인증에만 비동기로 로드한다.
+  supabasePromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js';
+    script.async = true;
+    const timeout = setTimeout(() => finish(new Error('로그인 스크립트 응답 지연')), 10000);
+    function finish(error) {
+      clearTimeout(timeout);
+      script.onload = script.onerror = null;
+      if (error) {
+        script.remove();
+        supabasePromise = null;
+        reject(error);
+      } else {
+        resolve();
+      }
+    }
+    script.onload = () => finish(window.supabase ? null : new Error('Supabase JS CDN 로드 실패'));
+    script.onerror = () => finish(new Error('Supabase JS CDN 로드 실패'));
+    document.head.appendChild(script);
+  });
+  return supabasePromise;
+}
+
 // 게스트 신원(로컬 모드): 서버가 HMAC 서명한 토큰을 localStorage 에 보관·재사용한다.
 // Supabase 세션과 같은 모양(access_token/user)으로 만들어 기존 투표 경로를 그대로 탄다.
 const GUEST_TOKEN_KEY = 'hc_guest_token_v1';
@@ -2861,55 +2865,6 @@ document.getElementById('btn-share').onclick = shareStory;
 document.getElementById('btn-receipt').onclick = makeReceipt;
 document.getElementById('btn-close-story').onclick = closeStoryCard;
 
-let typingTimer = null;
-
-function typeWriter(element, text, speedMin = 12, speedMax = 25, callback) {
-  if (typingTimer) {
-    clearTimeout(typingTimer);
-    typingTimer = null;
-  }
-  element.innerHTML = '';
-  element.classList.remove('typing-done');
-
-  let i = 0;
-  const hasDropcap = leadsWithLetter(text);
-  let dropcapChar = '';
-  let restText = text;
-
-  if (hasDropcap) {
-    const trimmed = text.replace(/^\s+/, '');
-    dropcapChar = String.fromCodePoint(trimmed.codePointAt(0));
-    restText = trimmed.slice(dropcapChar.length);
-    element.innerHTML = `<span class="dropcap">${escHtml(dropcapChar)}</span>`;
-  }
-
-  const textNode = document.createTextNode('');
-  element.appendChild(textNode);
-
-  // 모션 최소화 선호 시 타이핑 애니메이션을 건너뛰고 본문을 즉시 표시(접근성).
-  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    textNode.nodeValue = restText;
-    element.classList.add('typing-done');
-    typingTimer = null;
-    if (callback) callback();
-    return;
-  }
-
-  function type() {
-    if (i < restText.length) {
-      textNode.nodeValue += restText[i];
-      i++;
-      const randomSpeed = Math.floor(Math.random() * (speedMax - speedMin + 1)) + speedMin;
-      typingTimer = setTimeout(type, randomSpeed);
-    } else {
-      element.classList.add('typing-done');
-      typingTimer = null;
-      if (callback) callback();
-    }
-  }
-  type();
-}
-
 function showStory(s) {
   currentStory = s;
   setStoryHash(s.id || s.story_id);   // 주소창을 이 글로 → 공유·새로고침·뒤로가기 가능
@@ -2942,8 +2897,8 @@ function showStory(s) {
   const sbEl = document.getElementById('story-body');
   sbEl.classList.toggle('no-dropcap', !leadsWithLetter(s.body));
   
-  // 실시간 타이핑 효과 렌더링
-  typeWriter(sbEl, s.body);
+  // 전문은 한 번에 표시한다. textContent로 줄바꿈을 보존하고 HTML은 실행하지 않는다.
+  sbEl.textContent = s.body || '';
 
   // 시적 오버레이 및 휘발성 연출
   const poeticOverlay = document.getElementById('poetic-overlay');
@@ -3216,19 +3171,27 @@ function extractDomain(url) {
 }
 
 // ── 투표 ───────────────────────────────────────────────────────────────────
+let voteStatusRequest = 0;
 async function refreshVoteStatus(storyId) {
   if (!storyId) return;
+  const requestId = ++voteStatusRequest;
   const token = session?.access_token || '';
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  const isCurrentRequest = () => requestId === voteStatusRequest
+    && token === (session?.access_token || '')
+    && storyId === (currentStory?.id || currentStory?.story_id);
   try {
     const resp = await fetch(`/api/vote/${storyId}/status`, { headers });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
+    // 인증 전 조회가 늦게 돌아와 로그인 후의 투표 여부를 덮어쓰지 않게 한다.
+    if (!isCurrentRequest()) return;
     renderVoteArea(storyId, data);
     if (data.vote_count >= data.threshold && !currentStory?.arweave_tx_id) {
       pollForArchive(storyId);
     }
   } catch (e) {
+    if (!isCurrentRequest()) return;
     console.error('[vote status]', e);
     // 투표 버튼이 showStory 에서 disabled 로 무력화된 채 남지 않게 복구 경로 제공.
     const btn = document.getElementById('btn-vote');
@@ -3648,9 +3611,33 @@ async function runVerification(txId, arweaveUrl) {
 }
 
 // ── 목록 ───────────────────────────────────────────────────────────────────
+const STORY_LIST_CACHE_KEY = 'hc_story_list_v1';
+const STORY_LIST_CACHE_TTL = 60 * 1000;
+
+function restoreStoryList() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(STORY_LIST_CACHE_KEY));
+    const age = Date.now() - saved?.savedAt;
+    if (!Number.isFinite(age) || age < 0 || age > STORY_LIST_CACHE_TTL
+        || !Array.isArray(saved?.stories) || saved.stories.length > 100
+        || !saved.stories.every(s => s && typeof s.id === 'string' && typeof s.body === 'string')) return;
+    allStories = saved.stories;
+    renderStoryList();
+    updateBadges();
+  } catch (_) { /* 저장소 차단·구버전 데이터는 일반 네트워크 조회로 폴백 */ }
+}
+
+function cacheStoryList(stories) {
+  try {
+    // 공개 목록만 이 탭에 잠시 보관. 검색 결과·인증·개인별 투표 여부는 캐시하지 않는다.
+    sessionStorage.setItem(STORY_LIST_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), stories }));
+  } catch (_) { /* 용량 부족·저장소 차단이 목록 표시를 막지 않게 한다. */ }
+}
+
 let storyListRequest = 0;
 async function loadStoryList() {
   const requestId = ++storyListRequest;
+  const query = searchQuery;
   const searchIcon = document.querySelector('.list-search-icon');
   if (searchIcon) {
     searchIcon.classList.add('spin');
@@ -3658,8 +3645,8 @@ async function loadStoryList() {
   }
   try {
     // 검색 중이면 q 를 붙여 전체 아카이브를 서버에서 검색(부분일치). 더 넓은 limit 으로 매칭 확보.
-    const url = searchQuery
-      ? `/api/stories?limit=200&q=${encodeURIComponent(searchQuery)}`
+    const url = query
+      ? `/api/stories?limit=200&q=${encodeURIComponent(query)}`
       : '/api/stories?limit=100';
     const resp = await fetch(url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -3670,6 +3657,7 @@ async function loadStoryList() {
     renderStoryList();
     updateBadges();
     updateSearchStatus();
+    if (!query) cacheStoryList(stories);
   } catch (e) {
     if (requestId !== storyListRequest) return;
     console.error('[stories] load failed', e);

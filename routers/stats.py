@@ -1,5 +1,7 @@
 """신호 누적 대시보드 API + 시계열."""
 
+import asyncio
+import threading
 import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -27,6 +29,8 @@ router = APIRouter(prefix="/api")
 _STATS_TTL = 60
 _stats_cache: dict = {"value": None, "expires_at": 0.0}
 _ts_cache: dict = {}  # days -> {"value", "expires_at"}
+_stats_lock = threading.Lock()
+_ts_lock = threading.Lock()
 
 
 def _count(table: str, build=None) -> int | None:
@@ -44,6 +48,18 @@ def _count(table: str, build=None) -> int | None:
 
 @router.get("/stats")
 async def get_stats():
+    # Supabase/로컬 DB 는 동기 클라이언트다. 수십 번의 집계 쿼리가 홈페이지의
+    # 이야기 응답까지 막지 않도록 워커에서 실행한다.
+    return await asyncio.to_thread(_get_stats_locked)
+
+
+def _get_stats_locked():
+    # 동시 첫 방문/캐시 만료 시 같은 집계를 중복 실행하지 않는다.
+    with _stats_lock:
+        return _get_stats()
+
+
+def _get_stats():
     now_t = time.time()
     if _stats_cache["value"] is not None and now_t < _stats_cache["expires_at"]:
         # 캐시본은 매번 새로 계산되는 hunter/collector 상태만 갱신해 신선도 유지
@@ -191,6 +207,15 @@ async def get_stats():
 @router.get("/stats/timeseries")
 async def timeseries(days: int = 30):
     """일별 신규/박제/삭제 감지 카운트. UI 차트용."""
+    return await asyncio.to_thread(_timeseries_locked, days)
+
+
+def _timeseries_locked(days: int):
+    with _ts_lock:
+        return _timeseries(days)
+
+
+def _timeseries(days: int):
     days = max(1, min(days, 90))
     now_t = time.time()
     cached = _ts_cache.get(days)

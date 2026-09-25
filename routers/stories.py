@@ -184,8 +184,26 @@ def _sanitize_search(q: str | None) -> str:
     return " ".join(cleaned.split())[:80]
 
 
+def _get_list_status_map(db, story_ids: list[str]) -> dict:
+    """목록 배지·임계값에 필요한 필드만 조회(상세의 추적 이력·지문은 제외)."""
+    if not story_ids:
+        return {}
+    resp = (
+        db.table("citation_checks")
+        .select("story_id,url,status,http_code,baseline_at")
+        .in_("story_id", story_ids)
+        .execute()
+    )
+    out: dict = {}
+    for row in resp.data or []:
+        out.setdefault(row["story_id"], {})[row["url"]] = row
+    return out
+
+
 @router.get("/stories")
-async def list_stories(limit: int = 50, q: str | None = None):
+def list_stories(limit: int = 50, q: str | None = None):
+    # Supabase/로컬 DB 와 동적 임계값 조회는 동기 API다. FastAPI 의 작업 스레드에서
+    # 전체 읽기를 실행해 첫 목록을 읽는 동안 다른 요청의 이벤트 루프를 막지 않는다.
     global _capture_cols_ok
     db = get_db()
     # 음수/0 limit 이 PostgREST 에서 500 나지 않게 하한도 클램프.
@@ -226,6 +244,11 @@ async def list_stories(limit: int = 50, q: str | None = None):
     resp = None
     last_err: Exception | None = None
     for cols, tier in attempts:
+        # 바로 앞 시도에서 부재가 확인된 컬럼은 같은 요청 안에서도 다시 질의하지 않는다.
+        if tier in ("both", "capture") and _capture_cols_ok is False:
+            continue
+        if tier in ("both", "value") and _value_col_ok is False:
+            continue
         try:
             resp = _query(cols)
             if tier in ("both", "capture"):
@@ -254,9 +277,9 @@ async def list_stories(limit: int = 50, q: str | None = None):
     # 출처 추적 상태는 배지/임계값 보조 정보일 뿐 — 조회가 실패해도 목록 자체는
     # 내려준다(추적 조회 한 번의 일시 오류로 전체 목록이 500 나지 않게).
     try:
-        status_map = await asyncio.to_thread(get_status_map, ids)
+        status_map = _get_list_status_map(db, ids)
     except Exception as e:
-        logger.warning(f"[stories] get_status_map 실패 — 추적 정보 없이 목록 반환: {e}")
+        logger.warning(f"[stories] 목록 추적 조회 실패 — 추적 정보 없이 목록 반환: {e}")
         status_map = {}
     for s in stories:
         _mask_pending(s)
@@ -276,7 +299,8 @@ async def list_stories(limit: int = 50, q: str | None = None):
 
 
 @router.get("/stories/{story_id}")
-async def get_story(story_id: str):
+def get_story(story_id: str):
+    # 상세 역시 전체 동기 DB 작업을 FastAPI 작업 스레드에서 처리한다.
     _ensure_uuid(story_id)
     db = get_db()
     resp = db.table("stories").select("*").eq("id", story_id).limit(1).execute()
@@ -286,17 +310,17 @@ async def get_story(story_id: str):
     _mask_pending(story)
 
     # 추적 정보 머지
-    status_map = await asyncio.to_thread(get_status_map, [story_id])
+    status_map = get_status_map([story_id])
     by_url = status_map.get(story_id, {})
 
     # 이 스토리에 추적 레코드가 없으면 (옛 데이터) 즉시 등록
     if not by_url and story.get("citations"):
-        await asyncio.to_thread(register_citations, story_id, story["citations"])
+        register_citations(story_id, story["citations"])
 
     # Wayback 스냅샷 상태 머지(조회 실패해도 본문은 내려가게 best-effort)
     cite_urls = [c.get("uri") for c in (story.get("citations") or [])]
     try:
-        wayback_by_url = await asyncio.to_thread(get_wayback_map, cite_urls)
+        wayback_by_url = get_wayback_map(cite_urls)
     except Exception:
         wayback_by_url = {}
 
