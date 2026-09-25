@@ -5,3 +5,7 @@
 ## 2025-02-24 - Inline Loading States and Keyboard Discoverability
 **Learning:** Adding a spinner to the search icon itself during an API call provides clear, immediate feedback without disrupting the layout. Additionally, indicating keyboard shortcuts in placeholders or tooltips (e.g. `/` for search and `Esc` for closing) improves discoverability for keyboard users.
 **Action:** Always consider using existing nearby icons for inline loading states rather than creating new spinner elements that may cause layout shifts. Provide keyboard shortcut hints in UI text whenever implementing global keyboard event listeners.
+
+## 2024-05-19 - Dynamic Aria-Labels and Empty State Focus Management
+**Learning:** For interactive UI elements where visual states (like icons) change, screen readers will read outdated information if the `aria-label` or `title` is static. Also, when dynamic elements like empty state buttons trigger a re-render of their parent container (destroying the button itself), keyboard focus is lost and resets to the document root, causing poor accessibility.
+**Action:** Dynamically update `aria-label` and `title` via JavaScript for icon-only toggle buttons (like theme switchers). For empty state CTAs that trigger re-renders, use inline `onclick` handlers (or attach listeners) to locate a logical next element in the new DOM and explicitly call `.focus({preventScroll: true})` on it to maintain user context.
