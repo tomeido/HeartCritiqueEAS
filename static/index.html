@@ -1603,14 +1603,26 @@ function applyTheme(t) {
   root.classList.remove('dark-theme', 'light-theme');
   if (t === 'dark') {
     root.classList.add('dark-theme');
-    if (btn) btn.textContent = '🌙';
+    if (btn) {
+      btn.textContent = '🌙';
+      btn.setAttribute('aria-label', '테마 변경 (현재: 어둡게)');
+      btn.setAttribute('title', '테마 변경 (현재: 어둡게)');
+    }
   } else if (t === 'light') {
     root.classList.add('light-theme');
-    if (btn) btn.textContent = '☀️';
+    if (btn) {
+      btn.textContent = '☀️';
+      btn.setAttribute('aria-label', '테마 변경 (현재: 밝게)');
+      btn.setAttribute('title', '테마 변경 (현재: 밝게)');
+    }
   } else {
     // auto
     const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (btn) btn.textContent = '🌗';
+    if (btn) {
+      btn.textContent = '🌗';
+      btn.setAttribute('aria-label', '테마 변경 (현재: 시스템)');
+      btn.setAttribute('title', '테마 변경 (현재: 시스템)');
+    }
   }
 }
 function toggleTheme() {
@@ -3773,7 +3785,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">🔍</div>
         <div class="empty-text">‘${escHtml(searchQuery)}’에 대한 검색 결과가 없습니다.</div>
-        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.getElementById('story-search-clear').click()">검색 지우기</button></div>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="const btn = document.getElementById('story-search-clear'); if (btn) { btn.click(); const input = document.getElementById('story-search'); if (input) input.focus({preventScroll: true}); }">검색 지우기</button></div>
       </div>`
       : currentFilter === 'mine'
         ? `
@@ -3781,13 +3793,13 @@ function renderStoryList() {
         <div class="empty-icon" aria-hidden="true">🗳</div>
         <div class="empty-text">아직 투표한 글이 없습니다.</div>
         <p class="muted text-sm" style="margin-top:8px">투표는 글을 Arweave 에 영구 박제할지 결정하는 인간의 결단입니다 — 여기에 당신의 기록이 쌓입니다.</p>
-        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector('.chip[data-filter=all]').click()">전체 보기로 돌아가기</button></div>
+        <div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="const chip = document.querySelector('.chip[data-filter=all]'); chip.click(); chip.focus({preventScroll: true});">전체 보기로 돌아가기</button></div>
       </div>`
         : `
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
-        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.gen-card\').scrollIntoView({ behavior: \'smooth\', block: \'start\' })">새 이야기 의뢰하기</button></div>'}
+        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="const chip = document.querySelector(\'.chip[data-filter=all]\'); chip.click(); chip.focus({preventScroll: true});">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="const gc = document.querySelector(\'.gen-card\'); gc.scrollIntoView({ behavior: \'smooth\', block: \'start\' }); const btn = gc.querySelector(\'.btn-gen-kindness\'); if(btn) btn.focus({preventScroll: true});">새 이야기 의뢰하기</button></div>'}
       </div>`;
     return;
   }
