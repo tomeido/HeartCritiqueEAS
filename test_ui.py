@@ -310,5 +310,72 @@ async def main():
             await browser.close()
 
 
+import pytest
+
+@pytest.mark.asyncio
+async def test_palette_micro_ux():
+    """Verify the micro-UX improvements (focus routing, disabled button feedback, toast on copy)."""
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        # Give permission to write to clipboard
+        browser = await p.chromium.launch()
+        context = await browser.new_context(permissions=['clipboard-read', 'clipboard-write'])
+        page = await context.new_page()
+
+        # We need to stub window.cfg so that the frontend doesn't throw when trying to render
+        await page.add_init_script("""
+            window.cfg = { vote_threshold: 3 };
+        """)
+
+        await page.goto("file:///app/static/index.html")
+
+        # Test 1: Check if .gen-card has the correct attributes for programmatic focus
+        print("Checking .gen-card attributes...")
+        gen_card = page.locator("#gen-card")
+        tabindex = await gen_card.get_attribute("tabindex")
+        style = await gen_card.get_attribute("style")
+        assert tabindex == "-1", "tabindex should be -1"
+        assert "outline: none" in style.lower(), "style should include outline: none"
+        print("Test 1 Passed!")
+
+        # Test 2: Check disabled button title attribute
+        print("Checking disabled button title attribute...")
+        btn_vote = page.locator("#btn-vote")
+        title = await btn_vote.get_attribute("title")
+        assert title == "로그인이 필요합니다", "title should be 로그인이 필요합니다"
+        print("Test 2 Passed!")
+
+        # Test 3: Trigger toast on copy wallet address
+        # We need to first make the wallet copy button visible
+        await page.evaluate("""
+            const walletBox = document.getElementById('wallet-box');
+            walletBox.style.display = 'block';
+            const copyBtn = document.getElementById('wallet-copy');
+            if (copyBtn) {
+                copyBtn.dataset.addr = '0x1234567890abcdef';
+                copyBtn.style.display = 'block';
+            }
+        """)
+
+        print("Testing wallet copy toast...")
+        copy_btn = page.locator("#wallet-copy")
+        await copy_btn.click()
+
+        toast = page.locator(".toast.success").last
+        await toast.wait_for(state="visible", timeout=2000)
+        toast_text = await toast.inner_text()
+        assert "지갑 주소가 복사되었습니다" in toast_text, f"Expected toast text not found, got {toast_text}"
+        print("Test 3 Passed!")
+
+        # Verify scrollFocus is defined
+        print("Checking scrollFocus exists...")
+        is_defined = await page.evaluate("typeof scrollFocus === 'function'")
+        assert is_defined, "scrollFocus should be defined as a function"
+        print("Test 4 Passed!")
+
+        await browser.close()
+
+
 if __name__ == "__main__":
     asyncio.run(main())
+    asyncio.run(test_palette_micro_ux())

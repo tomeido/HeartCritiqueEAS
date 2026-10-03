@@ -1316,7 +1316,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
   </header>
 
   <!-- 생성기 (사냥개 호출 CTA) -->
-  <div class="card gen-card">
+  <div class="card gen-card" id="gen-card" tabindex="-1" style="outline: none;">
     <p class="gen-eyebrow">오늘의 의뢰 · AI 사냥개 호출</p>
     <p class="copy" id="gen-copy">AI 사냥개에게 무엇을 시킬까요?
       <span class="gen-sub">커뮤니티 게시판(더쿠·블라인드·FM코리아·디시 등)과 뉴스에서 미담·폭로를 길어 올립니다</span>
@@ -1421,7 +1421,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
         <div class="vote-bar" id="vote-bar" role="progressbar" aria-label="공론화 투표 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
           <div class="vote-bar-fill" id="vote-bar-fill" style="width:0%"></div>
         </div>
-        <button class="btn-vote btn-sm" id="btn-vote" disabled>로그인 후 투표</button>
+        <button class="btn-vote btn-sm" id="btn-vote" title="로그인이 필요합니다" disabled>로그인 후 투표</button>
         <p class="vote-explain" id="vote-explain"></p>
         <div class="status" id="vote-status" role="status" aria-live="polite"></div>
       </div>
@@ -2477,6 +2477,7 @@ document.addEventListener('click', (e) => {
   navigator.clipboard?.writeText(btn.dataset.addr).then(() => {
     const old = btn.textContent;
     btn.textContent = '복사됨 ✓';
+    toast('지갑 주소가 복사되었습니다', 'success');
     setTimeout(() => { btn.textContent = old; }, 1500);
   }).catch(() => toast('복사 실패 — 주소를 직접 선택해 복사하세요', 'error'));
 });
@@ -3245,15 +3246,18 @@ function renderVoteArea(storyId, data) {
   }
 
   btn.removeAttribute('aria-busy');
+  btn.removeAttribute('title');
   if (data.vote_count >= data.threshold) {
     btn.innerHTML = '<span class="spin" aria-hidden="true"></span> Arweave 박제 진행 중…';
     btn.setAttribute('aria-busy', 'true');
     btn.className = 'btn-vote btn-sm';
     btn.disabled = true;
+    btn.setAttribute('title', '투표가 마감되어 Arweave 박제가 진행 중입니다');
   } else if (data.already_voted) {
     btn.textContent = '✓ 투표 완료';
     btn.className = 'btn-voted btn-sm';
     btn.disabled = true;
+    btn.setAttribute('title', '이미 투표를 완료했습니다');
   } else if (!session) {
     btn.textContent = guestMode ? '↻ 게스트 신원 준비하고 투표하기' : '🔑 로그인하고 투표하기';
     btn.className = 'btn-vote btn-sm';
@@ -3787,7 +3791,7 @@ function renderStoryList() {
       <div class="empty">
         <div class="empty-icon">${currentFilter === 'archived' ? '🗄' : '📭'}</div>
         <div class="empty-text">해당 카테고리의 이야기가 없습니다.</div>
-        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.gen-card\').scrollIntoView({ behavior: \'smooth\', block: \'start\' })">새 이야기 의뢰하기</button></div>'}
+        ${currentFilter !== 'all' ? '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="document.querySelector(\'.chip[data-filter=all]\').click()">전체 보기로 돌아가기</button></div>' : '<div style="margin-top:16px"><button class="btn-sm btn-outline" onclick="scrollFocus(document.getElementById(\'gen-card\'))">새 이야기 의뢰하기</button></div>'}
       </div>`;
     return;
   }
