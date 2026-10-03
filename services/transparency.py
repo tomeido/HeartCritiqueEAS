@@ -114,6 +114,7 @@ def build_snapshot() -> dict:
             ],
             "private": [
                 "captured_posts 원본 본문(raw) — 절대 공개하지 않음(PII·명예훼손 보호)",
+                "비공개 HTML·첨부 이미지·해시 manifest·오프라인 읽기 사본(로컬 영속 볼륨)",
                 "수동 검토 큐(pending_review/blocked_pii)의 내용",
             ],
             "never_done": [
@@ -145,7 +146,10 @@ def build_snapshot() -> dict:
                         "role": "출처 URL 삭제 추적(기준선 대비 변화 판정)"},
             "hunter": {"enabled": HUNTER_ENABLED, "role": "주기적 스토리 자동 생성"},
             "collector": {"enabled": COLLECTOR_ENABLED, "feeds": len(COMMUNITY_FEEDS),
-                          "role": "화제글 선제 캡처(비공개 보관) + 삭제 감시"},
+                          "role": "영속 발견 대기열 → 원문·이미지 비공개 보존 + 삭제 감시",
+                          "durable_discovery": True,
+                          "preservation_scope": "HTML + 본문에서 발견한 지원 이미지; 누락·잘림은 partial",
+                          "originals_public": False},
             "promoter": {"enabled": PROMOTER_ENABLED,
                          "auto_critique": PROMOTER_AUTO_CRITIQUE,
                          "min_volatility": PROMOTER_MIN_VOLATILITY,
@@ -220,7 +224,8 @@ def build_snapshot() -> dict:
             "untrackable_domains": sorted(UNTRACKABLE_DOMAINS),
             "bot_block_codes": list(BOT_BLOCK_CODES),
             "note": (
-                "안티봇 사이트는 직접 추적이 불가하며 Wayback 위임도 동일하게 막힌다. "
+                "정상 본문은 직접 관측하며, 접근 거부·보안 챌린지 응답은 추적 불가로 표시한다. "
+                "Wayback 위임도 안티봇에 막힐 수 있다. "
                 "프록시 관측(옵트인)이 켜져 있으면 soft 신호로만 보강한다. 프록시 사용 시 "
                 "출처 URL 이 프록시 사업자에 전달되는 트레이드오프가 있다."
             ),

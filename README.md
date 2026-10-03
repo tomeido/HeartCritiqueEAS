@@ -114,8 +114,21 @@ Docker
 
 ### 4) 선제 수집 & 삭제 감시 (Collector + Tracker) — "사라지기 전에 잡는다"
 - **왜 필요한가**: 검색(Tavily/구글)은 *이미 삭제된 글*을 구조적으로 가져올 수 없습니다 — 삭제되면 인덱스에서 사라지고, 검색은 살아남은 인기글(개념글/베스트)만 돌려주기 때문입니다. 따라서 `hunter`의 검색 경로만으로는 사실상 **'삭제되지 않을 글'만** 박제하게 됩니다. 진짜로 사라지는 글을 잡으려면 *살아있을 때 미리 잡아두고, 죽는 것을 감시*해야 합니다.
-- **Collector** (`COLLECTOR_ENABLED=true`): 커뮤니티 RSS를 주기적으로 폴링해 화제글을 살아있을 때 캡처하고, **본문·SHA256 해시·삭제확률 점수(`volatility_score`)**를 `captured_posts`(비공개 테이블)에 보관합니다. 한 주기 예산 안에서 삭제확률이 높은 글을 우선 캡처합니다.
+- **Collector** (`COLLECTOR_ENABLED=true`): RSS·공개 목록의 링크를 영속 대기열에 기록하고 사이트별 예산으로 본문·이미지를 캡처합니다. 본문·해시·점수·보존물 참조는 비공개 `captured_posts`에, HTML·이미지·manifest·오프라인 사본은 `data/captures`에 저장합니다. 실패한 첫 캡처도 재시도하며 최초 성공 원본은 덮어쓰지 않습니다.
 - **Tracker** (`compute_next_check` 적응형 주기): 캡처/출처 URL을 재방문해 삭제를 감지합니다. **HTTP 404/410(hard 삭제)**가 확인되면 `hard_deleted_at`을 기록합니다 — 이것이 '확정 삭제' 신호입니다. 본문 패턴·메인 리다이렉트 같은 *soft 신호*는 오탐(살아있는 글의 정상 UI에 매치) 가능성이 있어 자동 박제 트리거로 쓰지 않습니다.
+
+**수집 사이트 확인:** 화면 상단의 **수집 사이트**에서 사이트명·게시판·도메인을 검색하고,
+수집 대상 / 확인 필요 / 수집 제외로 필터링할 수 있습니다. 수집 방식, 마지막 확인 시각,
+새 링크·캡처 건수와 오류 사유를 함께 표시합니다. 가벼운 공개 API는 `GET /api/sources`입니다.
+
+카탈로그는 **23개 사이트·26개 목록**, 자동 수집 대상은 **12개 사이트·15개 목록**입니다.
+인벤 오픈이슈갤러리·루리웹 유머 베스트·퀘이사존 자유게시판을 추가했습니다.
+접근 제한 또는 허가가 필요한 11개 목록은 사유를 표시하고 자동 수집에서 제외합니다. 전체 게시판과 동작 설명은
+[수집 사이트 안내](docs/COMMUNITY_SOURCES.md), 단일 설정 목록은
+[`services/community_sources.py`](services/community_sources.py)를 참고하세요.
+
+보존물 검증과 Wayback/Common Crawl 과거 사본 복구 명령은
+[커뮤니티 아카이빙 운영 안내](docs/COMMUNITY_ARCHIVING_OPERATIONS.md)에 있습니다.
 
 ### 5) ★ 삭제 확정 글의 공개 박제 (Promoter) — 이 프로젝트의 핵심 가치
 
@@ -124,7 +137,7 @@ Docker
 ```text
 [검색의 한계]  Tavily/구글은 이미 삭제된 글을 못 준다 (인덱스에 없음, 살아남은 글만 줌)
        │  그래서 ↓ 살아있을 때 미리 잡는다
-[Collector]   RSS 폴링 → 화제글 본문+해시+삭제확률(volatility)을 captured_posts(비공개)에 보관
+[Collector]   RSS/공개 목록 폴링 → 화제글 본문+해시+삭제확률(volatility)을 captured_posts(비공개)에 보관
        │
 [Tracker]     적응형 주기로 재방문 → HTTP 404/410 확인 시 hard_deleted_at 기록 (= 확정 삭제)
        │
@@ -229,7 +242,7 @@ Docker
 | `IRYS_NETWORK` | 선택 | `devnet` | `devnet`(약 60일 임시 저장) 또는 `mainnet`(영구 저장, 가스비 소모). `devnet` 모드 시 UI에 임시 배지가 표시됩니다. |
 | `VOTE_THRESHOLD` | 선택 | `3` | 박제 트리거에 필요한 기본 투표수 |
 | `DYNAMIC_THRESHOLD` | 선택 | `true` | 활성 투표자 수 및 검열 신호에 따라 임계값 동적 변동 여부 |
-| `COLLECTOR_ENABLED` | 선택 | `false` | RSS 피드 선제 수집기 활성화 여부 (`migrations/006` 필요) |
+| `COLLECTOR_ENABLED` | 선택 | `false` | RSS·공개 목록 선제 수집기 활성화 여부 (`migrations/006` 및 `013` 필요) |
 | `PROMOTER_ENABLED` | 선택 | `false` | ★ 캡처→공개 승격기 활성화. hard 삭제된 캡처글을 익명 재작성·PII 게이트 후 공개 (`migrations/009` + `COLLECTOR_ENABLED=true` 필요) |
 | `PROMOTER_AUTO_CRITIQUE` | 선택 | `false` | `critique`(기업 비위) 캡처도 자동 승격할지. 기본은 수동 검토(`pending_review`, 명예훼손 노출 최소화) |
 | `PROMOTER_MIN_VOLATILITY` | 선택 | `0` | 승격 최소 삭제확률(0~10). 높일수록 저가치 잡담을 걸러내고 고위험 글만 공개 (hard 삭제가 이미 강한 게이트) |
@@ -267,6 +280,7 @@ cp .env.example .env
 # - migrations/010_cleanup_preserve_captures.sql     (미박제 글 정리 시 캡처 승격글 보존)
 # - migrations/011_value_score.sql                   (아카이브 가치 점수 저장 — 승격 우선순위)
 # - migrations/012_story_value_score.sql             (선택: 승격 글에 아카이브 가치 점수 승계·표시)
+# - migrations/013_discovery_queue.sql               (영속 발견 큐·원문 보존물 참조)
 
 # 3. Docker 컨테이너 빌드 및 실행
 docker compose up -d
@@ -351,6 +365,8 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
+`pytest.ini`는 단위 테스트 경로를 `tests/`로 제한하여 운영 `data/`와 로컬 연구 파일을 탐색하지 않습니다.
+
 - `tests/test_localdb.py` — SQLite 로컬 백엔드의 supabase-py 호환 계약(에러코드·필터·정렬·RPC) 고정
 - `tests/test_nativetext.py` — Rust 텍스트 파이프라인과 파이썬 폴백의 결과 완전 일치(픽스처+퍼즈 200케이스). 로컬에 `hc_native`가 없으면 Rust 쪽 패리티는 자동 건너뛰므로, 완전 검증은 휠이 설치된 Docker 이미지 안에서 실행합니다:
   ```bash
@@ -414,4 +430,3 @@ pytest
 
 
 https://github.com/user-attachments/assets/5bb99954-6c67-4204-9ff4-72f7c41a9db4
-

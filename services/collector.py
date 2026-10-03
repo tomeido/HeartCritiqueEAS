@@ -8,15 +8,16 @@
 tracker 의 감지 엔진을 그대로 재사용해 주기적으로 삭제를 감시한다.
 
 봇탐지 최소화 원칙(직접 긁는 양을 최소화):
-  · 공식 RSS 가 살아있는 사이트만 1차 대상(직접 스크래핑 최소화). 실측 확인 목록은
-    COMMUNITY_FEEDS 참고. FM코리아는 안티봇 챌린지(430)라 제외(tracker 의 추적불가와 동일).
-  · 피드에서 '신규 글 ID' 만 추려, 본문은 이미 본 글을 빼고 '정확히 1회'만 GET.
+  · 공식 RSS 또는 공개 HTML 목록을 폴링한다. 수집 대상·보류 사유는
+    services.community_sources 의 카탈로그에서 한 번에 관리한다.
+  · 신규 URL 을 DB 대기열에 먼저 저장하고, 실패는 지수 백오프로 재시도한다.
+  · 첫 정상 본문·HTML·미디어를 보존하며 기존 원본은 덮어쓰지 않는다.
   · 요청 사이에 지터, 봇차단 코드(403/429/430/503)엔 그 출처를 이번 주기 건너뜀.
   · SSRF 방어·EUC-KR 디코딩·삭제 판정은 services.tracker 의 검증된 함수를 재사용.
 
 ⚠️ captured_posts 는 비공개(service_role 전용, migrations/006). 본문 전체를 보관하므로
    공개 API/Arweave 박제로 내보내려면 PII 마스킹·사인 배제 등 법적 가드레일이 선행돼야
-   한다(이 MVP 는 '수집 + 삭제 감시'까지만; 스토리 승격·공개는 미구현).
+   한다(공개 승격은 services.promoter 의 별도 가드레일을 통과해야 한다).
 """
 
 import asyncio
@@ -27,10 +28,13 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from services.community_sources import COMMUNITY_SOURCES, parse_html_source
 from services.db import get_db
+from services import discovery
 from services.tracker import (
     BOT_BLOCK_CODES,
     MAX_REDIRECTS,
@@ -126,26 +130,14 @@ MAX_FEED_BYTES = 2_000_000   # 피드 본문 상한 2MB
 _JITTER_LO = float(os.environ.get("COLLECTOR_JITTER_LO", "1.5"))
 _JITTER_HI = float(os.environ.get("COLLECTOR_JITTER_HI", "4.0"))
 
-# 실측 확인된 공식 RSS + HTML 목록 (source_domain, feed_url). 전 피드 가동 재확인: 2026-06-11.
-# (더쿠 HOT HTML 접근성 재확인: 2026-07-04 — 챌린지 없음, 목록 정상 파싱)
-# 제외:
-#   · 디시인사이드: 공식 RSS 없음 → HTML 목록 폴링(2차 과제) 보류.
-#   · FM코리아: 안티봇 챌린지(430) → tracker.UNTRACKABLE_DOMAINS 와 일관되게 제외.
+# 수집 루프와 공개 목록은 같은 카탈로그를 사용한다. 기존 (domain, url) 계약은 유지.
 COMMUNITY_FEEDS = [
-    ("ppomppu.co.kr",      "http://www.ppomppu.co.kr/rss.php?id=ppomppu"),
-    ("ppomppu.co.kr",      "http://www.ppomppu.co.kr/rss.php?id=freeboard"),
-    ("ruliweb.com",        "https://bbs.ruliweb.com/news/rss"),
-    ("mlbpark.donga.com",  "https://mlbpark.donga.com/mp/rss.php"),
-    ("inven.co.kr",        "https://www.inven.co.kr/webzine/news/rss.php"),
-    ("clien.net",          "https://www.clien.net/service/board/park"),
-    ("bobaedream.co.kr",    "https://bobaedream.co.kr/list?code=freeb"),
-    # 더쿠: RSS 는 잠겼지만(2026-06-11 '피드 기능이 잠겨 있습니다') HOT 목록 HTML 은 열려
-    # 있다. 미담(여초 미담 활발)·비위(사회 이슈) 양쪽의 핵심 소스(llm.DOMAINS_* 참고).
-    ("theqoo.net",         "https://theqoo.net/hot"),
-    # 네이트판: 일반인 익명 사연의 메카(llm.DOMAINS_KINDNESS 1순위). RSS 없음 → 일간
-    # 랭킹(톡커들의 선택) HTML 폴링. 목록이 본문 미리보기(dd.txt)까지 줘 예비 점수가 정확.
-    ("pann.nate.com",      "https://pann.nate.com/talk/ranking"),
+    (source["domain"], source["url"])
+    for source in COMMUNITY_SOURCES if source["enabled"]
 ]
+_SOURCE_BY_URL = {source["url"]: source for source in COMMUNITY_SOURCES}
+_source_results: dict[str, dict] = {}
+_feed_cursor = 0  # 예산이 피드 수보다 작아도 매 주기 시작점을 돌려 모든 출처에 기회를 준다.
 
 # 모듈 상태 (대시보드/stats 용)
 _last_poll_at: Optional[datetime] = None
@@ -163,6 +155,37 @@ def get_status() -> dict:
         "last_poll_at": _last_poll_at.isoformat() if _last_poll_at else None,
         "last_result": _last_result,
     }
+
+
+def get_sources_status() -> dict:
+    """DB 조회 없이 공개 카탈로그와 이 프로세스의 최근 폴링 결과만 반환한다.
+
+    본문·제목·원문 작성자·DB 오류 메시지는 포함하지 않는다. 재시작 뒤에는 미확인으로
+    돌아간다. enabled 는 수집 대상 설정이며 실제 작동 여부는 최상위 enabled 와 구분한다.
+    """
+    sources = []
+    for source in COMMUNITY_SOURCES:
+        result = {
+            "status": "pending" if source["enabled"] else "disabled",
+            "last_checked_at": None, "http_code": None, "discovered": 0,
+            "captured": 0, "attempted": 0, "capture_errors": 0, "error": None,
+        }
+        if source["enabled"]:
+            result.update(_source_results.get(source["url"], {}))
+        sources.append({**source, **result})
+    return {**get_status(), "sources": sources}
+
+
+def _parse_source(source: str, feed_url: str, raw: bytes) -> list[dict]:
+    parser = _SOURCE_BY_URL.get(feed_url, {}).get("parser", "rss")
+    parsers = {
+        "rss": _parse_feed, "clien": _parse_clien_html,
+        "bobaedream": _parse_bobaedream_html, "theqoo": _parse_theqoo_html,
+        "pann": _parse_pann_html,
+    }
+    if parser in parsers:
+        return parsers[parser](raw)
+    return parse_html_source(parser, raw)
 
 
 def _local(tag: str) -> str:
@@ -199,6 +222,13 @@ def _parse_feed(raw: bytes) -> list[dict]:
         if not link and guid and guid.startswith("http"):
             link = guid
         if link and link.startswith("http"):
+            # 공식 뽐뿌 RSS 는 HTTP 글 주소를 주지만 해당 페이지는 JS 로 HTTPS 이동한다.
+            # JS 를 실행하지 않는 수집기도 실제 본문을 받을 수 있도록 정규화한다.
+            parsed = urlsplit(link)
+            if (parsed.scheme == "http" and parsed.hostname
+                    and (parsed.hostname == "ppomppu.co.kr"
+                         or parsed.hostname.endswith(".ppomppu.co.kr"))):
+                link = urlunsplit(parsed._replace(scheme="https"))
             out.append({
                 "title": title,
                 "url": link,
@@ -377,84 +407,109 @@ async def _fetch_feed(url: str, client: httpx.AsyncClient) -> tuple[Optional[byt
 
 
 def _existing_urls(db, urls: list[str]) -> set:
-    """이미 잡아둔 글 URL 집합. 조회 실패 시 '전부 기존'으로 간주해(빈 신규) 중복 캡처 폭주 방지."""
+    """기존 URL 집합. 조회 실패는 호출부에서 해당 피드를 건너뛰고 오류로 표시한다."""
     if not urls:
         return set()
     try:
-        resp = db.table("captured_posts").select("url").in_("url", urls).execute()
-        return {r["url"] for r in (resp.data or [])}
+        resp = (db.table("captured_posts").select("url,captured_at,status,http_code")
+                .in_("url", urls).execute())
+        # 최초 접근이 일시 차단/오류였던 글은 본문을 아직 확보하지 못했다.
+        # 다음 폴링에서 다시 시도하되 이미 보관했거나 hard 삭제된 글은 건너뛴다.
+        return {r["url"] for r in (resp.data or [])
+                if r.get("captured_at") or (r.get("status") == "deleted"
+                                           and r.get("http_code") in (404, 410))}
     except Exception as e:
         logger.warning(f"[collector] existing 조회 실패: {e}")
-        return set(urls)
+        raise RuntimeError("captured URL lookup failed") from e
 
 
-async def _capture(db, source: str, feed_url: str, item: dict,
-                   client: httpx.AsyncClient) -> bool:
-    """신규 글 1건의 본문을 1회 GET 해 captured_posts 에 저장(콜드스타트 = 기준선 캡처)."""
-    url = item["url"]
-    obs = await fetch_observation(url, client, capture_text=True)
-    res = decide_status(obs, url, None)   # 콜드스타트: 기준선 없음
-    now_dt = datetime.now(timezone.utc)
-    now_iso = now_dt.isoformat()
+async def _first_capture_payload(obs: dict, res: dict, now_iso: str,
+                                 client: httpx.AsyncClient) -> dict:
+    """Prepare an immutable first snapshot only after article/artifact validation."""
+    if obs.get("net") != "ok" or res["status"] != "live":
+        return {}
     text = obs.get("text")
-    captured_ok = obs.get("net") == "ok" and bool(text)
-
-    row = {
-        "source": source,
-        "feed": feed_url,
-        "url": url,
-        "guid": item.get("guid"),
-        "title": item.get("title"),
-        "rss_summary": item.get("summary"),
-        "status": res["status"],
-        "http_code": res["http_code"],
-        "reason": res["reason"],
-        "last_checked": now_iso,
-        "check_count": 1,
-        "content_hash": obs.get("text_hash"),
-        "body_text": text if captured_ok else None,
-        "captured_at": now_iso if captured_ok else None,
+    if not text and not (obs.get("media_urls") and obs.get("capture")):
+        return {}
+    payload = {
+        "body_text": text or None,
+        "content_hash": obs.get("article_hash") or obs.get("text_hash"),
+        "captured_at": now_iso,
     }
-    if res.get("baseline"):
-        b = res["baseline"]
-        row.update({
-            "baseline_final_url": b["final_url"],
-            "baseline_len": b["len"],
-            "baseline_hash": b.get("hash"),
-            "baseline_del_match": b["del_match"],
-            "baseline_blk_match": b["blk_match"],
-            "baseline_at": now_iso,
+    if obs.get("capture"):
+        from services.preservation import preserve_capture
+        manifest = await preserve_capture(obs["capture"], client)
+        payload.update({
+            "capture_manifest_path": manifest["manifest_path"],
+            "capture_manifest_sha256": manifest["manifest_sha256"],
+            "capture_state": manifest["state"],
         })
-    if res["status"] == "deleted":
-        row["deleted_at"] = now_iso
-    # 점수 산출 소스: 본문 있으면 본문, 없으면 제목+RSS요약.
-    vsrc = text or item.get("summary") or ""
-    if _promotion_cols(db):
-        # 결정적 삭제확률(0~10): 캡처/모니터링 우선순위·UI 배지 전용
-        # (생성 게이트·임계값·박제 결정엔 미주입).
-        row["volatility_score"] = predict_volatility(item.get("title"), vsrc, url)["score"]
-        # 드물게 캡처 시점에 이미 hard 삭제(404/410)면 기록. 단 본문이 없으면 승격 불가.
-        if res["status"] == "deleted" and res.get("http_code") in (404, 410):
-            row["hard_deleted_at"] = now_iso
-    if _value_col(db):
-        # 결정적 아카이브 가치(0~10, docs/ARCHIVAL_CRITERIA.md): volatility 와 동일하게
-        # 선별·우선순위·UI 전용. 본문 확보 후 재산출하므로 발견 시 예비 점수보다 정확하다.
-        row["value_score"] = assess_value(item.get("title"), vsrc)["score"]
-    nxt, ec = compute_next_check(res["status"], 1, 0, now_dt)
-    row["next_check_at"] = nxt
-    row["error_count"] = ec
+        # HTML referencing an unavailable image is insufficient evidence for an
+        # image-only article. Keep the partial manifest, but retry first capture.
+        if not text and not manifest.get("media_saved"):
+            payload.pop("captured_at")
+            payload.pop("content_hash")
+    return payload
 
-    try:
-        # 같은 주기에 두 피드가 같은 글을 올려도 멱등(url unique).
-        db.table("captured_posts").upsert(row, on_conflict="url").execute()
-    except Exception as e:
-        logger.warning(f"[collector] capture 저장 실패 {url}: {e}")
-        return False
-    # 살아있을 때 Wayback 위임 큐에 적재(삭제 대비 외부 스냅샷). 기능 꺼졌으면 no-op.
+
+def _enqueue_wayback(url: str) -> None:
     try:
         wayback_enqueue(url)
     except Exception as e:
         logger.warning(f"[collector] wayback enqueue 실패 {url}: {e}")
+
+
+async def _capture(db, source: str, feed_url: str, item: dict,
+                   client: httpx.AsyncClient) -> bool:
+    """Capture once; retry failed first requests without overwriting original evidence."""
+    url = item["url"]
+    # An idempotent metadata insert followed by a conditional update protects
+    # earlier evidence even if another worker captures between discovery and GET.
+    db.table("captured_posts").upsert({
+        "source": source, "feed": feed_url, "url": url,
+        "guid": item.get("guid"), "title": item.get("title"),
+        "rss_summary": item.get("summary"),
+        **({"first_seen": item["first_seen"]} if item.get("first_seen") else {}),
+    }, on_conflict="url", ignore_duplicates=True).execute()
+    current = db.table("captured_posts").select("*").eq("url", url).limit(1).execute().data[0]
+    if current.get("captured_at") or current.get("body_text"):
+        return True
+    if current.get("status") == "deleted" and current.get("http_code") in (404, 410):
+        return False
+    obs = await fetch_observation(url, client, capture_text=True, capture_artifacts=True)
+    res = decide_status(obs, url, _baseline_from_row(current))
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    try:
+        capture = await _first_capture_payload(obs, res, now_iso, client)
+        if capture and not capture.get("captured_at"):
+            res = {"status": "error", "http_code": obs.get("http_code"),
+                   "reason": "image-only article media unavailable", "baseline": None}
+    except Exception:
+        logger.exception("[collector] artifact 저장 실패: %s", source)
+        capture = {}
+        res = {"status": "error", "http_code": obs.get("http_code"),
+               "reason": "capture artifact storage failed", "baseline": None}
+    row = _build_update(res, current, now_iso, adaptive=True, now=now_dt)
+    row.update(capture)
+    if res["status"] == "deleted" and not current.get("deleted_at"):
+        row["deleted_at"] = now_iso
+    vsrc = obs.get("text") or item.get("summary") or ""
+    if _promotion_cols(db):
+        row["volatility_score"] = predict_volatility(item.get("title"), vsrc, url)["score"]
+        if res["status"] == "deleted" and res.get("http_code") in (404, 410):
+            row["hard_deleted_at"] = current.get("hard_deleted_at") or now_iso
+    if _value_col(db):
+        row["value_score"] = assess_value(item.get("title"), vsrc)["score"]
+    try:
+        saved = (db.table("captured_posts").update(row).eq("url", url)
+                 .is_("captured_at", "null").is_("body_text", "null").execute().data)
+    except Exception as e:
+        logger.warning(f"[collector] capture 저장 실패 {url}: {e}")
+        return False
+    if not capture.get("captured_at") or not saved:
+        return False
+    _enqueue_wayback(url)
     return True
 
 
@@ -463,78 +518,121 @@ async def poll_feeds(client: httpx.AsyncClient) -> dict:
     반환: {discovered, captured, skipped_ads}. 광고·거래 글(hard negative)은 캡처하지
     않으므로 DB 에 남지 않고, 피드에 머무는 동안 매 주기 재발견·재스킵된다(HTTP 비용 0).
 
-    공정 분배: 발견(모든 피드)과 캡처를 분리하고, 캡처는 피드별로 한 건씩 번갈아 가져가는
-    라운드로빈으로 주기 예산(COLLECTOR_MAX_CAPTURE_PER_CYCLE)을 소진한다. 한 고volume 피드
-    (예: ppomppu)가 예산을 독식해 다른 커뮤니티가 한 번도 수집 안 되는 일을 막는다.
-    신규가 적은 피드는 자기 몫만 쓰고, 남은 예산은 다른 피드가 채운다(낭비 없음)."""
+    모든 발견 URL 은 예산 사용 전에 영속 대기열에 저장한다. 캡처는 도메인별 한 건씩
+    돌아가며 주기 예산을 쓴다. 마지막 시도 시각·실패 백오프도 DB 에 저장하므로
+    재시작하거나 글이 목록에서 사라져도 재시도와 출처별 공정 분배가 유지된다."""
+    global _feed_cursor
     db = get_db()
     discovered = 0
     skipped_ads = 0
+    scheduled_urls: set[str] = set()
 
-    # 1) 발견: 모든 피드에서 신규 항목만 추린다(피드 본문은 가벼워 전부 폴링).
-    per_feed: list[tuple[str, str, list]] = []
-    for source, feed_url in COMMUNITY_FEEDS:
-        raw, code = await _fetch_feed(feed_url, client)
-        await _sleep_jitter()
+    # 매 주기 시작점 회전: 신규 출처가 예산보다 많아져도 뒤쪽 피드를 굶기지 않는다.
+    feeds = list(COMMUNITY_FEEDS)
+    if feeds:
+        offset = _feed_cursor % len(feeds)
+        feeds = feeds[offset:] + feeds[:offset]
+        _feed_cursor = (offset + 1) % len(feeds)
+
+    # 1) 발견: 모든 피드에서 신규 항목만 추린다.
+    for source, feed_url in feeds:
+        result = {
+            "status": "pending", "last_checked_at": datetime.now(timezone.utc).isoformat(),
+            "http_code": None, "discovered": 0, "captured": 0,
+            "attempted": 0, "capture_errors": 0, "error": None,
+        }
+        _source_results[feed_url] = result
         new_items: list = []
-        if raw is None:
-            if code in BOT_BLOCK_CODES:
-                logger.info(f"[collector] {source} 봇차단/일시거부({code}) — 이번 주기 건너뜀")
-        else:
-            if source == "clien.net":
-                items = _parse_clien_html(raw)[:COLLECTOR_FEED_ITEMS]
-            elif source == "bobaedream.co.kr":
-                items = _parse_bobaedream_html(raw)[:COLLECTOR_FEED_ITEMS]
-            elif source == "theqoo.net":
-                items = _parse_theqoo_html(raw)[:COLLECTOR_FEED_ITEMS]
-            elif source == "pann.nate.com":
-                items = _parse_pann_html(raw)[:COLLECTOR_FEED_ITEMS]
+        try:
+            raw, code = await _fetch_feed(feed_url, client)
+            result["http_code"] = code
+            if raw is None:
+                result["status"] = "blocked" if code in BOT_BLOCK_CODES else "error"
+                result["error"] = (f"HTTP {code}: 목록을 가져오지 못했습니다."
+                                   if code else "목록 요청에 실패했습니다. 다음 주기에 재시도합니다.")
             else:
-                items = _parse_feed(raw)[:COLLECTOR_FEED_ITEMS]
-            urls = [it["url"] for it in items]
-            existing = _existing_urls(db, urls) if urls else set()
-            new_items = [it for it in items if it["url"] not in existing]
-            discovered += len(new_items)
-            # 광고·거래 글(hard negative, docs/ARCHIVAL_CRITERIA.md §3)은 본문 GET 예산
-            # 자체를 쓰지 않는다 — 무가치 글에 요청을 낭비하지 않는 정중한 폴링 원칙.
-            kept = []
-            for it in new_items:
-                va = assess_value(it.get("title"), it.get("summary"))
-                if va["hard_negative"]:
-                    skipped_ads += 1
-                    continue
-                # 예산이 빠듯할 때 '곧 지워질 && 지워지면 아까운' 글부터 캡처하도록
-                # 삭제위험+가치 결합 예비 점수(제목+RSS요약 기반)로 피드 내 정렬(stable).
-                # 교차-피드 공정 라운드로빈(아래)은 그대로 유지된다.
-                it["_priority"] = va["score"] + predict_volatility(
-                    it.get("title"), it.get("summary") or "", it.get("url") or ""
-                )["score"]
-                kept.append(it)
-            kept.sort(key=lambda it: it["_priority"], reverse=True)
-            new_items = kept
-        per_feed.append((source, feed_url, new_items))
+                items = _parse_source(source, feed_url, raw)[:COLLECTOR_FEED_ITEMS]
+                result["status"] = "ok" if items else "empty"
+                if not items:
+                    result["error"] = "목록에서 글을 찾지 못했습니다. 접근 제한 또는 목록 구조를 확인해 주세요."
+                urls = [it["url"] for it in items]
+                existing = _existing_urls(db, urls) if urls else set()
+                for it in items:
+                    if it["url"] in existing or it["url"] in scheduled_urls:
+                        continue
+                    scheduled_urls.add(it["url"])
+                    new_items.append(it)
+                result["discovered"] = len(new_items)
+                discovered += len(new_items)
+                kept = []
+                for it in new_items:
+                    va = assess_value(it.get("title"), it.get("summary"))
+                    if va["hard_negative"]:
+                        skipped_ads += 1
+                        continue
+                    it["_priority"] = va["score"] + predict_volatility(
+                        it.get("title"), it.get("summary") or "", it.get("url") or ""
+                    )["score"]
+                    kept.append(it)
+                kept.sort(key=lambda it: it["_priority"], reverse=True)
+                new_items = kept
+                # Persist every eligible discovery before consuming capture budget.
+                # Backlog survives feeds changing, application restart, and failures.
+                discovery.enqueue(db, source, feed_url, new_items)
+        except Exception:
+            # 한 사이트의 구조 변경/파싱 실패가 다른 출처의 수집을 막지 않는다.
+            logger.exception("[collector] 목록 처리 실패: %s", source)
+            result["status"] = "error"
+            result["error"] = "목록 처리에 실패했습니다. 다음 주기에 재시도합니다."
+            new_items = []
+        await _sleep_jitter()
 
-    # 2) 캡처: 라운드로빈(피드당 1건씩 돌아가며) 예산 소진. 본문은 신규 1건당 정확히 1회 GET.
-    budget = COLLECTOR_MAX_CAPTURE_PER_CYCLE
+    # 2) Drain the durable backlog, including posts no longer present in any feed.
+    # Source cooldowns and attempt order are persisted, so restarts stay fair.
+    budget = max(0, COLLECTOR_MAX_CAPTURE_PER_CYCLE)
+    per_source = discovery.ready(db, [source for source, _ in feeds], budget)
     captured = 0
-    idx = [0] * len(per_feed)
+    idx = [0] * len(per_source)
     progressed = True
     while budget > 0 and progressed:
         progressed = False
-        for i, (source, feed_url, new_items) in enumerate(per_feed):
+        for i, (source, candidates) in enumerate(per_source):
             if budget <= 0:
                 break
-            if idx[i] >= len(new_items):
+            if idx[i] >= len(candidates):
                 continue
-            it = new_items[idx[i]]
+            candidate = candidates[idx[i]]
             idx[i] += 1
             progressed = True
-            if await _capture(db, source, feed_url, it, client):
+            it = discovery.claim(db, candidate)
+            if it is None:
+                continue
+            feed_url = it["feed"]
+            result = _source_results.get(feed_url)
+            if result is not None:
+                result["attempted"] += 1
+            try:
+                success = await _capture(db, source, feed_url, it, client)
+            except Exception:
+                logger.exception("[collector] 본문 캡처 실패: %s", source)
+                success = False
+            discovery.finish(db, it, success)
+            if success:
                 captured += 1
+                if result is not None:
+                    result["captured"] += 1
+            else:
+                if result is not None:
+                    result["capture_errors"] += 1
+                    result["status"] = "error"
+                    result["error"] = f"본문 확보 또는 저장 실패 {result['capture_errors']}건."
+                # A domain's blocked request pauses all its feeds for this cycle.
+                idx[i] = len(candidates)
             budget -= 1
             await _sleep_jitter()
 
-    return {"discovered": discovered, "captured": captured, "skipped_ads": skipped_ads}
+    return {"discovered": discovered, "captured": captured, "skipped_ads": skipped_ads,
+            **discovery.summary(db)}
 
 
 async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> int:
@@ -552,14 +650,17 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
     promo = promo_state
     now_iso = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     cols = (
-        "id,url,check_count,status,http_code,error_count,"
+        "id,url,title,captured_at,body_text,check_count,status,http_code,error_count,"
         "baseline_final_url,baseline_len,baseline_hash,"
         "baseline_del_match,baseline_blk_match,baseline_at"
     )
     if promo:
         cols += ",hard_deleted_at"
+    disabled_domains = {
+        source["domain"] for source in COMMUNITY_SOURCES if not source["enabled"]
+    } - {source["domain"] for source in COMMUNITY_SOURCES if source["enabled"]}
     try:
-        resp = (
+        query = (
             db.table("captured_posts")
             .select(cols)
             .or_(RECHECK_QUEUE_FILTER)
@@ -567,8 +668,12 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
             .or_(_due_filter(now_iso))
             .order("next_check_at", desc=False, nullsfirst=True)
             .limit(batch_size)
-            .execute()
         )
+        # A disabled catalog domain must not continue receiving automated GETs
+        # through previously captured rows. Existing evidence stays untouched.
+        if disabled_domains:
+            query = query.not_.in_("source", sorted(disabled_domains))
+        resp = query.execute()
     except Exception as e:
         logger.warning(f"[collector] recheck 조회 실패: {e}")
         return 0
@@ -581,7 +686,9 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
     newly_hard = 0
     async with httpx.AsyncClient(max_redirects=MAX_REDIRECTS) as client:
         for row in rows:
-            obs = await fetch_observation(row["url"], client)
+            needs_capture = not row.get("captured_at") and not row.get("body_text")
+            obs = await fetch_observation(row["url"], client, capture_text=needs_capture,
+                                          capture_artifacts=needs_capture)
             res = decide_status(obs, row["url"], _baseline_from_row(row))
             prev = row.get("status")
             now_dt = datetime.now(timezone.utc)
@@ -589,7 +696,21 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
             # tracker 와 동일한 payload(상태·기준선·적응형 스케줄)를 공용 헬퍼로 생성.
             # captured_posts 는 적응형 컬럼이 항상 있으므로 adaptive=True. deleted_at·
             # newly_deleted 는 _build_update 가 다루지 않으므로 여기서 처리한다.
+            capture = {}
+            if needs_capture:
+                try:
+                    capture = await _first_capture_payload(obs, res, ni, client)
+                    if capture and not capture.get("captured_at"):
+                        res = {"status": "error", "http_code": obs.get("http_code"),
+                               "reason": "image-only article media unavailable", "baseline": None}
+                except Exception:
+                    logger.exception("[collector] 재검사 artifact 저장 실패")
+                    res = {"status": "error", "http_code": obs.get("http_code"),
+                           "reason": "capture artifact storage failed", "baseline": None}
             upd = _build_update(res, row, ni, adaptive=True, now=now_dt)
+            upd.update(capture)
+            if capture.get("captured_at") and _value_col(db):
+                upd["value_score"] = assess_value(row.get("title"), obs.get("text"))["score"]
             if res["status"] == "deleted" and prev != "deleted":
                 upd["deleted_at"] = ni
                 newly_deleted += 1
@@ -602,7 +723,16 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
                 upd["hard_deleted_at"] = ni
                 newly_hard += 1
             try:
-                db.table("captured_posts").update(upd).eq("id", row["id"]).execute()
+                query = db.table("captured_posts").update(upd).eq("id", row["id"])
+                if capture:
+                    query = query.is_("captured_at", "null").is_("body_text", "null")
+                saved = query.execute().data
+                if capture.get("captured_at") and saved:
+                    _enqueue_wayback(row["url"])
+                    discovery.resolve(db, row["url"], "captured")
+                elif (saved and res["status"] == "deleted"
+                      and res.get("http_code") in (404, 410)):
+                    discovery.resolve(db, row["url"], "deleted")
             except Exception as e:
                 logger.warning(f"[collector] recheck 갱신 실패 {row['id']}: {e}")
             await _sleep_jitter()
@@ -615,7 +745,9 @@ async def recheck_captured_batch(batch_size: int = COLLECTOR_RECHECK_BATCH) -> i
 
 def _table_exists() -> bool:
     try:
-        get_db().table("captured_posts").select("id").limit(1).execute()
+        db = get_db()
+        db.table("captured_posts").select("id,capture_manifest_path").limit(1).execute()
+        db.table("discovery_queue").select("id").limit(1).execute()
         return True
     except Exception:
         return False
@@ -629,7 +761,7 @@ async def background_loop() -> None:
         logger.info("[collector] 비활성화 (COLLECTOR_ENABLED=false)")
         return
     if not _table_exists():
-        logger.warning("[collector] captured_posts 테이블 없음 — migrations/006 적용 후 "
+        logger.warning("[collector] 수집 스키마 없음 — migrations/006 및 013 적용 후 "
                        "COLLECTOR_ENABLED=true 로 켜세요. 루프 중단.")
         return
 

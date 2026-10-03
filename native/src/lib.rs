@@ -8,8 +8,8 @@
 //!   · 탐지 패턴(삭제/차단/봇)은 **파이썬 쪽 re.compile 원본 문자열을 그대로 받아**
 //!     컴파일한다(이중 정의 드리프트 방지). rust regex 가 못 받는 문법(역참조·룩어라운드)이
 //!     들어오면 컴파일 에러 → 파이썬 쪽 래퍼가 순수 파이썬 폴백으로 전환한다.
-//!   · visible_text 의 구조 정규식 4종은 알고리즘의 일부라 여기 고정 재현한다.
-//!     원본 `<(script|style|noscript|template)\b.*?</\1>` 의 역참조는 rust regex 미지원
+//!   · visible_text 의 구조 정규식은 알고리즘의 일부라 여기 고정 재현한다.
+//!     원본 `<(script|style|noscript|template)\b.*?(?:</\1\s*>|\Z)` 의 역참조는 rust regex 미지원
 //!     → 태그별 4개 대안으로 전개(의미 동일: 같은 태그로 닫힐 때만 매치).
 //!   · 공백 클래스는 파이썬 re 의 \s(유니코드 + U+001C..1F 포함)와 맞추기 위해
 //!     `[\s\x1C-\x1F]` 를 쓴다(러스트 \s 는 White_Space 프로퍼티라 001C-1F 미포함).
@@ -27,15 +27,10 @@ fn re_strip_block() -> &'static Regex {
     static R: OnceLock<Regex> = OnceLock::new();
     R.get_or_init(|| {
         Regex::new(
-            r"(?is)<script\b.*?</script>|<style\b.*?</style>|<noscript\b.*?</noscript>|<template\b.*?</template>",
+            r"(?is)<!--.*?(?:-->|\z)|<script\b.*?(?:</script\s*>|\z)|<style\b.*?(?:</style\s*>|\z)|<noscript\b.*?(?:</noscript\s*>|\z)|<template\b.*?(?:</template\s*>|\z)",
         )
         .expect("strip_block regex")
     })
-}
-
-fn re_comment() -> &'static Regex {
-    static R: OnceLock<Regex> = OnceLock::new();
-    R.get_or_init(|| Regex::new(r"(?s)<!--.*?-->").expect("comment regex"))
 }
 
 fn re_any_tag() -> &'static Regex {
@@ -51,7 +46,6 @@ fn re_ws() -> &'static Regex {
 
 fn extract_visible(html: &str) -> String {
     let s = re_strip_block().replace_all(html, " ");
-    let s = re_comment().replace_all(&s, " ");
     let s = re_any_tag().replace_all(&s, " ");
     let s = re_ws().replace_all(&s, " ");
     s.trim().to_string()

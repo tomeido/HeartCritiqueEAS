@@ -76,8 +76,9 @@ def test_client_ip_blank_xff_falls_through():
 # ── FM코리아류 봇차단/안티봇 챌린지 = '삭제 추적 불가' ───────────────────────
 def test_untrackable_source_domain_and_botblock():
     U = tracker.is_untrackable_source
-    # 지정 도메인은 코드/서브도메인 무관 추적 불가
-    assert U("https://www.fmkorea.com/123", 200, None) is True
+    # 실제 본문을 제공하는 FM코리아는 도메인만으로 추적 불가 표시하지 않는다.
+    assert U("https://www.fmkorea.com/123", 200, None) is False
+    assert U("https://issuefeed.dcinside.com/123", 200, None) is True
     assert U("https://m.fmkorea.com/123", 430, "HTTP 430") is True
     # 단, 404/410 은 실제 삭제 신호라 도메인과 무관하게 신뢰(가리지 않음)
     assert U("https://www.fmkorea.com/123", 404, "HTTP 404") is False

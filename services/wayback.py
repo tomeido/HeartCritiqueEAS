@@ -8,14 +8,13 @@
 
 설계(레이트 한도 준수): '프로듀서(enqueue) → 단일 컨슈머(process_batch)' 큐.
   · enqueue(): 스토리 citation 등록(tracker)·화제글 캡처(collector) 시 url 을 wayback_snapshots
-    에 'queued' 로 적재(API 호출 없음). 봇차단 도메인(fmkorea 등)은 IA 도 실패하므로 제외.
+    에 'queued' 로 적재(API 호출 없음). 고정 추적 불가 도메인(issuefeed.dcinside.com)은 제외.
   · process_batch(): tracker 루프가 주기 호출. (1) pending 작업 상태 폴링(무료),
     (2) queued 를 capacity(동시 12/익명 6, 일일 한도) 안에서 SPN2 save 제출 → pending,
        save 실패 시 Availability 로 기존 스냅샷이라도 찾아 success 로 승격.
 
-⚠️ 한계: Cloudflare/안티봇(fmkorea)은 Wayback·archive.today 도 동일하게 막혀(403/challenge)
-   위임해도 스냅샷이 안 떠진다 → 기존 '🚫 삭제 추적 불가'와 동일. 위임이 추적불가를
-   추적가능으로 바꾸지 못한다.
+⚠️ 한계: Cloudflare/안티봇 응답은 Wayback 도 차단할 수 있어 위임 성공을 보장하지 않는다.
+   FM코리아처럼 정상 본문을 제공하는 출처는 적재하며 실제 저장 결과로 성공 여부를 판단한다.
 
 API 레퍼런스(2026-06 확인):
   POST https://web.archive.org/save        (Authorization: LOW {access}:{secret}, form: url=)
@@ -26,7 +25,9 @@ API 레퍼런스(2026-06 확인):
 """
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
+from urllib.parse import parse_qsl, urlsplit
 
 import httpx
 
@@ -71,6 +72,43 @@ def snapshot_url(ts: str, original_url: str) -> str:
     return f"https://web.archive.org/web/{ts}/{original_url}"
 
 
+def _valid_timestamp(value) -> bool:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{14}", value):
+        return False
+    try:
+        datetime.strptime(value, "%Y%m%d%H%M%S")
+        return True
+    except ValueError:
+        return False
+
+
+def _original_key(url):
+    """Strict article identity: retain host/path and every query key/value.
+
+    Only HTTP→HTTPS, default ports, query ordering and non-requested fragments
+    are immaterial. Mobile/www aliases and tracking-looking parameters remain.
+    """
+    if not isinstance(url, str) or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return None
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None):
+            return None
+        port = parsed.port
+        if port == (80 if parsed.scheme == "http" else 443):
+            port = None
+        return (parsed.hostname.lower(), port, parsed.path or "/",
+                tuple(sorted(parse_qsl(parsed.query, keep_blank_values=True))))
+    except ValueError:
+        return None
+
+
+def _same_original(left, right) -> bool:
+    key = _original_key(left)
+    return key is not None and key == _original_key(right)
+
+
 def _parse_save(data: dict) -> tuple[str | None, str | None]:
     """save 응답에서 (job_id, error_message). job_id 없으면 message 를 사유로."""
     if not isinstance(data, dict):
@@ -90,10 +128,13 @@ def _parse_status(data: dict) -> dict:
     if st == "success":
         ts = data.get("timestamp")
         orig = data.get("original_url")
+        if not _valid_timestamp(ts) or _original_key(orig) is None:
+            return {"status": "error", "reason": "invalid_snapshot_metadata"}
         return {
             "status": "success",
             "timestamp": ts,
-            "snapshot_url": snapshot_url(ts, orig) if (ts and orig) else None,
+            "original_url": orig,
+            "snapshot_url": snapshot_url(ts, orig),
         }
     if st == "error":
         return {"status": "error",
@@ -113,21 +154,39 @@ def _parse_user_status(data: dict) -> dict:
             "daily_remaining": daily_remaining}
 
 
-def _parse_availability(data: dict) -> dict | None:
+def _parse_availability(data: dict, target_url: str | None = None) -> dict | None:
     """wayback/available → {snapshot_url, timestamp} 또는 None(스냅샷 없음)."""
     if not isinstance(data, dict):
         return None
-    closest = ((data.get("archived_snapshots") or {}).get("closest")) or {}
+    snapshots = data.get("archived_snapshots") or {}
+    if not isinstance(snapshots, dict):
+        return None
+    closest = snapshots.get("closest") or {}
+    if not isinstance(closest, dict):
+        return None
     if not closest.get("available"):
         return None
     url = closest.get("url")
     ts = closest.get("timestamp")
-    if not url:
+    if (not isinstance(url, str) or not _valid_timestamp(ts)
+            or str(closest.get("status", "200")) != "200"):
+        return None
+    try:
+        parsed = urlsplit(url)
+        if (parsed.scheme not in {"http", "https"} or parsed.hostname != "web.archive.org"
+                or parsed.username or parsed.password or parsed.port not in {None, 80, 443}
+                or not parsed.path.startswith(f"/web/{ts}/")):
+            return None
+    except ValueError:
+        return None
+    original = url.split(f"/web/{ts}/", 1)[1]
+    if (_original_key(original) is None
+            or (target_url is not None and not _same_original(original, target_url))):
         return None
     # 재생 URL 은 https 로 정규화(IA 가 http 로 줄 때가 있음)
     if url.startswith("http://"):
         url = "https://" + url[len("http://"):]
-    return {"snapshot_url": url, "timestamp": ts}
+    return {"snapshot_url": url, "timestamp": ts, "original_url": original}
 
 
 # ── 비동기 HTTP 호출 ─────────────────────────────────────────────────────────
@@ -139,7 +198,7 @@ async def save_now(url: str, client: httpx.AsyncClient) -> tuple[str | None, str
             headers={**_auth_header(), "Content-Type": "application/x-www-form-urlencoded"},
             data={
                 "url": url,
-                "capture_all": "1",                              # 4xx/5xx 도 보존
+                "capture_all": "0",                              # 원문 큐에 오류 페이지를 저장하지 않는다
                 "if_not_archived_within": str(WAYBACK_IF_NOT_ARCHIVED_SEC),
                 "skip_first_archive": "1",                       # 첫 스캔 단계 생략(빠름)
             },
@@ -177,7 +236,7 @@ async def availability(url: str, client: httpx.AsyncClient) -> dict | None:
     try:
         resp = await client.get(_AVAILABILITY_ENDPOINT, params={"url": url},
                                 timeout=_HTTP_TIMEOUT)
-        return _parse_availability(resp.json())
+        return _parse_availability(resp.json(), target_url=url)
     except Exception:
         return None
 
@@ -193,7 +252,7 @@ def _table_exists() -> bool:
 
 def enqueue(urls) -> int:
     """url(들)을 스냅샷 큐에 'queued' 로 적재(멱등, API 호출 없음). 적재 시도 수 반환.
-    봇차단 도메인은 IA 도 실패하므로 제외한다. 기능 꺼졌으면 아무것도 안 한다."""
+    고정 추적 불가 도메인은 제외한다. 기능 꺼졌으면 아무것도 안 한다."""
     if not WAYBACK_ENABLED:
         return 0
     if isinstance(urls, str):
@@ -203,7 +262,7 @@ def enqueue(urls) -> int:
     for u in urls:
         if not u or not isinstance(u, str) or u in seen:
             continue
-        if is_untrackable_source(u):     # fmkorea 류 — 위임해도 실패
+        if is_untrackable_source(u):     # issuefeed.dcinside.com 등의 고정 로더
             continue
         seen.add(u)
         rows.append({"url": u, "status": "queued"})
@@ -244,6 +303,8 @@ async def _poll_pending(db, client) -> int:
         if not row.get("job_id"):
             continue
         res = await check_job(row["job_id"], client)
+        if res["status"] == "success" and not _same_original(res.get("original_url"), row["url"]):
+            res = {"status": "error", "reason": "snapshot_original_url_mismatch"}
         upd = {"updated_at": now.isoformat()}
         if res["status"] == "success":
             upd.update({"status": "success", "snapshot_timestamp": res.get("timestamp"),
@@ -277,6 +338,7 @@ async def _submit_queued(db, client) -> int:
             db.table("wayback_snapshots")
             .select("id,url,attempts")
             .eq("status", "queued")
+            .or_(f"next_poll_at.is.null,next_poll_at.lte.{datetime.now(timezone.utc).isoformat()}")
             .order("created_at", desc=False, nullsfirst=True)
             .limit(budget)
             .execute()
@@ -311,12 +373,48 @@ async def _submit_queued(db, client) -> int:
                        "reason": (err or "save_failed")[:200], "updated_at": now_iso}
             else:
                 upd = {"status": "queued", "attempts": attempts,
-                       "reason": (err or "save_failed")[:200], "updated_at": now_iso}
+                       "reason": (err or "save_failed")[:200], "updated_at": now_iso,
+                       "next_poll_at": (now + timedelta(seconds=WAYBACK_POLL_BACKOFF_SEC
+                                                         * 2 ** min(attempts, 8))).isoformat()}
         try:
             db.table("wayback_snapshots").update(upd).eq("id", row["id"]).execute()
         except Exception as e:
             logger.warning(f"[wayback] submit 갱신 실패 {row['id']}: {e}")
     return processed
+
+
+async def _lookup_queued(db, client) -> int:
+    """IA 키 없는 환경도 기존 사본을 조회한다. POST/유료 저장 요청은 하지 않는다.
+
+    미발견/일시 오류는 백오프해 다른 URL을 굶기지 않고, 시도 한도 뒤에는 error로
+    남긴다. success는 외부 사본 링크 발견을 뜻하며 원문 내용 검증을 대신하지 않는다.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        rows = (db.table("wayback_snapshots").select("id,url,attempts")
+                .eq("status", "queued")
+                .or_(f"next_poll_at.is.null,next_poll_at.lte.{now.isoformat()}")
+                .order("created_at", desc=False, nullsfirst=True)
+                .limit(WAYBACK_SUBMIT_PER_CYCLE).execute().data or [])
+    except Exception as e:
+        logger.warning("[wayback] 조회 전용 큐 실패: %s", e)
+        return 0
+    found = 0
+    for row in rows:
+        attempts = (row.get("attempts") or 0) + 1
+        snap = await availability(row["url"], client)
+        upd = {"attempts": attempts, "updated_at": now.isoformat()}
+        if snap:
+            upd.update(status="success", snapshot_url=snap["snapshot_url"],
+                       snapshot_timestamp=snap["timestamp"], reason="기존 스냅샷 — 내용 검증 전")
+            found += 1
+        else:
+            upd.update(status="error" if attempts >= WAYBACK_MAX_ATTEMPTS else "queued",
+                       reason="기존 스냅샷 미발견 또는 조회 실패 — IA 키 없음",
+                       next_poll_at=(now + timedelta(seconds=WAYBACK_POLL_BACKOFF_SEC
+                                                     * 2 ** min(attempts, 8))).isoformat())
+        db.table("wayback_snapshots").update(upd).eq("id", row["id"]).execute()
+    return found
 
 
 async def process_batch() -> dict:
@@ -327,9 +425,10 @@ async def process_batch() -> dict:
     async with httpx.AsyncClient() as client:
         polled = await _poll_pending(db, client)
         submitted = await _submit_queued(db, client) if _can_save() else 0
+        found = await _lookup_queued(db, client) if not _can_save() else 0
     if polled or submitted:
         logger.info(f"[wayback] 폴링확정 {polled} · 제출/승격 {submitted}")
-    return {"polled": polled, "submitted": submitted}
+    return {"polled": polled, "submitted": submitted, "found": found}
 
 
 # ── 조회 (UI/API 직렬화 보조) ────────────────────────────────────────────────

@@ -719,7 +719,7 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   font-family: var(--font-mono); font-size: var(--fs-2xs); font-weight: 700; padding: 1px 5px;
   border-radius: var(--r-full); margin-left: 4px; min-width: 14px; text-align: center; vertical-align: middle; }
 /* 이야기 검색 박스 — 헤더에서 한 줄을 통째로 차지(전체 폭) */
-.list-search { flex: 1 1 100%; display: flex; align-items: center; gap: 8px;
+.list-search { flex: 1 1 100%; min-width: 0; display: flex; align-items: center; gap: 8px;
   background: var(--bg-card-2); border: 1px solid var(--border-strong); border-radius: var(--r-full);
   padding: 7px 14px; transition: border-color var(--t-base); }
 .list-search:focus-within { border-color: var(--text); }
@@ -752,6 +752,53 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 /* 내부 dash-card 이중 카드 제거 */
 .dash-collapse .dash-card { border: 0; border-top: 1px solid var(--border); border-radius: 0;
   margin: 0; box-shadow: none; background: transparent; padding: var(--sp-5) var(--sp-6); animation: none; }
+/* 수집 사이트: 서버의 수집 설정과 마지막 확인 결과를 분리해서 보여준다. */
+.sources-directory { margin: 0 0 var(--sp-6); scroll-margin-top: 16px; }
+.sources-directory > summary { font-family: var(--font-sans); font-size: var(--fs-base);
+  letter-spacing: 0; text-transform: none; color: var(--text); }
+.sources-summary-count { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); margin-left: 8px; }
+.sources-intro { margin: 0 0 var(--sp-3); font-size: var(--fs-sm); color: var(--muted); }
+.sources-runtime { padding: 12px 14px; background: var(--bg-2); border-left: 3px solid var(--accent-2);
+  border-radius: var(--r-sm); font-size: var(--fs-sm); line-height: 1.7; }
+.sources-runtime strong { display: block; color: var(--text); }
+.sources-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: var(--sp-4); }
+.sources-search { flex: 1 1 210px; min-width: 0; }
+.sources-search label { display: block; font-size: var(--fs-xs); color: var(--muted); margin-bottom: 4px; }
+.sources-search input { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); background: var(--bg-card-2); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.sources-toolbar > button { align-self: flex-end; min-height: 40px; }
+.sources-filters { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--sp-3); }
+.source-filter { padding: 6px 11px; border: 1px solid var(--border-strong); border-radius: var(--r-full);
+  background: transparent; color: var(--muted); font: 500 var(--fs-sm)/1.6 var(--font-sans); cursor: pointer; }
+.source-filter[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.sources-message, .sources-count { margin: 10px 0; font-size: var(--fs-xs); color: var(--muted); }
+.sources-message:empty { display: none; }
+.sources-message.error { color: var(--err); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.sources-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.source-item { padding: 14px; background: var(--bg-card-2); border: 1px solid var(--border); border-radius: var(--r-md); }
+.source-item-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.source-item h3 { margin: 0; font-family: var(--font-serif); font-size: var(--fs-md); font-weight: 700; }
+.source-item h3 a { color: var(--text); text-underline-offset: 3px; }
+.source-domain { margin: 2px 0 0; color: var(--muted); font: var(--fs-xs)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.source-status { flex-shrink: 0; padding: 2px 8px; background: var(--bg-2); color: var(--muted);
+  font-size: var(--fs-xs); border-radius: var(--r-full); }
+.source-status.source-state-ok { color: var(--ok); }
+.source-status.source-state-blocked, .source-status.source-state-empty { background: var(--kindness-bg); color: var(--kindness-fg); }
+.source-status.source-state-error { background: var(--critique-bg); color: var(--critique-fg); }
+.source-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; margin: 12px 0 0;
+  font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.source-meta div { display: flex; gap: 8px; }
+.source-meta dt { flex-shrink: 0; color: var(--muted); }
+.source-meta dd { margin: 0; color: var(--text-soft); }
+.source-note { margin: 9px 0 0; font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+.source-problem { color: var(--warn-fg); }
+@media (max-width: 480px) {
+  .sources-directory .dash-card { padding: 16px; }
+  .sources-summary-count { display: block; margin: 2px 0 0; }
+  .source-meta { grid-template-columns: 1fr; }
+}
 .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: var(--sp-4); }
 .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
 .stat-tile { appearance: none; padding: var(--sp-4) var(--sp-3); background: var(--bg-card-2);
@@ -1303,6 +1350,7 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
       <p class="tagline">AI 사냥개가 건진 사실 · 인간 투표로 Arweave에 영구 박제</p>
     </div>
     <div class="header-right">
+      <button class="btn-sm btn-outline" id="sources-open" type="button" aria-controls="sources-collapse" aria-expanded="false">수집 사이트</button>
       <button class="theme-btn" id="theme-btn" title="테마 변경 (시스템/밝게/어둡게)" aria-label="테마 변경">
         🌗
       </button>
@@ -1328,6 +1376,31 @@ summary:focus-visible, .list-item:focus-visible, .chip:focus-visible,
     </div>
     <div class="status" id="gen-status" role="status" aria-live="polite"></div>
   </div>
+
+  <details class="dash-collapse sources-directory" id="sources-collapse">
+    <summary><span>수집 사이트 <span class="sources-summary-count" id="sources-summary-count">대상 목록과 확인 결과</span></span></summary>
+    <div class="dash-card">
+      <p class="sources-intro">인기 사이트의 공개 게시판과 RSS를 확인합니다. 사이트별 수집 대상, 접근 상태와 최근 캡처 수를 살펴보세요.</p>
+      <div class="sources-runtime" id="sources-runtime">목록을 열면 서버의 수집 설정과 마지막 확인 기록을 불러옵니다.</div>
+      <div class="sources-toolbar">
+        <div class="sources-search">
+          <label for="sources-search">사이트 · 게시판 검색</label>
+          <input type="search" id="sources-search" placeholder="예: 디시인사이드, 유머, RSS" autocomplete="off" aria-controls="sources-list">
+        </div>
+        <button class="btn-sm btn-outline" id="sources-refresh" type="button">상태 새로고침</button>
+      </div>
+      <div class="sources-filters" role="group" aria-label="수집 사이트 필터">
+        <button class="source-filter" type="button" data-source-filter="all" aria-pressed="true">전체 <span id="sources-total">·</span></button>
+        <button class="source-filter" type="button" data-source-filter="enabled" aria-pressed="false">수집 대상 <span id="sources-enabled">·</span></button>
+        <button class="source-filter" type="button" data-source-filter="problems" aria-pressed="false">확인 필요 <span id="sources-problems">·</span></button>
+        <button class="source-filter" type="button" data-source-filter="disabled" aria-pressed="false">수집 제외 <span id="sources-disabled">·</span></button>
+      </div>
+      <p class="sources-message" id="sources-message" role="status" aria-live="polite"></p>
+      <p class="sources-count" id="sources-count" role="status" aria-live="polite"></p>
+      <ul class="sources-list" id="sources-list" aria-label="수집 사이트 목록" aria-busy="false"></ul>
+      <p class="source-note">결과는 서버가 마지막으로 확인한 기록입니다. ‘링크 미발견’은 게시판 구조 변경으로 발생할 수도 있습니다. 캡처 수는 새로 저장한 건수이며, 모든 글이 공개 이야기로 발행되는 것은 아닙니다.</p>
+    </div>
+  </details>
 
   <!-- 현재 스토리 -->
   <div id="story-card" class="hidden" tabindex="-1">
@@ -2175,6 +2248,149 @@ async function makeReceipt() {
     btn.innerHTML = orig;
   }
 }
+
+// ── 수집 사이트: 집계가 필요 없는 독립 API, 패널이 열렸을 때만 조회 ─────────
+let sourcesSnapshot = null;
+let sourcesFilter = 'all';
+let sourcesLoading = false;
+const sourceStatusLabels = {
+  pending: '첫 확인 대기', ok: '목록 확인', empty: '링크 미발견',
+  blocked: '접근 차단', error: '확인 오류', disabled: '수집 제외',
+};
+const sourceMethodLabels = { rss: 'RSS 피드', atom: 'Atom 피드', html: '공개 게시판' };
+
+function sourceNeedsAttention(source) {
+  return source.enabled && ['blocked', 'error', 'empty'].includes(source.status);
+}
+
+function sourceTime(value, fallback = '확인 전') {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return fallback;
+  return `<time datetime="${escHtml(date.toISOString())}" title="${escHtml(date.toLocaleString('ko-KR'))}">${escHtml(date.toLocaleString('ko-KR', {
+    month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+  }))}</time>`;
+}
+
+function renderSources() {
+  if (!sourcesSnapshot) return;
+  const data = sourcesSnapshot;
+  const sources = data.sources;
+  const enabledCount = sources.filter(source => source.enabled).length;
+  const problemCount = sources.filter(sourceNeedsAttention).length;
+  const siteCount = new Set(sources.map(source => source.domain || source.name)).size;
+  document.getElementById('sources-summary-count').textContent = `${siteCount}개 사이트 · ${sources.length}개 목록`;
+  document.getElementById('sources-total').textContent = sources.length;
+  document.getElementById('sources-enabled').textContent = enabledCount;
+  document.getElementById('sources-problems').textContent = problemCount;
+  document.getElementById('sources-disabled').textContent = sources.length - enabledCount;
+
+  const interval = Number(data.interval_sec);
+  const intervalLabel = interval >= 60 ? `${Math.round(interval / 60)}분` : `${interval}초`;
+  const runtimeTitle = data.enabled ? '자동 수집 켜짐' : '자동 수집 꺼짐';
+  const runtimeDetail = data.enabled
+    ? `수집 대상 ${enabledCount}개 목록${interval > 0 ? ` · ${intervalLabel} 간격` : ''}`
+    : '수집 대상이 등록되어 있어도 현재 서버에서는 자동으로 수집하지 않습니다.';
+  const next = data.enabled && data.next_poll_at ? ` · 다음 예정 ${sourceTime(data.next_poll_at, '미정')}` : '';
+  const result = data.last_result;
+  const lastResult = result && Number.isFinite(result.discovered) && Number.isFinite(result.captured)
+    ? `<br>최근 주기: 새 링크 ${escHtml(result.discovered)}건 · 신규 캡처 ${escHtml(result.captured)}건` : '';
+  const backlog = result && Number.isFinite(result.queue_pending)
+    ? `<br>보존 대기 ${escHtml(result.queue_pending)}건${Number.isFinite(result.queue_retry) ? ` · 재시도 ${escHtml(result.queue_retry)}건` : ''}` : '';
+  document.getElementById('sources-runtime').innerHTML = `<strong>${runtimeTitle}</strong>${runtimeDetail}<br>최근 수집 주기 ${sourceTime(data.last_poll_at, '아직 실행 기록 없음')}${next}${lastResult}${backlog}`;
+
+  const query = document.getElementById('sources-search').value.trim().toLocaleLowerCase('ko-KR');
+  const filtered = sources.filter(source => {
+    if (sourcesFilter === 'enabled' && !source.enabled) return false;
+    if (sourcesFilter === 'disabled' && source.enabled) return false;
+    if (sourcesFilter === 'problems' && !sourceNeedsAttention(source)) return false;
+    const method = sourceMethodLabels[source.kind] || source.kind || '';
+    return [source.name, source.domain, source.board, method].join(' ').toLocaleLowerCase('ko-KR').includes(query);
+  }).sort((a, b) => Number(b.enabled) - Number(a.enabled)
+    || String(a.name).localeCompare(String(b.name), 'ko-KR')
+    || String(a.board).localeCompare(String(b.board), 'ko-KR'));
+  document.getElementById('sources-count').textContent = sources.length
+    ? `${sources.length}개 목록 중 ${filtered.length}개 표시${problemCount ? ` · 확인 필요 ${problemCount}개 (차단·오류·링크 미발견)` : ''}`
+    : '등록된 수집 사이트가 없습니다.';
+  document.getElementById('sources-list').innerHTML = filtered.map(source => {
+    const status = !source.enabled ? 'disabled' : Object.hasOwn(sourceStatusLabels, source.status) ? source.status : 'pending';
+    const url = source.url ? safeUrl(source.url) : '#';
+    const name = escHtml(source.name || source.domain || '이름 없음');
+    const title = url === '#' ? name : `<a href="${escHtml(url)}" target="_blank" rel="noopener noreferrer">${name} <span aria-hidden="true">↗</span><span class="sr-only"> (새 탭)</span></a>`;
+    const method = sourceMethodLabels[source.kind] || '공개 목록';
+    const checked = source.last_checked_at;
+    const counts = checked && Number.isFinite(source.discovered) && Number.isFinite(source.captured)
+      ? `새 링크 ${escHtml(source.discovered)}건 · 신규 캡처 ${escHtml(source.captured)}건` : '확인 기록 없음';
+    const http = checked && source.http_code ? ` · HTTP ${escHtml(source.http_code)}` : '';
+    const problem = source.error && sourceNeedsAttention(source)
+      ? `<p class="source-note source-problem">${escHtml(String(source.error).slice(0, 180))}</p>` : '';
+    return `<li class="source-item" data-source-id="${escHtml(source.id)}">
+      <div class="source-item-head"><div><h3>${title}</h3><p class="source-domain">${escHtml(source.domain)}</p></div><span class="source-status source-state-${status}">${sourceStatusLabels[status]}</span></div>
+      <dl class="source-meta">
+        <div><dt>게시판</dt><dd>${escHtml(source.board || '공개 목록')}</dd></div>
+        <div><dt>방식</dt><dd>${method} · ${source.enabled ? '수집 대상' : '수집 제외'}</dd></div>
+        <div><dt>마지막 확인</dt><dd>${sourceTime(checked)}${http}</dd></div>
+        <div><dt>최근 결과</dt><dd>${counts}</dd></div>
+      </dl>${source.note ? `<p class="source-note">${escHtml(source.note)}</p>` : ''}${problem}
+    </li>`;
+  }).join('') || (sources.length ? '<li class="empty">검색어나 필터에 맞는 사이트가 없습니다.</li>' : '');
+}
+
+async function loadSources() {
+  if (!document.getElementById('sources-collapse').open || sourcesLoading) return;
+  sourcesLoading = true;
+  const button = document.getElementById('sources-refresh');
+  const message = document.getElementById('sources-message');
+  const listing = document.getElementById('sources-list');
+  button.disabled = true;
+  listing.setAttribute('aria-busy', 'true');
+  message.className = 'sources-message';
+  message.textContent = sourcesSnapshot ? '최신 상태를 확인하는 중입니다…' : '사이트 목록을 불러오는 중입니다…';
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch('/api/sources', { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    if (!Array.isArray(data.sources) || !data.sources.every(source => source && typeof source === 'object')) {
+      throw new Error('Invalid source directory');
+    }
+    sourcesSnapshot = data;
+    renderSources();
+    message.textContent = '';
+  } catch (error) {
+    console.error('[sources] load failed', error);
+    message.className = 'sources-message error';
+    message.textContent = sourcesSnapshot
+      ? '최신 상태를 불러오지 못했습니다. 아래는 이전 조회 결과입니다. 상태 새로고침으로 다시 확인해 주세요.'
+      : '수집 사이트 목록을 불러오지 못했습니다. 상태 새로고침으로 다시 시도해 주세요.';
+  } finally {
+    clearTimeout(timeout);
+    sourcesLoading = false;
+    button.disabled = false;
+    listing.setAttribute('aria-busy', 'false');
+  }
+}
+
+document.getElementById('sources-open').addEventListener('click', () => {
+  document.getElementById('sources-collapse').open = true;
+  scrollFocus(document.getElementById('sources-search'));
+});
+document.getElementById('sources-collapse').addEventListener('toggle', event => {
+  document.getElementById('sources-open').setAttribute('aria-expanded', String(event.target.open));
+  if (event.target.open) loadSources();
+});
+document.getElementById('sources-refresh').addEventListener('click', loadSources);
+document.getElementById('sources-search').addEventListener('input', renderSources);
+document.querySelectorAll('[data-source-filter]').forEach(button => {
+  button.addEventListener('click', () => {
+    sourcesFilter = button.dataset.sourceFilter;
+    document.querySelectorAll('[data-source-filter]').forEach(filter => {
+      filter.setAttribute('aria-pressed', String(filter === button));
+    });
+    renderSources();
+  });
+});
 
 // ── 대시보드 ───────────────────────────────────────────────────────────────
 async function loadStats() {
@@ -4006,6 +4222,7 @@ setInterval(() => {
   if (document.hidden) return;
   loadStoryList();
   loadStats();
+  loadSources();
   loadWallet();   // 잔액·박제 가능 글 수·비용을 실시간 갱신(탭 보일 때만)
 }, 45000);
 // 비신뢰 URL(출처 링크)을 href 에 넣기 전 스킴 검증. javascript:/data: 등 차단.

@@ -1,0 +1,90 @@
+{
+  "verified_at": "2026-09-26T18:09:17.901690+00:00",
+  "application_url": "https://domeido.asuscomm.com",
+  "image": "sha256:687ffe0c811c404afe6bfd60beca37430ad2b2db1ad4f43764fb8cd0addd06d8",
+  "rollback_image": "heartcritiqueeas-app:pre-community-20260926",
+  "backup": {
+    "directory": "/home/tomeido/heartcritique-backups/community-20260926T180312Z",
+    "created_at": "2026-09-26T18:03:51.195743+00:00",
+    "file": "data.tar",
+    "bytes": 1477601280,
+    "sha256": "10880efbaa780a0733378f79722084ccbcc106f0bd240631e28fec431fc5e20b",
+    "method": "app stopped; complete data directory including WAL and guest secret"
+  },
+  "tests": {
+    "deployment_image_full_suite_passed": 475,
+    "browser_mock_scenario_groups_passed": 5,
+    "deployed_mobile_desktop_passed": true,
+    "deployed_browser_errors": 0,
+    "deployed_browser_server_writes": 0,
+    "historical_recovery_regression_suite_passed": 8
+  },
+  "health": {
+    "ok": true,
+    "background_alive": true,
+    "background": {
+      "tracker": "running",
+      "hunter": "running",
+      "cleanup": "running",
+      "collector": "running",
+      "promoter": "running"
+    }
+  },
+  "source_catalog": {
+    "total": 26,
+    "enabled": 15,
+    "enabled_domains": 12
+  },
+  "first_cycle": {
+    "discovered": 246,
+    "captured": 20,
+    "skipped_ads": 0,
+    "queue_pending": 226,
+    "queue_retry": 0,
+    "queue_oldest_at": "2026-09-26T18:05:41.255161+00:00",
+    "rechecked": 15,
+    "at": "2026-09-26T18:08:21.334561+00:00"
+  },
+  "existing_data_before_new_cycle": {
+    "captured_posts_before": 217072,
+    "captured_posts_after": 217072,
+    "stories_before": 367,
+    "stories_after": 367
+  },
+  "capture_verification": {
+    "checked": 20,
+    "all_valid": true,
+    "objects_verified": 89,
+    "states": {
+      "complete": 12,
+      "partial": 8
+    },
+    "images_saved": 49,
+    "missing_media_reasons": {
+      "unsupported_content_type": 10,
+      "page_media_budget": 36,
+      "invalid_image_signature": 1,
+      "host_or_url_not_allowed": 4
+    }
+  },
+  "offline_restore_smoke": {
+    "private_copy_only": true,
+    "network_offline": true,
+    "bundles_verified": 2,
+    "local_images_loaded": 10,
+    "scripts": 0,
+    "http_requests": 0
+  },
+  "privacy": {
+    "originals_public": false,
+    "data_capture_path_http_status": 404
+  },
+  "limits": [
+    "complete applies to captured HTML and discovered supported images; partial records omitted media or limits",
+    "predeployment backup is on the same host",
+    "historical recovery requires an existing verifiable archive snapshot; it does not guarantee recovery"
+  ],
+  "observations": [
+    "Existing Groq generation model returned model_not_found; existing Gemini fallback ran. This is separate from collector and preservation verification."
+  ]
+}

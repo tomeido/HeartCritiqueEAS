@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import services.tracker as tracker
 import services.collector as collector
+from services.localdb import LocalClient
 
 
 _NOW = datetime(2026, 6, 9, 12, 0, 0, tzinfo=timezone.utc)
@@ -238,7 +239,8 @@ def _setup_poll(monkeypatch, feeds, items_per_feed, budget):
     """poll_feeds 의 IO(피드 fetch·파싱·중복조회·캡처·지터)를 메모리 stub 으로 격리."""
     monkeypatch.setattr(collector, "COMMUNITY_FEEDS", feeds)
     monkeypatch.setattr(collector, "COLLECTOR_MAX_CAPTURE_PER_CYCLE", budget)
-    monkeypatch.setattr(collector, "get_db", lambda: object())
+    db = LocalClient(":memory:", engine="sqlite")
+    monkeypatch.setattr(collector, "get_db", lambda: db)
 
     async def _no_sleep():
         return None
@@ -288,7 +290,8 @@ def test_poll_feeds_skips_hard_negative_ads(monkeypatch):
     (docs/ARCHIVAL_CRITERIA.md §3). discovered 에는 잡히되 캡처에서 제외."""
     monkeypatch.setattr(collector, "COMMUNITY_FEEDS", [("a", "fa")])
     monkeypatch.setattr(collector, "COLLECTOR_MAX_CAPTURE_PER_CYCLE", 10)
-    monkeypatch.setattr(collector, "get_db", lambda: object())
+    db = LocalClient(":memory:", engine="sqlite")
+    monkeypatch.setattr(collector, "get_db", lambda: db)
 
     async def _no_sleep():
         return None

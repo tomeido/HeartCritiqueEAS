@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 CHECK_INTERVAL_SEC = int(os.environ.get("CHECK_INTERVAL_SEC", "300"))   # 5분 간격
 CHECK_BATCH_SIZE   = int(os.environ.get("CHECK_BATCH_SIZE", "15"))
 HTTP_TIMEOUT       = 15
-MAX_BODY_BYTES     = 80000   # 본문은 앞 80KB 만 읽음 (대용량 응답 남용 방지)
+MAX_BODY_BYTES     = 512_000  # 광고/메뉴 뒤의 본문도 확보(인벤 본문 시작 약94KB), 상한 유지
 MAX_REDIRECTS      = 5
 FETCH_DEADLINE_SEC = 30      # 한 citation 의 전체 fetch(모든 리다이렉트 홉 합산) 절대 한도
 TRACKER_ENABLED    = os.environ.get("TRACKER_ENABLED", "true").lower() != "false"
@@ -124,6 +124,8 @@ def _is_safe_url(url: str) -> tuple[bool, str, str]:
         return False, "bad_url", ""
     if p.scheme not in ("http", "https"):
         return False, f"scheme:{p.scheme or 'none'}", ""
+    if p.username or p.password:
+        return False, "url_credentials", ""
     host = p.hostname
     if not host:
         return False, "no_host", ""
@@ -187,8 +189,11 @@ DELETION_PATTERNS = re.compile(
     # '차단된 글' 은 신고/운영 맥락 또는 종결형일 때만 — '차단된 글 보기 설정' 오탐 차단
     r"|(?:신고|운영자|운영진|관리자|다수\s*신고)[로은는이가]?\s*(?:에\s*의해\s*)?차단된\s*(?:글|게시[물글]?)"
     r"|차단된\s*(?:글|게시[물글]?)\s*(?:입니다|이에요|예요|이다)"
-    # '블라인드 처리' 는 완료형일 때만 — '블라인드 처리 안내/하기' 오탐 차단
-    r"|블라인드\s*처리(?:된|됨|되었|됐)"
+    # 오늘의유머의 상시 '전체 댓글이 블라인드 처리되었습니다'는 글 삭제가 아니다.
+    # 글/게시물 명사가 있거나 그 안내문만 있는 경우로 한정한다.
+    r"|블라인드\s*처리된\s*(?:글|게시물|게시글)"
+    r"|(?:^|\s)(?:이\s*)?(?:글|게시물|게시글)[이가은는]?\s*블라인드\s*처리(?:된|됨|되었|됐)"
+    r"|^블라인드\s*처리(?:됨|되었습니다|됐습니다)[.!\s]*$"
     r"|deleted\s+(?:post|by)",
     re.IGNORECASE,
 )
@@ -210,10 +215,10 @@ BLOCKED_PATTERNS = re.compile(
     re.IGNORECASE,
 )
 
-# 자동 크롤러를 차단/챌린지하는 사이트 — 본문을 못 읽어 삭제 추적이 불가능한 도메인.
-# host 접미사 매칭(www./m./서브도메인 포함). 큐레이션 목록에 있어도 추적은 불가하다
-# (FM코리아: HTTP 200 으로 '보안 시스템' 챌린지 페이지를 주거나 간헐적으로 430).
-UNTRACKABLE_DOMAINS = {"fmkorea.com", "issuefeed.dcinside.com"}
+# 본문을 읽을 수 없는 고정 로더 도메인(host 접미사 매칭).
+# FM코리아는 정상 목록·본문을 직접 확인했으므로 도메인 자체를 차단하지 않는다.
+# 간헐적인 430/403 또는 '보안 시스템' 응답은 아래 HTTP/본문 신호로 판별한다.
+UNTRACKABLE_DOMAINS = {"issuefeed.dcinside.com"}
 
 # 사이트가 자동 접근을 거부/챌린지하는 HTTP 코드 (is_untrackable_source 가 사용).
 BOT_BLOCK_CODES = (403, 429, 430, 503)
@@ -227,7 +232,9 @@ BOT_CHALLENGE_PATTERNS = re.compile(
     r"|Checking\s+(?:if\s+the\s+site\s+connection\s+is\s+secure|your\s+browser)"
     r"|Attention\s+Required|cf-browser-verification|DDoS\s+protection\s+by"
     r"|Enable\s+JavaScript\s+and\s+cookies\s+to\s+continue"
-    r"|로딩\s*중\b|loading\s*\.\.\.|spinner\b",
+    # 더쿠 등은 정상 본문 옆 즐겨찾기 위젯에도 '로딩중'을 상시 표시한다.
+    # 일반 로딩 문구는 짧은 로더 페이지에서만 신호로 쓰고 명시적 챌린지는 유지.
+    r"|^.{0,80}(?:로딩\s*중\b|loading\s*\.\.\.|spinner\b).{0,80}$",
     re.IGNORECASE,
 )
 
@@ -362,7 +369,8 @@ _COLLAPSE_MIN_BASELEN = 800
 
 
 async def fetch_observation(url: str, client: httpx.AsyncClient,
-                            capture_text: bool = False) -> dict:
+                            capture_text: bool = False,
+                            capture_artifacts: bool = False) -> dict:
     """단일 URL 을 GET 해서 *관측값*만 수집(판정은 decide_status 가 담당).
     반환 dict 키:
       net        : 'ok'(2xx 본문) | 'http'(>=400) | 'unsafe' | 'timeout'
@@ -379,7 +387,10 @@ async def fetch_observation(url: str, client: httpx.AsyncClient,
     SSRF 방어: 리다이렉트를 자동 추종하지 않고, 홉마다 _is_safe_url 로 다시 검증한다.
     (안전한 외부 URL 이 30x 로 사설/루프백/메타데이터/내부서비스 IP 로 리다이렉트해
     초기 1회 검증을 우회하는 것을 차단. follow_redirects=True 면 최종 목적지가 재검증되지 않음.)"""
-    headers = {"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5"}
+    # Explicit empty credentials prevent a reused client cookie jar/auth header from
+    # entering public captures. Only an allowlist of response headers is retained.
+    headers = {"User-Agent": USER_AGENT, "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+               "Cookie": "", "Authorization": ""}
     cur = url
     # 인터-청크 간격이 아니라 '전체' 마감시한. 느린 드립/슬로로리스 서버가 직렬 추적
     # 루프를 무한정 붙들지 못하게 모든 홉을 합쳐 절대 한도를 건다.
@@ -399,7 +410,7 @@ async def fetch_observation(url: str, client: httpx.AsyncClient,
                 try:
                     # 스트리밍으로 헤더 먼저 받고, 본문은 앞 MAX_BODY_BYTES 만 읽는다.
                     async with client.stream(
-                        "GET", connect_url, timeout=HTTP_TIMEOUT, follow_redirects=False,
+                        "GET", connect_url, timeout=HTTP_TIMEOUT, follow_redirects=False, auth=None,
                         headers=req_headers, extensions={"sni_hostname": u.host},
                     ) as resp:
                         code = resp.status_code
@@ -412,15 +423,27 @@ async def fetch_observation(url: str, client: httpx.AsyncClient,
 
                         chunks: list[bytes] = []
                         total = 0
+                        truncated = False
                         async for chunk in resp.aiter_bytes():
-                            chunks.append(chunk)
-                            total += len(chunk)
+                            remaining = MAX_BODY_BYTES - total
+                            chunks.append(chunk[:remaining])
+                            total += min(len(chunk), remaining)
                             if total >= MAX_BODY_BYTES:
+                                # If exactly at the limit, conservatively mark partial:
+                                # EOF has not been observed and further bytes may exist.
+                                truncated = True
                                 break
+                        raw_body = b"".join(chunks)
                         raw = _decode_body(
-                            b"".join(chunks), resp.encoding,
-                            resp.headers.get("content-type", ""),
+                            raw_body, resp.encoding, resp.headers.get("content-type", ""),
                         )
+                        response_headers = {
+                            key: resp.headers[key] for key in (
+                                "content-type", "content-length", "content-encoding", "date",
+                                "last-modified", "etag", "cache-control",
+                            ) if key in resp.headers
+                        }
+                        fetched_at = datetime.now(timezone.utc).isoformat()
                 except httpx.TimeoutException:
                     return {"net": "timeout", "http_code": None, "final_url": cur}
                 except Exception as e:
@@ -441,8 +464,40 @@ async def fetch_observation(url: str, client: httpx.AsyncClient,
                     # 동적 페이지는 매 방문 해시가 달라지므로 '변화(삭제) 감지'엔 쓰지 않는다.
                     "text_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 }
-                if capture_text:
-                    out["text"] = text   # collector 가 본문 스냅샷을 저장할 때만 동봉
+                from services.article_content import extract_article
+                article = extract_article(cur, raw)
+                mime = response_headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                if mime and mime not in ("text/html", "application/xhtml+xml", "text/plain"):
+                    article = {**article, "status": "unknown", "body_text": None,
+                               "media_urls": [], "reason": "unsupported_article_content_type"}
+                # Community rechecks need template-aware status too (notably JS
+                # alert-only deletion). Generic citations keep existing baselines.
+                if capture_text or capture_artifacts or article["supported"]:
+                    out["article_status"] = article["status"]
+                    out["article_supported"] = article["supported"]
+                    out["article_reason"] = article.get("reason")
+                    out["parser_version"] = article.get("parser_version")
+                if capture_text or capture_artifacts:
+                    out["media_urls"] = article.get("media_urls") or []
+                    valid = (article["status"] == "live" and not bot
+                             and bool(article.get("body_text") or out["media_urls"]))
+                    # Page text/hash remain the tracking baseline; article_hash is
+                    # separately tied to the actual captured body, never navigation.
+                    out["text"] = article.get("body_text") if valid else None
+                    out["article_hash"] = (
+                        hashlib.sha256(out["text"].encode("utf-8")).hexdigest()
+                        if out["text"] else None
+                    )
+                    out["html_truncated"] = truncated
+                    if capture_artifacts and valid:
+                        out["capture"] = {
+                            "source_url": url, "final_url": cur,
+                            "fetched_at": fetched_at, "http_code": code,
+                            "raw_body": raw_body, "response_headers": response_headers,
+                            "html_truncated": truncated,
+                            "parser_version": article.get("parser_version"),
+                            "body_text": out["text"], "media_urls": out["media_urls"],
+                        }
                 return out
 
             return {"net": "redirect_loop", "http_code": None, "final_url": cur}
@@ -499,6 +554,21 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
     if obs.get("bot_challenge"):
         return _verdict("error", code, UNTRACKABLE_REASON)
 
+    # Supported communities carry an article parser result on every check;
+    # generic citation observations retain page-baseline semantics.
+    article_status = obs.get("article_status")
+    if article_status == "deleted":
+        return _verdict("deleted", code, obs.get("article_reason") or "deleted")
+    # A valid-looking container on a different site's root is not the observed
+    # article. Keep the established redirect identity signal ahead of parser-live.
+    base_url = (baseline or {}).get("final_url") or original_url
+    if have_base and _url_key(final_url) != _url_key(base_url) and _is_site_root(final_url):
+        return _verdict("deleted", code, f"게시물 사라짐·메인 리다이렉트: {final_url[:120]}")
+    if article_status == "blocked":
+        return _verdict("blocked", code, obs.get("article_reason") or "blocked")
+    if article_status == "unknown":
+        return _verdict("error", code, obs.get("article_reason") or "본문 미확보")
+
     if not have_base:
         # 콜드스타트(기준선 없음): 비교 불가. 잘 앵커링된 '삭제' 표식만 신뢰하고,
         # 오탐 주범인 '차단(로그인 벽)' 표식은 무시한 채 다음 검사로 미룬다.
@@ -506,7 +576,7 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
         # 기준선에 박혀 newly_del 이 영영 False 가 되어 다음 검사에 live 로 뒤집히는
         # 자가오염이 생기므로, 삭제 분기에선 캡처하지 않는다(소프트 삭제는 큐에 남아
         # 매 회 재판정되고, 실제 복구 시 del_match 가 사라지며 그때 기준선을 잡는다).
-        if obs.get("del_match"):
+        if obs.get("del_match") and article_status != "live":
             return _verdict("deleted", code, f"삭제 표식: {obs.get('del_snip')}")
         new_base = {
             "final_url": final_url,
@@ -516,6 +586,11 @@ def decide_status(obs: dict, original_url: str, baseline: dict | None) -> dict:
             "blk_match": obs.get("blk_match", False),
         }
         return _verdict("live", code, None, baseline=new_base)
+
+    # A supported site's actual article remains present. Navigation, comments,
+    # and footer length/wording changes cannot override this positive evidence.
+    if obs.get("article_supported") and article_status == "live":
+        return _verdict("live", code, None)
 
     # --- 기준선 보유: 변화 기반 판정 ---
     # 가시 텍스트가 기준선과 비트 동일하면 내용이 그대로다 → 확실히 live(변화검사 생략).

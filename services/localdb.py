@@ -135,7 +135,7 @@ class _TursoConn:
     def rollback(self):
         self._conn.rollback()
 
-# ── 스키마 (supabase_schema.sql + migrations 001~012 통합본의 SQLite 번역) ────
+# ── 스키마 (supabase_schema.sql + migrations 001~013 통합본의 SQLite 번역) ────
 _DDL = """
 PRAGMA journal_mode=WAL;
 
@@ -217,6 +217,9 @@ CREATE TABLE IF NOT EXISTS captured_posts (
   title              TEXT,
   rss_summary        TEXT,
   body_text          TEXT,
+  capture_manifest_path TEXT,
+  capture_manifest_sha256 TEXT,
+  capture_state      TEXT,
   content_hash       TEXT,
   status             TEXT NOT NULL DEFAULT 'unchecked'
                      CHECK (status IN ('unchecked','live','deleted','blocked','error')),
@@ -250,6 +253,29 @@ CREATE INDEX IF NOT EXISTS idx_captured_posts_hard_deleted ON captured_posts (ha
 CREATE INDEX IF NOT EXISTS idx_captured_posts_volatility   ON captured_posts (volatility_score DESC);
 CREATE INDEX IF NOT EXISTS idx_captured_posts_promotion    ON captured_posts (promotion_status);
 CREATE INDEX IF NOT EXISTS idx_captured_posts_value        ON captured_posts (value_score DESC);
+
+CREATE TABLE IF NOT EXISTS discovery_queue (
+  id TEXT PRIMARY KEY,
+  url TEXT NOT NULL UNIQUE,
+  source TEXT NOT NULL,
+  feed TEXT NOT NULL,
+  guid TEXT,
+  title TEXT,
+  summary TEXT,
+  priority INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'queued'
+    CHECK (status IN ('queued','capturing','retry','captured','deleted')),
+  attempts INTEGER NOT NULL DEFAULT 0,
+  cooldown INTEGER NOT NULL DEFAULT 1 CHECK (cooldown IN (0,1)),
+  first_seen TEXT NOT NULL,
+  last_attempt_at TEXT,
+  next_attempt_at TEXT,
+  last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_source_due
+  ON discovery_queue (source, status, next_attempt_at, first_seen);
+CREATE INDEX IF NOT EXISTS idx_discovery_source_attempt
+  ON discovery_queue (source, last_attempt_at DESC);
 
 CREATE TABLE IF NOT EXISTS wayback_snapshots (
   id                 TEXT PRIMARY KEY,
@@ -299,6 +325,8 @@ _COLS: dict[str, dict[str, str]] = {
         "id": "uuid", "source": "text", "feed": "text", "url": "text",
         "guid": "text", "title": "text", "rss_summary": "text",
         "body_text": "text", "content_hash": "text", "status": "text",
+        "capture_manifest_path": "text", "capture_manifest_sha256": "text",
+        "capture_state": "text",
         "http_code": "int", "reason": "text", "first_seen": "ts",
         "captured_at": "ts", "last_checked": "ts", "check_count": "int",
         "error_count": "int", "next_check_at": "ts", "deleted_at": "ts",
@@ -308,6 +336,13 @@ _COLS: dict[str, dict[str, str]] = {
         "volatility_score": "int", "hard_deleted_at": "ts",
         "promoted_story_id": "uuid", "promotion_status": "text",
         "value_score": "int",
+    },
+    "discovery_queue": {
+        "id": "uuid", "url": "text", "source": "text", "feed": "text",
+        "guid": "text", "title": "text", "summary": "text", "priority": "int",
+        "status": "text", "attempts": "int", "first_seen": "ts",
+        "cooldown": "bool",
+        "last_attempt_at": "ts", "next_attempt_at": "ts", "last_error": "text",
     },
     "wayback_snapshots": {
         "id": "uuid", "url": "text", "job_id": "text", "snapshot_url": "text",
@@ -324,6 +359,7 @@ _TS_DEFAULTS: dict[str, tuple[str, ...]] = {
     "citation_checks": ("first_seen",),
     "captured_posts": ("first_seen",),
     "wayback_snapshots": ("created_at",),
+    "discovery_queue": ("first_seen", "next_attempt_at"),
 }
 
 _OPS = {"eq": "=", "neq": "<>", "gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
@@ -831,6 +867,17 @@ class LocalClient:
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.execute("PRAGMA busy_timeout = 5000")
         self._conn.executescript(_DDL)
+        # CREATE TABLE IF NOT EXISTS does not upgrade existing capture tables.
+        # PRAGMA + additive ALTER works with both sqlite3 and pyturso.
+        capture_columns = {r["name"] for r in self._conn.execute(
+            "PRAGMA table_info(captured_posts)").fetchall()}
+        for column in ("capture_manifest_path", "capture_manifest_sha256", "capture_state"):
+            if column not in capture_columns:
+                self._conn.execute(f'ALTER TABLE captured_posts ADD COLUMN "{column}" TEXT')
+        queue_columns = {r["name"] for r in self._conn.execute(
+            "PRAGMA table_info(discovery_queue)").fetchall()}
+        if "cooldown" not in queue_columns:
+            self._conn.execute("ALTER TABLE discovery_queue ADD COLUMN cooldown INTEGER NOT NULL DEFAULT 1")
         self._conn.commit()
         self.auth = _LocalAuth()
 

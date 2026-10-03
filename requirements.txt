@@ -7,3 +7,5 @@ python-dotenv>=1.0
 # 로컬 DB 기본 엔진 — Turso Database(SQLite 의 Rust 재작성, 파일 포맷 호환).
 # 미설치여도 services/localdb.py 가 stdlib sqlite3 으로 자동 폴백한다.
 pyturso>=0.6
+# Common Crawl의 과거 원문 WARC 레코드 복구
+warcio>=1.8,<2

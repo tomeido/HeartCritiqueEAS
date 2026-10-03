@@ -1,0 +1,340 @@
+{
+  "verified_at": "2026-09-26T17:55:19.688572+00:00",
+  "scope": "Bounded public-page probes and extracted lengths/media reference counts; not capture or permission guarantees. No post text, titles, authors, cookies, HTML, or media are included.",
+  "catalog": {
+    "listings": 26,
+    "enabled_listings": 15,
+    "enabled_domains": 12
+  },
+  "probes": [
+    {
+      "source": "dcinside",
+      "list_url": "https://gall.dcinside.com/board/lists/?id=dcbest",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 49,
+      "article_url": "https://gall.dcinside.com/board/view/?id=dcbest&no=466122",
+      "article_code": 200,
+      "article_bytes": 389753,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 7426,
+        "media_references": 38,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "humoruniv",
+      "list_url": "https://web.humoruniv.com/board/humor/list.html?table=pds&st=day",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 20,
+      "article_url": "https://web.humoruniv.com/board/humor/read.html?table=pds&number=1426487",
+      "article_code": 200,
+      "article_bytes": 171563,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 0,
+        "media_references": 2,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "todayhumor",
+      "list_url": "https://www.todayhumor.co.kr/board/list.php?table=bestofbest",
+      "robots_code": 404,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 30,
+      "article_url": "https://www.todayhumor.co.kr/board/view.php?table=bestofbest&no=483885",
+      "article_code": 200,
+      "article_bytes": 135660,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 8,
+        "media_references": 3,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "slrclub",
+      "list_url": "https://www.slrclub.com/bbs/zboard.php?id=free",
+      "robots_code": 200,
+      "list_allowed": false
+    },
+    {
+      "source": "ddanzi",
+      "list_url": "https://www.ddanzi.com/free",
+      "robots_code": 200,
+      "list_allowed": false
+    },
+    {
+      "source": "dogdrip",
+      "list_url": "https://www.dogdrip.net/dogdrip",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 23,
+      "article_url": "https://www.dogdrip.net/726641319",
+      "article_code": 200,
+      "article_bytes": 189945,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 2,
+        "media_references": 1,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "cook82",
+      "list_url": "https://www.82cook.com/entiz/enti.php?bn=15",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 25,
+      "article_url": "https://www.82cook.com/entiz/read.php?bn=15&num=4243441",
+      "article_code": 200,
+      "article_bytes": 36173,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 38,
+        "media_references": 0,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "fmkorea",
+      "list_url": "https://www.fmkorea.com/best",
+      "robots_code": 200,
+      "list_allowed": false,
+      "robots_interpretation_correction": "stdlib RobotFileParser misreports /best due first-match behavior. Manual longest-match review: /best listing allowed, normalized numeric article path disallowed for wildcard crawler. No list/article requested."
+    },
+    {
+      "source": "quasarzone",
+      "list_url": "https://quasarzone.com/bbs/qb_free",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "article_url": "https://quasarzone.com/bbs/qb_free/views/8903004",
+      "article_code": 200,
+      "article_bytes": 748267,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 143,
+        "media_references": 1,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "dmitory",
+      "list_url": "https://www.dmitory.com/issue",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 403
+    },
+    {
+      "source": "damoang",
+      "list_url": "https://damoang.net/free",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 403
+    },
+    {
+      "source": "ppomppu-free",
+      "list_url": "https://www.ppomppu.co.kr/rss.php?id=freeboard",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 15,
+      "article_url": "https://www.ppomppu.co.kr/zboard/view.php?id=freeboard&no=10131792",
+      "article_code": 200,
+      "article_bytes": 39325,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 568,
+        "media_references": 0,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "ruliweb-news",
+      "list_url": "https://bbs.ruliweb.com/news/rss",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 15,
+      "article_url": "https://bbs.ruliweb.com/news/read/229913",
+      "article_code": 200,
+      "article_bytes": 297551,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 1340,
+        "media_references": 2,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "mlbpark-bullpen",
+      "list_url": "https://mlbpark.donga.com/mp/rss.php",
+      "robots_code": 200,
+      "list_allowed": false
+    },
+    {
+      "source": "inven-news",
+      "list_url": "https://www.inven.co.kr/webzine/news/rss.php",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 25,
+      "article_url": "https://www.inven.co.kr/webzine/news/?news=321460",
+      "article_code": 200,
+      "article_bytes": 228767,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 1382,
+        "media_references": 3,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "clien-park",
+      "list_url": "https://www.clien.net/service/board/park",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 53,
+      "article_url": "https://www.clien.net/service/board/park/19270053",
+      "article_code": 200,
+      "article_bytes": 79664,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 98,
+        "media_references": 1,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "bobaedream-free",
+      "list_url": "https://bobaedream.co.kr/list?code=freeb",
+      "robots_code": 200,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 35,
+      "article_url": "https://www.bobaedream.co.kr/view?code=freeb&No=3438720",
+      "article_code": 200,
+      "article_bytes": 231733,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 854,
+        "media_references": 2,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "theqoo-hot",
+      "list_url": "https://theqoo.net/hot",
+      "robots_code": 404,
+      "list_allowed": true,
+      "list_code": 200,
+      "parsed_count": 20,
+      "article_url": "https://theqoo.net/hot/4357242804",
+      "article_code": 200,
+      "article_bytes": 33947,
+      "article_extract": {
+        "status": "live",
+        "body_chars": 90,
+        "media_references": 23,
+        "parser_version": "community-v1"
+      }
+    },
+    {
+      "source": "pann-ranking",
+      "list_url": "https://pann.nate.com/talk/ranking",
+      "robots_code": 200,
+      "list_allowed": false
+    }
+  ],
+  "new_enabled_probes": [
+    {
+      "id": "ruliweb-humor",
+      "list_status": 200,
+      "list_count": 28,
+      "article_url": "https://bbs.ruliweb.com/community/board/300143/read/76816795",
+      "article_http_code": 200,
+      "article_bytes": 225213,
+      "extract_status": "live",
+      "body_chars": 4,
+      "media_count": 20
+    },
+    {
+      "id": "inven-openissue",
+      "list_status": 200,
+      "list_count": 50,
+      "article_url": "https://www.inven.co.kr/board/webzine/2097/2733012",
+      "article_http_code": 200,
+      "article_bytes": 413929,
+      "extract_status": "live",
+      "body_chars": 154,
+      "media_count": 4
+    },
+    {
+      "id": "quasarzone-free",
+      "list_status": 200,
+      "list_count": 30,
+      "article_url": "https://quasarzone.com/bbs/qb_free/views/8903158",
+      "article_http_code": 200,
+      "article_bytes": 730146,
+      "extract_status": "live",
+      "body_chars": 86,
+      "media_count": 1
+    }
+  ],
+  "catalog_disabled": [
+    {
+      "id": "mlbpark-bullpen",
+      "reason": "2026-09-26 robots.txt가 일반 수집기의 접근을 금지하여 수집을 보류했습니다."
+    },
+    {
+      "id": "pann-ranking",
+      "reason": "2026-09-26 robots.txt가 일반 수집기의 접근을 금지하여 수집을 보류했습니다."
+    },
+    {
+      "id": "slrclub-free",
+      "reason": "2026-09-26 robots.txt가 일반 수집기의 게시판 접근을 금지하여 수집을 보류했습니다."
+    },
+    {
+      "id": "ddanzi-free",
+      "reason": "2026-09-26 robots.txt가 일반 수집기의 자유게시판 접근을 금지하여 수집을 보류했습니다."
+    },
+    {
+      "id": "fmkorea-best",
+      "reason": "2026-09-26 robots.txt는 /best 목록을 허용하지만 정규 원문 /글번호 경로는 일반 수집기에 금지하여 보류했습니다."
+    },
+    {
+      "id": "dmitory-issue",
+      "reason": "2026-09-26 공개 목록 HTTP 403 및 robots의 AI 에이전트 제한으로 수집을 보류했습니다."
+    },
+    {
+      "id": "damoang-free",
+      "reason": "2026-09-26 공개 목록 HTTP 403 및 robots의 AI 에이전트·무단 수집기 제한으로 수집을 보류했습니다."
+    },
+    {
+      "id": "arca-best",
+      "reason": "공개 목록 HTTP 403 보안 챌린지로 보류했습니다. 승인된 접근 경로가 필요합니다."
+    },
+    {
+      "id": "etoland-humor",
+      "reason": "robots의 AI·아카이브 봇 제한과 변경된 글 주소 체계로 운영자 허용 범위 확인 전 수집을 보류했습니다."
+    },
+    {
+      "id": "blind-public",
+      "reason": "약관에서 명시 허가 없는 크롤링·추출을 제한하므로 운영자 허가 전 수집을 보류했습니다."
+    },
+    {
+      "id": "instiz-issues",
+      "reason": "공개 목록 요청이 HTTP 403 보안 챌린지를 반환하여 자동 수집을 보류했습니다."
+    }
+  ]
+}

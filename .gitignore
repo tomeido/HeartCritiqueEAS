@@ -1,7 +1,7 @@
 # 환경변수 (API 키, 개인키 포함 - 절대 커밋 금지)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -10,6 +10,11 @@ __pycache__/
 .venv/
 venv/
 *.egg
+.pytest_cache/
+.coverage
+htmlcov/
+*.so
+*.pyd
 
 # Node
 node_modules/
@@ -27,6 +32,15 @@ Thumbs.db
 
 # SQLite 로컬 모드 데이터 (DB 파일 + 게스트 토큰 비밀키 - 절대 커밋 금지)
 data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
 
 # Rust 네이티브 모듈 빌드 산출물
 native/target/

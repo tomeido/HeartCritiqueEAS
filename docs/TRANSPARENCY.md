@@ -90,12 +90,14 @@ pub.verify(bytes.fromhex(bundle["signature"]), canonical,
 | LLM 익명 재작성 스토리, 출처 URL·추적 상태, 콘텐츠 지문 | **공개** |
 | 서명된 박제 번들(스토리+투표 로그+출처 생존 증거) | **공개** (Arweave) |
 | `captured_posts` 원본 본문(raw) | **비공개** (service_role 전용 RLS) — PII·명예훼손 보호 |
+| `discovery_queue`, HTML·이미지·manifest·오프라인 읽기 사본 | **비공개**. 원문은 `data/captures` 영속 볼륨에 저장하며 공개 API로 제공하지 않음 |
 | 수동 검토 큐(pending_review/blocked_pii) 내용 | **비공개** |
 
 ## 5. 정직한 한계
 
-- **추적 불가 사이트**: 안티봇(fmkorea 등)은 직접 관측이 불가하며 Wayback 위임도
-  동일하게 막힌다. 프록시 관측(`PROXY_FETCH_ENABLED`, 옵트인)은 soft 신호로만
+- **접근 차단**: 에펨코리아처럼 정상 접근과 보안 챌린지가 번갈아 나타나는 사이트는
+  실제 HTTP·본문 신호로 판정한다. 차단 응답을 정상 본문으로 보관하지 않으며,
+  차단 상태에서도 Wayback이 성공한다고 보장하지 않는다. 프록시 관측(`PROXY_FETCH_ENABLED`, 옵트인)은 soft 신호로만
   보강한다 — 프록시 경유 판정은 절대 자동·영구 박제를 앞당기지 않는다.
 - **프록시 트레이드오프**: 프록시 사용 시 출처 URL 이 프록시 사업자(기본 Jina)에
   전달된다. 수집 대상이 공개 게시물 URL 뿐이지만, 이 외부 의존을 숨기지 않는다.

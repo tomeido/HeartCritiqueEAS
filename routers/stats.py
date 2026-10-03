@@ -11,6 +11,7 @@ from fastapi import APIRouter
 from services.db import get_db
 from services.hunter import get_status as get_hunter_status
 from services.collector import get_status as get_collector_status
+from services.collector import get_sources_status
 from services.promoter import get_status as get_promoter_status
 from services.proxyfetch import get_status as get_proxy_status
 from services.wayback import get_status as get_wayback_status
@@ -31,6 +32,12 @@ _stats_cache: dict = {"value": None, "expires_at": 0.0}
 _ts_cache: dict = {}  # days -> {"value", "expires_at"}
 _stats_lock = threading.Lock()
 _ts_lock = threading.Lock()
+
+
+@router.get("/sources")
+async def get_sources():
+    """수집 대상·보류 사유·최근 폴링 상태. 원문/DB 조회 없는 가벼운 공개 목록."""
+    return get_sources_status()
 
 
 def _count(table: str, build=None) -> int | None:

@@ -215,7 +215,7 @@ def test_redacted_base_strips_or_masks_credentials(monkeypatch):
 
 # ── 추적 불가 라벨 해제 ───────────────────────────────────────────────────────
 def test_proxy_observed_reason_clears_untrackable_label():
-    url = "https://www.fmkorea.com/best/1"
+    url = "https://issuefeed.dcinside.com/1"
     # 봇차단 도메인은 기본 추적 불가
     assert is_untrackable_source(url) is True
     # 프록시 관측으로 판정을 확보하면 라벨 해제 (코드가 봇차단 코드여도)

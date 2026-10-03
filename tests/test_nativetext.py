@@ -49,6 +49,8 @@ FIXTURES = [
     ("<p>존재하지 않는 게시물입니다</p>", True, False, False),
     ("<p>페이지를 찾을 수 없습니다</p>", True, False, False),
     ("<p>블라인드 처리된 글</p>", True, False, False),
+    ("<p>이 게시물이 블라인드 처리되었습니다.</p>", True, False, False),
+    ("<p>블라인드 처리되었습니다.</p>", True, False, False),
     ("<p>deleted post</p>", True, False, False),
     ("<p>DELETED   By admin</p>", True, False, False),          # 대소문자 무시
     # 오탐 함정(살아있는 글의 정상 UI) — 매치되면 안 됨
@@ -57,6 +59,8 @@ FIXTURES = [
     ("<p>존재하지 않는 회원입니다</p>", False, False, False),
     ("<p>차단된 글 보기 설정</p>", False, False, False),
     ("<p>블라인드 처리 안내</p>", False, False, False),
+    ("<article>정상 글</article><div>댓글 분란 또는 분쟁 때문에 전체 댓글이 블라인드 처리되었습니다.</div>",
+     False, False, False),
     # 차단(로그인 벽)
     ("<p>이 글을 보려면 로그인이 필요합니다</p>", False, True, False),
     ("<p>회원 전용 열람 게시판입니다</p>", False, True, False),
@@ -67,6 +71,9 @@ FIXTURES = [
     ("<p>Just a moment...</p>", False, False, True),
     ("<p>잠시만 기다리시면 자동으로 접속됩니다</p>", False, False, True),
     ("<div>로딩 중</div>", False, False, True),
+    ("<div>사이트 제목 Loading...</div>", False, False, True),
+    ("<nav>내 즐겨찾기 관리 로딩중 HOT 카테고리</nav><article>" +
+     "살아있는 게시물의 정상 본문입니다. " * 20 + "</article>", False, False, False),
     # 구조 케이스: script/style/주석/중첩 태그/NBSP/EUC-KR 흔한 공백
     ("<script>var x='삭제된 글';</script><p>정상 본문</p>", False, False, False),
     ("<style>.del::after{content:'삭제된 글'}</style><p>본문</p>", False, False, False),
@@ -75,6 +82,19 @@ FIXTURES = [
     ("<template><span>삭제된 글</span></template><p>ok</p>", False, False, False),
     ("<p>공 백　정리   테스트</p>", False, False, False),
     ("<SCRIPT>x</SCRIPT><P>대문자 태그도 제거</P>", False, False, False),
+]
+
+# 응답 상한이 숨겨진 블록 중간에서 끝나도 JS/주석을 본문으로 수집하면 안 된다.
+TRUNCATED_FIXTURES = [
+    ("<p>정상 본문</p><script>alert('이미 삭제된 댓글입니다.');", "정상 본문"),
+    ("<p>정상 본문</p><STYLE>.x{content:'Just a moment'}", "정상 본문"),
+    ("<p>정상 본문</p><noscript>삭제된 글", "정상 본문"),
+    ("<p>정상 본문</p><template><div>삭제된 글</div>", "정상 본문"),
+    ("<p>정상 본문</p><!-- 이미 삭제된 게시물", "정상 본문"),
+    ("<script>숨김</script><p>정상 본문</p><script>삭제된 글", "정상 본문"),
+    ("<script>숨김</script   ><p>정상 본문</p>", "정상 본문"),
+    ("<!-- disabled <script> --> <p>정상 본문</p>", "정상 본문"),
+    ("<script><!-- legacy wrapper </script><p>정상 본문</p>", "정상 본문"),
 ]
 
 
@@ -108,6 +128,12 @@ def test_python_fallback_scan_expected():
         assert p.extract_and_scan(html) == (text, d, b, bot)
 
 
+def test_truncated_hidden_blocks_do_not_leak_into_captured_text():
+    p = _py_pipe()
+    for html, expected in TRUNCATED_FIXTURES:
+        assert p.extract_and_scan(html) == (expected, None, None, False)
+
+
 def test_scan_snippet_is_leftmost_match():
     p = _py_pipe()
     text = p.visible_text("<p>앞부분 … 삭제된 글 입니다 … 뒤에도 이미 삭제 문구</p>")
@@ -129,7 +155,7 @@ def test_rust_parity_if_available():
         print("  (hc_native 미설치 — Rust 패리티는 Docker 이미지에서 검증)")
         return
     p = _py_pipe()
-    for html, *_ in FIXTURES:
+    for html, *_ in FIXTURES + TRUNCATED_FIXTURES:
         pv, rv = p.visible_text(html), r.visible_text(html)
         assert pv == rv, f"visible_text 불일치: {html!r}\n py={pv!r}\n rs={rv!r}"
         assert p.scan(pv) == r.scan(rv), f"scan 불일치: {html!r}"

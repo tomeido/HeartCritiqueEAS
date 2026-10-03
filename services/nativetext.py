@@ -22,15 +22,17 @@ logger = logging.getLogger(__name__)
 NATIVE_TEXT_ENABLED = os.environ.get("NATIVE_TEXT_ENABLED", "true").lower() != "false"
 
 # ── 순수 파이썬 구현 (기존 tracker._visible_text 의 이관 — 동작 불변) ─────────
-_STRIP_BLOCK_RE = re.compile(r"(?is)<(script|style|noscript|template)\b.*?</\1>")
-_COMMENT_RE = re.compile(r"(?s)<!--.*?-->")
+# 스트리밍 상한에서 잘린 script 안의 삭제 안내/보안 문구는 본문이 아니다.
+# 닫는 태그를 받지 못했어도 숨겨진 블록은 응답 끝까지 버린다(Rust 와 동일).
+# 주석과 블록을 한 번에 매치해야 주석 안의 <script>가 다음 본문을 삼키지 않는다.
+_STRIP_BLOCK_RE = re.compile(
+    r"(?is)<!--.*?(?:-->|\Z)|<(script|style|noscript|template)\b.*?(?:</\1\s*>|\Z)")
 _ANY_TAG_RE = re.compile(r"<[^>]+>")
 _WS_RE = re.compile(r"\s+")
 
 
 def _py_visible_text(html: str) -> str:
     s = _STRIP_BLOCK_RE.sub(" ", html)
-    s = _COMMENT_RE.sub(" ", s)
     s = _ANY_TAG_RE.sub(" ", s)
     return _WS_RE.sub(" ", s).strip()
 

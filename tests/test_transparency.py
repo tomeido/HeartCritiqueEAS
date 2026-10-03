@@ -138,8 +138,9 @@ def test_snapshot_exposes_core_promises():
     # 점수 가중치 공개(튜닝 투명성)
     assert snap["scoring"]["volatility_weights"]["pressure"] >= 1
     assert snap["scoring"]["value_weights"]["public_interest"] >= 1
-    # 추적 불가 도메인 정직 공개
-    assert "fmkorea.com" in snap["known_limits"]["untrackable_domains"]
+    # 고정 추적 불가 도메인은 공개하고, 정상 본문을 확인한 FM코리아는 제외한다.
+    assert "issuefeed.dcinside.com" in snap["known_limits"]["untrackable_domains"]
+    assert "fmkorea.com" not in snap["known_limits"]["untrackable_domains"]
     # 임계값 정책 수치 노출
     assert snap["threshold_policy"]["default"] >= 1
     # 서명 알고리즘 명시(검증 재현 가능성)
